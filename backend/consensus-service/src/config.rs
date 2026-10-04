@@ -7,6 +7,8 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
     pub consensus: ConsensusConfig,
+    pub grading: GradingConfig,
+    pub commit_reveal: CommitRevealConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +39,53 @@ pub struct ConsensusConfig {
     pub time_weight: f64,
     pub dispute_threshold: f64,
     pub auto_finalize_hours: u64,
+}
+
+/// Delayed re-grading of finalized consensus results.
+///
+/// A finalized verdict is the crowd's opinion. After `delay_hours` we go back,
+/// re-check the sample, and record what we believe now. Held-back payouts and
+/// reputation settle against that grade instead of the original vote.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GradingConfig {
+    /// Master switch. Off by default: grading moves money, so it must be
+    /// turned on deliberately per environment.
+    pub enabled: bool,
+    /// How long after finalization before a result is re-checked.
+    /// Production default is 30 days; set it to minutes in testing so you do
+    /// not have to wait a month to see the loop work.
+    pub delay_hours: u64,
+    /// How often the worker looks for due bounties.
+    pub poll_interval_secs: u64,
+    /// Max bounties graded per pass, so one tick cannot stampede the engine.
+    pub batch_size: i64,
+    /// Base URL of analysis-engine, used to re-scan a sample by hash.
+    pub analysis_engine_url: String,
+    /// Timeout for a single re-scan call.
+    pub rescan_timeout_secs: u64,
+}
+
+/// Commit-reveal voting.
+///
+/// While the commit window is open a voter submits only a hash of their
+/// verdict, so nobody can see -- or copy -- what anyone else chose. Once it
+/// shuts, voters publish the plaintext and the hash is verified.
+///
+/// Off by default: turning it on changes the voting API, so it is a
+/// deliberate per-environment switch rather than something that appears
+/// under an existing deployment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitRevealConfig {
+    pub enabled: bool,
+    /// How long commits are accepted, measured from the bounty's first commit.
+    pub commit_window_hours: u64,
+    /// How long reveals are accepted after the commit window shuts.
+    pub reveal_window_hours: u64,
+    /// Shortest salt a voter may use. A short salt is brute-forceable: with a
+    /// handful of verdict/confidence combinations, an observer who can guess
+    /// the salt can invert the commitment and learn the vote early, which
+    /// defeats the entire mechanism.
+    pub min_salt_len: usize,
 }
 
 impl Config {
@@ -86,6 +135,41 @@ impl Config {
                     .parse()?,
                 auto_finalize_hours: std::env::var("AUTO_FINALIZE_HOURS")
                     .unwrap_or_else(|_| "24".to_string())
+                    .parse()?,
+            },
+            grading: GradingConfig {
+                enabled: std::env::var("GRADING_ENABLED")
+                    .unwrap_or_else(|_| "false".to_string())
+                    .parse()
+                    .unwrap_or(false),
+                delay_hours: std::env::var("GRADING_DELAY_HOURS")
+                    .unwrap_or_else(|_| "720".to_string()) // 30 days
+                    .parse()?,
+                poll_interval_secs: std::env::var("GRADING_POLL_INTERVAL_SECS")
+                    .unwrap_or_else(|_| "3600".to_string())
+                    .parse()?,
+                batch_size: std::env::var("GRADING_BATCH_SIZE")
+                    .unwrap_or_else(|_| "50".to_string())
+                    .parse()?,
+                analysis_engine_url: std::env::var("ANALYSIS_ENGINE_URL")
+                    .unwrap_or_else(|_| "http://analysis-engine:8080".to_string()),
+                rescan_timeout_secs: std::env::var("GRADING_RESCAN_TIMEOUT_SECS")
+                    .unwrap_or_else(|_| "120".to_string())
+                    .parse()?,
+            },
+            commit_reveal: CommitRevealConfig {
+                enabled: std::env::var("COMMIT_REVEAL_ENABLED")
+                    .unwrap_or_else(|_| "false".to_string())
+                    .parse()
+                    .unwrap_or(false),
+                commit_window_hours: std::env::var("COMMIT_WINDOW_HOURS")
+                    .unwrap_or_else(|_| "24".to_string())
+                    .parse()?,
+                reveal_window_hours: std::env::var("REVEAL_WINDOW_HOURS")
+                    .unwrap_or_else(|_| "24".to_string())
+                    .parse()?,
+                min_salt_len: std::env::var("MIN_SALT_LEN")
+                    .unwrap_or_else(|_| "16".to_string())
                     .parse()?,
             },
         })

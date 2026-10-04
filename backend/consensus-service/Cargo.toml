@@ -56,8 +56,16 @@ validator = { version = "0.18", features = ["derive"] }
 # Statistical calculations
 statrs = "0.16"
 
+# HTTP client - used by the regrader worker to re-scan samples via analysis-engine
+reqwest = { version = "0.11", features = ["json"] }
+
+# Commit-reveal voting. Pinned to the 0.10 line to stay on the workspace's
+# shared `digest` 0.10 -- see the backend MSRV/hashing notes.
+sha2 = "0.10"
+hex = "0.4"
+
 # Shared module
-shared = { path = "../shared", features = ["axum-mw"] }
+shared = { path = "../shared", features = ["axum-mw", "otel", "validation", "idempotency", "circuit-breaker"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

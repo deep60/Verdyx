@@ -270,6 +270,7 @@ mod tests {
                 confidence: Decimal::new(90, 2),
                 reputation_score: 8000,
                 submitted_at: Utc::now(),
+                sample_hash: None,
             },
             SubmissionVote {
                 submission_id: Uuid::new_v4(),
@@ -279,6 +280,7 @@ mod tests {
                 confidence: Decimal::new(85, 2),
                 reputation_score: 7500,
                 submitted_at: Utc::now(),
+                sample_hash: None,
             },
             SubmissionVote {
                 submission_id: Uuid::new_v4(),
@@ -288,6 +290,7 @@ mod tests {
                 confidence: Decimal::new(60, 2),
                 reputation_score: 3000,
                 submitted_at: Utc::now(),
+                sample_hash: None,
             },
         ];
 
@@ -313,6 +316,7 @@ mod tests {
                 confidence: Decimal::new(90, 2),
                 reputation_score: 1000,
                 submitted_at: Utc::now(),
+                sample_hash: None,
             },
             SubmissionVote {
                 submission_id: Uuid::new_v4(),
@@ -322,6 +326,7 @@ mod tests {
                 confidence: Decimal::new(85, 2),
                 reputation_score: 1000,
                 submitted_at: Utc::now(),
+                sample_hash: None,
             },
         ];
 

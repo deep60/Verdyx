@@ -10,6 +10,7 @@ members = [
     "consensus-service",
     "payment-service",
     "shared",
+    "proptest",
 ]
 resolver = "2"
 
@@ -40,6 +41,20 @@ tracing = "0.1"
 # aggregate cleanly across the fleet (Loki/CloudWatch/etc).
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+# Crypto dependencies
+base64 = "0.22"
+rand = "0.8"
+hex = "0.4"
+
+# OpenTelemetry (pinned to avoid version conflicts)
+# tracing-opentelemetry 0.28+ supports opentelemetry 0.27+
+opentelemetry = "0.27"
+opentelemetry_sdk = "0.27"
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
+opentelemetry-http = "0.27"
+tracing-opentelemetry = "0.28"
+opentelemetry-semantic-conventions = "0.27"
+
 # Configuration
 config = "0.15"
 dotenvy = "0.15"
@@ -60,6 +75,11 @@ validator = { version = "0.18", features = ["derive"] }
 tokio-test = "0.4"
 mockall = "0.12"
 pretty_assertions = "1.4"
+proptest = "1.0"
+
+[profile.test]
+opt-level = 3
+debug = true
 
 [profile.release]
 opt-level = 3

@@ -331,6 +331,22 @@ services:
       # Consensus algorithm configuration
       - CONSENSUS_THRESHOLD=0.7
       - MIN_SUBMISSIONS_REQUIRED=3
+      # Delayed re-grading: re-check finalized verdicts once the world knows
+      # more, so held-back payouts settle against the graded verdict rather
+      # than the original vote. Off by default -- it moves money.
+      - GRADING_ENABLED=${GRADING_ENABLED:-false}
+      - GRADING_DELAY_HOURS=${GRADING_DELAY_HOURS:-720}
+      - GRADING_POLL_INTERVAL_SECS=${GRADING_POLL_INTERVAL_SECS:-3600}
+      - GRADING_BATCH_SIZE=${GRADING_BATCH_SIZE:-50}
+      - GRADING_RESCAN_TIMEOUT_SECS=${GRADING_RESCAN_TIMEOUT_SECS:-120}
+      - ANALYSIS_ENGINE_URL=http://analysis-engine:8080
+      # Commit-reveal voting: hide votes until the window shuts so a late voter
+      # cannot read the tally and copy whoever is ahead. Off by default -- it
+      # changes the voting API. Enabling it CLOSES the direct vote endpoint.
+      - COMMIT_REVEAL_ENABLED=${COMMIT_REVEAL_ENABLED:-false}
+      - COMMIT_WINDOW_HOURS=${COMMIT_WINDOW_HOURS:-24}
+      - REVEAL_WINDOW_HOURS=${REVEAL_WINDOW_HOURS:-24}
+      - MIN_SALT_LEN=${MIN_SALT_LEN:-16}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s

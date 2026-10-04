@@ -1,0 +1,85 @@
+# Gitleaks Configuration for Verdyx
+# https://github.com/gitleaks/gitleaks#configuration
+
+title = "Verdyx Gitleaks Config"
+
+# Allowlist - paths and patterns to ignore
+[allowlist]
+description = "Paths and patterns to ignore"
+paths = [
+  "(.*?)(target|dist|build|node_modules|.git)(/.*?)?$",
+  "(.*?)\\.(lock|log|sqlite|db)$",
+  "(.*?)(migrations|fixtures|mocks)(/.*?)?$",
+  "(.*?)\\.example$",
+  "(.*?)\\.template$",
+]
+
+# Generic patterns that are false positives
+regexes = [
+  '''(?i)example''',
+  '''(?i)placeholder''',
+  '''(?i)dummy''',
+  '''(?i)test''',
+  '''(?i)mock''',
+  '''(?i)fake''',
+  '''(?i)changeme''',
+  '''(?i)your.*key''',
+  '''(?i)your.*secret''',
+  '''(?i)your.*token''',
+  '''(?i)your.*password''',
+  '''(?i)xxxxxxxx''',
+  '''(?i)00000000''',
+]
+
+# Commit hashes to ignore (if needed)
+commits = []
+
+# Custom rules for Verdyx-specific patterns
+[[rules]]
+id = "verdyx-jwt-secret"
+description = "Verdyx JWT Secret"
+regex = '''(?i)(jwt[_-]?secret|jwt[_-]?key)\s*[=:]\s*['"][^'"]{32,}['"]'''
+tags = ["secret", "jwt", "verdyx"]
+entropy = 4.5
+
+[[rules]]
+id = "verdyx-database-url"
+description = "Verdyx Database URL with credentials"
+regex = '''(?i)(database[_-]?url|postgres(?:ql)?[_-]?url)\s*[=:]\s*['"]postgresql://[^'"]+['"]'''
+tags = ["secret", "database", "verdyx"]
+
+[[rules]]
+id = "verdyx-private-key"
+description = "Verdyx Private Key (Ethereum/Solana)"
+regex = '''(?i)(private[_-]?key|pk|secret[_-]?key)\s*[=:]\s*['"]0x[0-9a-fA-F]{64}['"]'''
+tags = ["secret", "crypto", "verdyx"]
+entropy = 4.5
+
+[[rules]]
+id = "verdyx-minio-credentials"
+description = "Verdyx MinIO Credentials"
+regex = '''(?i)(minio[_-]?(root[_-]?)?(user|password|access[_-]?key|secret[_-]?key))\s*[=:]\s*['"][^'"]{8,}['"]'''
+tags = ["secret", "minio", "verdyx"]
+
+[[rules]]
+id = "verdyx-redis-password"
+description = "Verdyx Redis Password"
+regex = '''(?i)(redis[_-]?password|redis[_-]?url)\s*[=:]\s*['"]redis://:[^'"]+['"]'''
+tags = ["secret", "redis", "verdyx"]
+
+[[rules]]
+id = "verdyx-aws-credentials"
+description = "Verdyx AWS Credentials"
+regex = '''(?i)(aws[_-]?(access[_-]?key|secret[_-]?access[_-]?key))\s*[=:]\s*['"][A-Z0-9]{16,}['"]'''
+tags = ["secret", "aws", "verdyx"]
+entropy = 4.5
+
+# Standard rules (enabled by default, can be overridden)
+# Disable rules that are too noisy for our codebase
+[[rules]]
+id = "generic-api-key"
+disabled = true
+
+[[rules]]
+id = "generic-secret"
+disabled = true

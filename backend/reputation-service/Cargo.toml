@@ -60,7 +60,7 @@ statrs = "0.16"
 tokio-cron-scheduler = "0.15"
 
 # Shared module
-shared = { path = "../shared", features = ["axum-mw"] }
+shared = { path = "../shared", features = ["axum-mw", "otel", "validation", "idempotency", "circuit-breaker"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

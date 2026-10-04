@@ -1,0 +1,187 @@
+name: Generate SBOM
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'blockchain/**'
+      - '.github/workflows/sbom.yml'
+  pull_request:
+    branches: [ "main", "develop" ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'blockchain/**'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  sbom-rust:
+    name: SBOM (Rust/Cargo)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+
+      - name: Generate SBOM (CycloneDX)
+        run: cargo cyclonedx --all-features --output-format json --output-file ../sbom-rust.json
+
+      - name: Generate SBOM (SPDX)
+        run: cargo cyclonedx --all-features --output-format spdx-json --output-file ../sbom-rust.spdx.json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-rust
+          path: |
+            sbom-rust.json
+            sbom-rust.spdx.json
+          retention-days: 90
+
+      - name: Attach SBOM to release
+        if: github.event_name == 'release'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sbom-rust.json
+          category: sbom-rust
+
+  sbom-npm:
+    name: SBOM (npm/Frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate SBOM (CycloneDX)
+        run: npx @cyclonedx/bom --json --output-file ../sbom-npm.json
+
+      - name: Generate SBOM (SPDX)
+        run: npx @cyclonedx/bom --spdx-json --output-file ../sbom-npm.spdx.json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-npm
+          path: |
+            sbom-npm.json
+            sbom-npm.spdx.json
+          retention-days: 90
+
+  sbom-contracts:
+    name: SBOM (Solidity/Contracts)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./blockchain
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: blockchain/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate SBOM (CycloneDX)
+        run: npx @cyclonedx/bom --json --output-file ../sbom-contracts.json
+
+      - name: Generate SBOM (SPDX)
+        run: npx @cyclonedx/bom --spdx-json --output-file ../sbom-contracts.spdx.json
+
+      - name: Upload SBOM as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-contracts
+          path: |
+            sbom-contracts.json
+            sbom-contracts.spdx.json
+          retention-days: 90
+
+  sbom-docker:
+    name: SBOM (Docker Images)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'  # Only run on push/release to avoid scanning PR images
+    steps:
+      - name: Generate SBOM for each service image from GHCR
+        run: |
+          cargo install syft
+          SERVICES="frontend api-gateway analysis-engine bounty-manager consensus-service notification-service payment-service reputation-service submission-service user-service"
+          for service in $SERVICES; do
+            image="ghcr.io/deep60/verdyx-${service}:latest"
+            echo "Generating SBOM for $image..."
+            syft "$image" -o cyclonedx-json=sbom-${service}.json || echo "Warning: Could not generate SBOM for $image"
+            syft "$image" -o spdx-json=sbom-${service}.spdx.json || echo "Warning: Could not generate SPDX SBOM for $image"
+          done
+
+      - name: Upload Docker SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-docker
+          path: sbom-*.json
+          retention-days: 90
+
+  sbom-merge:
+    name: Merge SBOMs
+    runs-on: ubuntu-latest
+    needs: [sbom-rust, sbom-npm, sbom-contracts]
+    steps:
+      - name: Download all SBOMs
+        uses: actions/download-artifact@v4
+        with:
+          path: ./sboms
+          pattern: sbom-*
+          merge-multiple: true
+
+      - name: Merge SBOMs with CycloneDX CLI
+        run: |
+          cargo install cyclonedx-cli
+          cyclonedx merge ./sboms/*.json --output-file sbom-merged.json
+          cyclonedx merge ./sboms/*.spdx.json --output-file sbom-merged.spdx.json
+
+      - name: Upload merged SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-merged
+          path: |
+            sbom-merged.json
+            sbom-merged.spdx.json
+          retention-days: 365
+
+      - name: Upload to GHCR as attestation
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: sbom-merged.json
+          predicate-type: https://in-toto.io/attestation/sbom/v1

@@ -1,10 +1,47 @@
-name: "Verdyx CodeQL config"
+# CodeQL Configuration for Verdyx
+# https://github.com/github/codeql-action/blob/main/docs/codeql-config.md
 
-# Exclude generated / vendored code so CodeQL only analyzes source we own.
+name: "Verdyx CodeQL Config"
+
+# Disable default queries and use security-and-quality suite
+disable-default-queries: false
+
+# Additional query suites to run
+queries:
+  - uses: security-and-quality
+  - uses: security-extended
+
+# Language-specific configuration
+languages:
+  - javascript-typescript
+  - rust
+
+# Paths to ignore during analysis
 paths-ignore:
-  - frontend/coverage
-  - frontend/dist
-  - frontend/playwright-report
-  - frontend/test-results
-  - "**/node_modules"
+  - "**/node_modules/**"
+  - "**/target/**"
+  - "**/dist/**"
+  - "**/build/**"
   - "**/*.min.js"
+  - "**/*.d.ts"
+  - "**/migrations/**"
+  - "**/test/**"
+  - "**/tests/**"
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/mock/**"
+  - "**/fixtures/**"
+
+# Paths to include (if not ignored above)
+paths:
+  - "frontend/**"
+  - "backend/**"
+  - "blockchain/**"
+  - "infrastructure/**"
+
+# Custom queries (optional)
+# queries:
+#   - uses: ./custom-queries/security
+
+# Extend the default configuration with additional settings
+# See: https://codeql.github.com/docs/codeql-cli/customizing-analysis-with-codeql-packs/

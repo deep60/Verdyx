@@ -1,100 +1,111 @@
 #!/usr/bin/env bash
-#
-# Create the per-service test databases and apply each service's migrations.
-#
-# The backend runs one database per microservice (see
-# database/init/01-init-databases.sql), and every service owns the migrations
-# under backend/<service>/migrations. CI previously started Postgres but never
-# applied any migrations, so a build with a broken or missing schema could pass
-# `cargo test` (which touched no tables) and only fail at runtime with
-# `relation "..." does not exist`.
-#
-# This script closes that gap: it creates each service DB, installs the shared
-# extensions, and runs `sqlx migrate run` against it. A broken migration now
-# fails CI here, before any test runs.
-#
-# Configuration (defaults match .github/workflows/rust.yml's postgres service):
-#   PGHOST     (default: localhost)
-#   PGPORT     (default: 5432)
-#   PGUSER     (default: test_user)
-#   PGPASSWORD (default: test_password)
-#
-# It also writes a `.ci-test-db-env` file with the per-service DATABASE_URLs so
-# later steps can `source` it.
+# Setup test databases for each backend service
+# This script creates isolated databases per service and runs their migrations
+# Exports DATABASE_URLs to .ci-test-db-env for use in subsequent CI steps
+
 set -euo pipefail
 
+# Configuration
 PGHOST="${PGHOST:-localhost}"
 PGPORT="${PGPORT:-5432}"
 PGUSER="${PGUSER:-test_user}"
 PGPASSWORD="${PGPASSWORD:-test_password}"
-export PGPASSWORD
+BASE_DB="verdyx_test"
 
-# Resolve the repo's backend directory relative to this script so the script
-# works regardless of the caller's working directory.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-BACKEND_DIR="${REPO_ROOT}/backend"
-
-# service_directory:database_name
+# Services that need isolated databases
 SERVICES=(
-  "api-gateway:verdyx_gateway"
-  "user-service:verdyx_users"
-  "analysis-engine:verdyx_analysis"
-  "bounty-manager:verdyx_bounty"
-  "submission-service:verdyx_submissions"
-  "consensus-service:verdyx_consensus"
-  "payment-service:verdyx_payments"
-  "reputation-service:verdyx_reputation"
-  "notification-service:verdyx_notifications"
+    "analysis"
+    "bounty"
+    "consensus"
+    "notification"
+    "payment"
+    "reputation"
+    "submission"
+    "user"
 )
 
-psql_admin() {
-  psql -v ON_ERROR_STOP=1 -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" "$@"
-}
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
 
-echo "==> Waiting for Postgres at ${PGHOST}:${PGPORT} ..."
-for _ in $(seq 1 30); do
-  if pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
+log_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+
+# Export PGPASSWORD for psql
+export PGPASSWORD
+
+# Create base database if it doesn't exist
+log_info "Creating base database: $BASE_DB"
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "CREATE DATABASE $BASE_DB;" 2>/dev/null || true
+
+# Create per-service databases and run migrations
+ENV_FILE="${GITHUB_WORKSPACE:-$(pwd)}/.ci-test-db-env"
+> "$ENV_FILE"  # Clear the file
+
+for service in "${SERVICES[@]}"; do
+    DB_NAME="${BASE_DB}_${service}"
+    log_info "Setting up database for $service: $DB_NAME"
+
+    # Create database
+    psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$BASE_DB" -c "CREATE DATABASE $DB_NAME;" 2>/dev/null || true
+
+    # Run migrations for this service
+    SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/${service}-engine"
+    if [[ "$service" == "analysis" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/analysis-engine"
+    elif [[ "$service" == "user" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/user-service"
+    elif [[ "$service" == "submission" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/submission-service"
+    elif [[ "$service" == "bounty" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/bounty-manager"
+    elif [[ "$service" == "consensus" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/consensus-service"
+    elif [[ "$service" == "notification" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/notification-service"
+    elif [[ "$service" == "payment" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/payment-service"
+    elif [[ "$service" == "reputation" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/reputation-service"
+    fi
+
+    if [[ -d "$SERVICE_DIR/migrations" ]]; then
+        log_info "Running migrations for $service from $SERVICE_DIR/migrations"
+        cd "$SERVICE_DIR"
+        DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${DB_NAME}" \
+            sqlx migrate run --source migrations 2>&1 | tail -20
+    else
+        log_warn "No migrations directory found for $service at $SERVICE_DIR/migrations"
+    fi
+
+    # Export DATABASE_URL for this service
+    VAR_NAME="${service^^}_DATABASE_URL"
+    if [[ "$service" == "analysis" ]]; then
+        VAR_NAME="ANALYSIS_ENGINE_DATABASE_URL"
+    elif [[ "$service" == "bounty" ]]; then
+        VAR_NAME="BOUNTY_MANAGER_DATABASE_URL"
+    elif [[ "$service" == "consensus" ]]; then
+        VAR_NAME="CONSENSUS_SERVICE_DATABASE_URL"
+    elif [[ "$service" == "notification" ]]; then
+        VAR_NAME="NOTIFICATION_SERVICE_DATABASE_URL"
+    elif [[ "$service" == "payment" ]]; then
+        VAR_NAME="PAYMENT_SERVICE_DATABASE_URL"
+    elif [[ "$service" == "reputation" ]]; then
+        VAR_NAME="REPUTATION_SERVICE_DATABASE_URL"
+    elif [[ "$service" == "submission" ]]; then
+        VAR_NAME="SUBMISSION_SERVICE_DATABASE_URL"
+    elif [[ "$service" == "user" ]]; then
+        VAR_NAME="USER_SERVICE_DATABASE_URL"
+    fi
+
+    echo "${VAR_NAME}=postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${DB_NAME}" >> "$ENV_FILE"
 done
-pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}"
 
-ENV_FILE="${REPO_ROOT}/.ci-test-db-env"
-: > "${ENV_FILE}"
+# Also export the base DATABASE_URL
+echo "DATABASE_URL=postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${BASE_DB}" >> "$ENV_FILE"
 
-for entry in "${SERVICES[@]}"; do
-  service="${entry%%:*}"
-  dbname="${entry##*:}"
-  migrations_dir="${BACKEND_DIR}/${service}/migrations"
-
-  if [ ! -d "${migrations_dir}" ]; then
-    echo "!! No migrations directory for ${service} (${migrations_dir}); skipping"
-    continue
-  fi
-
-  echo "==> [${service}] creating database ${dbname}"
-  # CREATE DATABASE cannot run inside a transaction and has no IF NOT EXISTS,
-  # so guard it with a catalog check (safe to re-run locally).
-  if ! psql_admin -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${dbname}'" | grep -q 1; then
-    psql_admin -d postgres -c "CREATE DATABASE ${dbname};"
-  fi
-
-  echo "==> [${service}] installing extensions in ${dbname}"
-  psql_admin -d "${dbname}" -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" \
-                             -c "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";" \
-                             -c "CREATE EXTENSION IF NOT EXISTS \"pg_trgm\";"
-
-  db_url="postgres://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${dbname}"
-  echo "==> [${service}] applying migrations from ${migrations_dir}"
-  sqlx migrate run --source "${migrations_dir}" --database-url "${db_url}"
-
-  # Export a per-service DATABASE_URL for the test step, e.g.
-  # USER_SERVICE_DATABASE_URL, SUBMISSION_SERVICE_DATABASE_URL.
-  var_name="$(echo "${service}" | tr '[:lower:]-' '[:upper:]_')_DATABASE_URL"
-  echo "${var_name}=${db_url}" >> "${ENV_FILE}"
-done
-
-echo "==> All service databases created and migrated."
-echo "==> Per-service DATABASE_URLs written to ${ENV_FILE}"
+log_info "Test databases setup complete. Environment file: $ENV_FILE"
+cat "$ENV_FILE"

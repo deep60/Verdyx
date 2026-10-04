@@ -12,9 +12,25 @@ use axum::{
 };
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::SystemTime};
 use tokio::{net::TcpListener, sync::RwLock};
+use tower::{ServiceBuilder, layer::Layer};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+use crate::{config::AppConfig, handlers, middleware, models, routes, services, utils};
+use crate::models::response::ApiResponse;
+use crate::services::{
+    blockchain::BlockchainService, database::DatabaseService, proxy_service::ProxyService,
+    redis::RedisService,
+};
+
+// Shared middleware
+use shared::{
+    circuit_breaker::{CircuitBreakerConfig, CircuitBreakerRegistry},
+    idempotency::{IdempotencyStore, idempotency_middleware},
+    otel::{init_combined_subscriber, OtelConfig},
+    validation::validation_middleware,
+};
 
 mod config;
 mod handlers;
@@ -30,8 +46,6 @@ use services::{
     blockchain::BlockchainService, database::DatabaseService, proxy_service::ProxyService,
     redis::RedisService,
 };
-
-use crate::models::response::ApiResponse;
 
 // Application state shared across handlers
 #[derive(Clone)]
@@ -49,6 +63,10 @@ pub struct AppState {
     /// `MetricsCollector` so the gateway emits the same `verdyx_*` schema as
     /// every other service for the root `/metrics` scrape.
     pub prom_metrics: shared::MetricsRegistry,
+    /// Circuit breaker registry for downstream service calls
+    pub circuit_breaker_registry: Arc<CircuitBreakerRegistry>,
+    /// Idempotency store for safe retries
+    pub idempotency_store: Arc<IdempotencyStore>,
 }
 
 // Session information for active users
@@ -227,12 +245,33 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing for logging
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .compact()
-        .init();
+    // Initialize OpenTelemetry + logging (combined subscriber)
+    let otel_config = OtelConfig {
+        service_name: "api-gateway".to_string(),
+        otlp_endpoint: std::env::var("OTEL_ENDPOINT")
+            .unwrap_or_else(|_| "http://localhost:4317".to_string()),
+        sample_rate: std::env::var("OTEL_SAMPLE_RATE")
+            .unwrap_or_else(|_| "0.1".to_string())
+            .parse()
+            .unwrap_or(0.1),
+        tls: false,
+        attributes: vec![
+            ("deployment.environment".to_string(), 
+             std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string())),
+            ("service.version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+        ],
+    };
+
+    let log_config = shared::logging::LogConfig {
+        service_name: "api-gateway".to_string(),
+        format: shared::logging::LogFormat::Json,
+        level: shared::logging::LogLevel::Info,
+        include_line_numbers: false,
+        include_thread_ids: true,
+    };
+
+    init_combined_subscriber(log_config, otel_config)
+        .context("Failed to initialize OpenTelemetry + logging")?;
 
     info!("Starting Verdyx API Gateway v{}", env!("CARGO_PKG_VERSION"));
 
@@ -252,6 +291,14 @@ async fn main() -> Result<()> {
             .context("Failed to initialize proxy service")?,
     );
 
+    // Create circuit breaker registry for downstream services
+    let circuit_breaker_registry = Arc::new(CircuitBreakerRegistry::new());
+    
+    // Create idempotency store
+    let idempotency_store = Arc::new(IdempotencyStore::new(
+        std::time::Duration::from_secs(24 * 60 * 60) // 24 hours
+    ));
+
     // Create application state
     let state = AppState {
         db: Arc::new(db),
@@ -262,6 +309,8 @@ async fn main() -> Result<()> {
         metrics: metrics_collector.clone(),
         proxy,
         prom_metrics: shared::MetricsRegistry::new("api-gateway", env!("CARGO_PKG_VERSION")),
+        circuit_breaker_registry: circuit_breaker_registry.clone(),
+        idempotency_store: idempotency_store.clone(),
     };
 
     // Create CORS layer from config
@@ -301,6 +350,13 @@ async fn main() -> Result<()> {
             let r = prom_registry.clone();
             async move { shared::metrics_mw::track_with(r, req, next).await }
         }))
+        // Validation middleware (runs first to reject invalid requests early)
+        .layer(axum::middleware::from_fn(validation_middleware::<shared::types::EmptyBody>))
+        // Idempotency middleware (for mutating endpoints)
+        .layer(axum::middleware::from_fn_with_state(
+            idempotency_store.clone(),
+            idempotency_middleware
+        ))
         .layer(TraceLayer::new_for_http())
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
         .layer(cors)
@@ -327,6 +383,9 @@ async fn main() -> Result<()> {
         .await
         .context("Server error")?;
 
+    // Shutdown OpenTelemetry gracefully
+    shared::shutdown_otel();
+    
     info!("Verdyx API Gateway shut down gracefully");
     Ok(())
 }

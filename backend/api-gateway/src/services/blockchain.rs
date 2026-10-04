@@ -176,6 +176,44 @@ impl BlockchainService {
     }
 
     /// Load smart contract instances
+    /// Parse a configured contract address, falling back to the zero address.
+    ///
+    /// Returns `Address::zero()` for anything unusable -- empty, whitespace, or
+    /// malformed -- after logging which variable was at fault. A zero address
+    /// is already the project's "chain disabled" sentinel, and it is inert:
+    /// contract *reads* return nothing and *writes* fail at send time with a
+    /// clear error, which is the same failure mode as an unreachable RPC.
+    ///
+    /// Startup must never depend on chain configuration being present.
+    fn parse_contract_address(var_name: &str, raw: &str) -> Address {
+        let trimmed = raw.trim();
+
+        if trimmed.is_empty() {
+            tracing::warn!(
+                "{var_name} is not set; on-chain calls through this contract are disabled"
+            );
+            return Address::zero();
+        }
+
+        match trimmed.parse::<Address>() {
+            Ok(addr) => {
+                if addr.is_zero() {
+                    tracing::warn!(
+                        "{var_name} is the zero address; on-chain calls through this contract are disabled"
+                    );
+                }
+                addr
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "{var_name} is not a valid address ({e}); treating as unset. \
+                     On-chain calls through this contract are disabled until it is corrected."
+                );
+                Address::zero()
+            }
+        }
+    }
+
     async fn load_contracts(
         client: &Arc<BlockchainClient>,
         config: &config::BlockchainConfig,
@@ -184,23 +222,24 @@ impl BlockchainService {
         // using ABIs loaded from the extracted JSON (see get_*_abi below). These
         // are live contract handles — reads/writes hit the chain via `client`.
 
-        let bounty_manager_address: Address = config
-            .contracts
-            .bounty_manager
-            .parse()
-            .context("Invalid bounty manager address")?;
-
-        let threat_token_address: Address = config
-            .contracts
-            .threat_token
-            .parse()
-            .context("Invalid threat token address")?;
-
-        let reputation_system_address: Address = config
-            .contracts
-            .reputation_system
-            .parse()
-            .context("Invalid reputation system address")?;
+        // Addresses are parsed leniently, matching how the wallet and nonce
+        // above already behave: a blank or malformed address must not stop the
+        // gateway from binding and serving its many non-chain routes.
+        //
+        // This was a real outage. With blank contract addresses the parse
+        // propagated, `BlockchainService::new` failed, `main` aborted, and the
+        // container never became healthy -- for a service whose chain features
+        // are optional and, in production today, disabled entirely.
+        let bounty_manager_address = Self::parse_contract_address(
+            "BOUNTY_MANAGER_ADDRESS",
+            &config.contracts.bounty_manager,
+        );
+        let threat_token_address =
+            Self::parse_contract_address("THREAT_TOKEN_ADDRESS", &config.contracts.threat_token);
+        let reputation_system_address = Self::parse_contract_address(
+            "REPUTATION_SYSTEM_ADDRESS",
+            &config.contracts.reputation_system,
+        );
 
         // ABIs are loaded from the extracted contract JSON at startup.
         let bounty_manager_abi = Self::get_bounty_manager_abi();
@@ -606,19 +645,47 @@ impl BlockchainService {
     }
 
     // Load real ABIs from compiled contract artifacts
+    /// Load an ABI, degrading to an empty one rather than panicking.
+    ///
+    /// ABI paths are resolved relative to the working directory (the image
+    /// sets `WORKDIR /app` and copies `abis/` there), so a binary started from
+    /// anywhere else used to panic the whole process at startup. An empty ABI
+    /// is inert in the same way the zero address is: contract *construction*
+    /// succeeds, and any `method(...)` lookup fails at call time with a clear
+    /// error instead of taking the gateway down with it.
+    fn load_abi_or_empty(label: &str, loaded: Result<Abi>) -> Abi {
+        match loaded {
+            Ok(abi) => abi,
+            Err(e) => {
+                tracing::warn!(
+                    "Could not load the {label} ABI ({e}); on-chain calls to this contract are \
+                     disabled. Run blockchain/scripts/extract-abis.sh and ensure abis/ is present \
+                     in the working directory."
+                );
+                Abi::default()
+            }
+        }
+    }
+
     fn get_bounty_manager_abi() -> Abi {
-        crate::services::abi_loader::load_bounty_manager_abi()
-            .expect("Failed to load BountyManager ABI - run blockchain/scripts/extract-abis.sh")
+        Self::load_abi_or_empty(
+            "BountyManager",
+            crate::services::abi_loader::load_bounty_manager_abi(),
+        )
     }
 
     fn get_threat_token_abi() -> Abi {
-        crate::services::abi_loader::load_threat_token_abi()
-            .expect("Failed to load ThreatToken ABI - run blockchain/scripts/extract-abis.sh")
+        Self::load_abi_or_empty(
+            "ThreatToken",
+            crate::services::abi_loader::load_threat_token_abi(),
+        )
     }
 
     fn get_reputation_system_abi() -> Abi {
-        crate::services::abi_loader::load_reputation_system_abi()
-            .expect("Failed to load ReputationSystem ABI - run blockchain/scripts/extract-abis.sh")
+        Self::load_abi_or_empty(
+            "ReputationSystem",
+            crate::services::abi_loader::load_reputation_system_abi(),
+        )
     }
 }
 
@@ -671,5 +738,87 @@ mod tests {
 
         let invalid_address = "invalid_address";
         assert!(BlockchainService::validate_address(invalid_address).is_err());
+    }
+
+    #[test]
+    fn valid_contract_address_is_used_as_configured() {
+        let addr = BlockchainService::parse_contract_address(
+            "BOUNTY_MANAGER_ADDRESS",
+            "0x742b15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34",
+        );
+        assert!(!addr.is_zero());
+        assert_eq!(
+            format!("{addr:?}").to_lowercase(),
+            "0x742b15c2d1f7a9fe9a8d2f1b22d7e3af95c30b34"
+        );
+    }
+
+    /// Regression: a blank contract address used to propagate a parse error
+    /// out of `load_contracts`, fail `BlockchainService::new`, abort `main`,
+    /// and leave the container permanently unhealthy -- for a service whose
+    /// chain features are optional and currently disabled in production.
+    /// Unset config must degrade, never crash.
+    #[test]
+    fn unset_contract_address_degrades_instead_of_failing() {
+        for raw in ["", "   ", "\t"] {
+            let addr = BlockchainService::parse_contract_address("THREAT_TOKEN_ADDRESS", raw);
+            assert!(
+                addr.is_zero(),
+                "an unset address must fall back to the zero address, got {addr:?}"
+            );
+        }
+    }
+
+    /// A typo in an address is a configuration mistake, not a reason to take
+    /// the whole gateway offline.
+    #[test]
+    fn malformed_contract_address_degrades_instead_of_failing() {
+        for raw in [
+            "not-an-address",
+            "0x123",                                          // too short
+            "0xZZZZ15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34",     // non-hex
+            "742b15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34extra",  // too long
+        ] {
+            let addr =
+                BlockchainService::parse_contract_address("REPUTATION_SYSTEM_ADDRESS", raw);
+            assert!(
+                addr.is_zero(),
+                "a malformed address must fall back to zero, got {addr:?} for {raw:?}"
+            );
+        }
+    }
+
+    /// Surrounding whitespace is a copy-paste artefact, not a malformed value.
+    #[test]
+    fn contract_address_tolerates_surrounding_whitespace() {
+        let addr = BlockchainService::parse_contract_address(
+            "BOUNTY_MANAGER_ADDRESS",
+            "  0x742b15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34\n",
+        );
+        assert!(!addr.is_zero(), "a padded but valid address must still parse");
+    }
+
+    /// The documented "chain disabled" sentinel must be accepted quietly
+    /// rather than treated as a failure.
+    #[test]
+    fn zero_address_sentinel_is_accepted() {
+        let addr = BlockchainService::parse_contract_address(
+            "BOUNTY_MANAGER_ADDRESS",
+            "0x0000000000000000000000000000000000000000",
+        );
+        assert!(addr.is_zero());
+    }
+
+    /// A missing ABI file must not panic the process at startup.
+    #[test]
+    fn missing_abi_degrades_to_an_empty_abi() {
+        let abi = BlockchainService::load_abi_or_empty(
+            "BountyManager",
+            Err(anyhow::anyhow!("no such file")),
+        );
+        assert!(
+            abi.functions().next().is_none(),
+            "a failed ABI load must yield an empty ABI, not panic"
+        );
     }
 }

@@ -1,0 +1,149 @@
+name: Cosign Sign & Verify
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'infrastructure/**'
+      - 'docker-compose*.yml'
+      - '.github/workflows/cosign.yml'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  sign-images:
+    name: Sign Docker Images (Cosign + Keyless)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.0'
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign each service image with Cosign (keyless)
+        run: |
+          SERVICES="frontend api-gateway analysis-engine bounty-manager consensus-service notification-service payment-service reputation-service submission-service user-service"
+          for service in $SERVICES; do
+            image="ghcr.io/deep60/verdyx-${service}:latest"
+            echo "Signing $image..."
+            cosign sign --yes "$image" \
+              --annotations "github.workflow=${{ github.workflow }}" \
+              --annotations "github.run_id=${{ github.run_id }}" \
+              --annotations "github.sha=${{ github.sha }}" \
+              --annotations "github.ref=${{ github.ref }}"
+          done
+
+      - name: Verify signatures
+        run: |
+          SERVICES="frontend api-gateway analysis-engine bounty-manager consensus-service notification-service payment-service reputation-service submission-service user-service"
+          for service in $SERVICES; do
+            image="ghcr.io/deep60/verdyx-${service}:latest"
+            echo "Verifying $image..."
+            cosign verify "$image" \
+              --certificate-identity-regexp ".*" \
+              --certificate-oidc-issuer-regexp ".*"
+          done
+
+      - name: Attach SBOM as attestation
+        run: |
+          # SBOM attestation would be attached here using:
+          # cosign attest --predicate sbom-merged.json --type cyclonedx "$image"
+          echo "SBOM attestation step - implement when SBOM workflow is integrated"
+
+  sign-artifacts:
+    name: Sign Release Artifacts
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.0'
+
+      - name: Generate checksums
+        run: |
+          cd ./artifacts
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Sign checksums with Cosign
+        run: |
+          cosign sign-blob --yes ./artifacts/checksums.txt \
+            --annotations "github.repository=${{ github.repository }}" \
+            --annotations "github.release=${{ github.event.release.tag_name }}"
+
+      - name: Upload signatures
+        uses: actions/upload-artifact@v4
+        with:
+          name: cosign-signatures
+          path: |
+            ./artifacts/*.sig
+            ./artifacts/*.pem
+          retention-days: 365
+
+  verify-images:
+    name: Verify Docker Image Signatures
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.0'
+
+      - name: Verify base images used in Dockerfiles
+        run: |
+          # Extract base images from Dockerfiles and verify they're signed
+          for dockerfile in $(find . -name "Dockerfile*" -type f); do
+            base=$(grep -E '^FROM' "$dockerfile" | head -1 | awk '{print $2}')
+            if [[ "$base" != *"scratch"* ]]; then
+              echo "Verifying base image: $base"
+              cosign verify "$base" \
+                --certificate-identity-regexp ".*" \
+                --certificate-oidc-issuer-regexp ".*" || echo "Warning: Base image $base not signed"
+            fi
+          done
+
+  slsa-provenance:
+    name: Generate SLSA Provenance
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate SLSA Provenance
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+        with:
+          provenance-name: verdyx-provenance

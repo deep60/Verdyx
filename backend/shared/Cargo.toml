@@ -16,21 +16,47 @@ uuid = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 # Database dependencies
 sqlx = { workspace = true }
-redis = { workspace = true }
+redis = { workspace = true, optional = true }
 tokio = { workspace = true }
 
 # Decimal arithmetic
 rust_decimal = { version = "1.33", features = ["serde-with-str"] }
 
 # Async trait support
-async-trait = "0.1"
+async-trait = { version = "0.1", optional = true }
 
 # Optional axum integration (feature `axum-mw`). Off by default so services
 # that don't use axum (or are on a different axum version) are unaffected.
 axum = { version = "0.8", optional = true }
+
+# OpenTelemetry (feature-gated, use workspace versions)
+opentelemetry = { workspace = true, optional = true, features = ["trace"] }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true, features = ["grpc-tonic"] }
+opentelemetry-http = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, optional = true }
+
+# Circuit breaker
+tower = { version = "0.4", optional = true }
+governor = { version = "0.6", optional = true }
+
+# Validation
+validator = { version = "0.18", optional = true, features = ["derive"] }
+serde_qs = { version = "0.10", optional = true }
+
+# Idempotency
+dashmap = { version = "5.5", optional = true }
+sha2 = { version = "0.10", optional = true }
+
+# Crypto dependencies
+base64 = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -38,3 +64,26 @@ default = []
 # `verdyx_http_requests_total` / `verdyx_http_errors_total` on the
 # `MetricsRegistry` per request. Requires axum 0.7.
 axum-mw = ["dep:axum"]
+# OpenTelemetry distributed tracing
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry-http",
+    "dep:tracing-opentelemetry",
+    "dep:opentelemetry-semantic-conventions",
+]
+# Circuit breaker middleware for downstream calls
+circuit-breaker = ["dep:tower", "dep:governor", "dep:async-trait"]
+# Request validation middleware
+validation = ["dep:validator", "dep:serde_qs"]
+# Idempotency key support
+idempotency = ["dep:dashmap", "dep:sha2", "axum-mw"]
+# Redis-backed messaging
+redis = ["dep:redis"]
+# Redis-backed idempotency store for production clusters
+redis-store = ["idempotency", "dep:redis"]
+# Crypto dependencies
+crypto = ["dep:base64", "dep:rand", "dep:hex"]
+# Logging with tracing-subscriber
+logging = ["dep:tracing-subscriber"]

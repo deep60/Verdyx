@@ -1,0 +1,46 @@
+# License Policy for Dependency Review
+# https://github.com/actions/dependency-review-action#license-policy-file
+
+# Allow list - licenses that are explicitly allowed
+allow:
+  - MIT
+  - Apache-2.0
+  - BSD-2-Clause
+  - BSD-3-Clause
+  - BSD-4-Clause
+  - ISC
+  - MPL-2.0
+  - MPL-1.1
+  - MPL-1.0
+  - Unicode-DFS-2016
+  - Unicode-DFS-2015
+  - Unicode-TOU
+  - Zlib
+  - CC0-1.0
+  - CC-BY-4.0
+  - CC-BY-3.0
+
+# Deny list - licenses that are explicitly forbidden
+deny:
+  - GPL-3.0-only
+  - GPL-3.0-or-later
+  - AGPL-3.0-only
+  - AGPL-3.0-or-later
+  - LGPL-3.0-only
+  - LGPL-3.0-or-later
+  - SSPL-1.0
+  - Elastic-2.0
+  - BSL-1.0
+  - Commons-Clause-1.0
+  - PolyForm-Small-Business-1.0.0
+  - PolyForm-Free-Trial-1.0.0
+
+# Packages that are exempt from license checking (by name)
+# Use sparingly - only for well-understood exceptions
+exempt:
+  - name: "some-proprietary-crate"
+    reason: "Internal crate, license reviewed separately"
+
+# Default action for unlisted licenses: "allow" or "deny"
+# Default: deny (fail the check)
+default-action: deny

@@ -94,6 +94,13 @@ pub use common::{
     MIN_STAKE_AMOUNT,
 };
 
+/// Empty body type for validation middleware (used when no body is expected)
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, serde::Serialize)]
+#[serde(transparent)]
+pub struct EmptyBody;
+
+impl validator::Validate for EmptyBody {}
+
 // Type aliases for commonly used Result types
 pub type Result<T> = std::result::Result<T, CommonError>;
 pub type ApiResult<T> = std::result::Result<ApiResponse<T>, CommonError>;

@@ -15,7 +15,7 @@ native-engines = ["yara-engine", "clamav", "ml-engine"]
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
-shared = { path = "../shared", features = ["axum-mw"] }
+shared = { path = "../shared", features = ["axum-mw", "otel", "validation", "idempotency", "circuit-breaker"] }
 tower = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -46,7 +46,10 @@ aws-config = "1.0"
 tokio-test.workspace = true
 blake2 = "0.10.6"
 sha3 = "0.10"
-ort = { version = "2.0.0-rc.10", optional = true }
+# Pinned exactly: a caret range spans pre-releases, so "2.0.0-rc.10" silently
+# resolved to rc.13, whose Session::builder API changed and broke the build.
+# Bump this deliberately, not by resolution drift.
+ort = { version = "=2.0.0-rc.13", optional = true }
 ndarray = { version = "0.17.2", optional = true }
 futures = "0.3"
 tempfile = "3"

@@ -1,14 +1,16 @@
 //! Observability utilities for logging, tracing, and metrics
-//! 
+//!
 //! Provides centralized observability setup for all services
 
 pub mod logging;
-pub mod tracing;
 pub mod metrics;
+pub mod otel;
+pub mod tracing;
 
 pub use logging::*;
-pub use tracing::*;
 pub use metrics::*;
+pub use otel::*;
+pub use tracing::*;
 
 use thiserror::Error;
 
@@ -22,6 +24,9 @@ pub enum ObservabilityError {
     
     #[error("Metrics error: {0}")]
     Metrics(String),
+    
+    #[error("OpenTelemetry error: {0}")]
+    Otel(String),
 }
 
 pub type ObservabilityResult<T> = Result<T, ObservabilityError>;

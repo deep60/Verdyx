@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bfc50eefe2df9094dc77561fd676572fde070c71cee8488a4578f55d1f5cc5db # shrinks to stake1 = 634, conf1 = 80, stake2 = 543, conf2 = 90
+cc 3c5b28b6161c91deeea9c4abe90d75035d4f38a977eecb1e2324de51b4478fc1 # shrinks to malicious_confidence = 2, benign_confidence = 1, stake = 50

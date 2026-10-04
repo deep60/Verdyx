@@ -93,7 +93,7 @@ futures-util = "0.3"
 
 # Shared metrics/utilities used by every service so the gateway emits the
 # same Prometheus `verdyx_*` schema as the rest of the fleet.
-shared = { path = "../shared", features = ["axum-mw"] }
+shared = { path = "../shared", features = ["axum-mw", "otel", "validation", "idempotency", "circuit-breaker", "crypto", "logging"] }
 
 [dev-dependencies]
 # Testing utilities

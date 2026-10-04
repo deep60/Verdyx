@@ -1,11 +1,15 @@
 /// Messaging and event handling utilities
 pub mod event_types;
+
+#[cfg(feature = "redis")]
 pub mod publisher;
 
 // Kafka client module - currently stubbed for future implementation
 // pub mod kafka_client;
 
 pub use event_types::*;
+
+#[cfg(feature = "redis")]
 pub use publisher::*;
 
 /// Message queue trait for abstracting different messaging backends

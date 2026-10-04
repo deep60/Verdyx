@@ -2,16 +2,19 @@ name: Contracts Static Analysis
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
     paths:
       - 'blockchain/**'
+      - '.github/workflows/contracts-analysis.yml'
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
     paths:
       - 'blockchain/**'
+      - '.github/workflows/contracts-analysis.yml'
 
 jobs:
   slither:
+    name: Slither (Static Analysis)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,7 +41,6 @@ jobs:
           target: 'blockchain/'
           slither-config: 'blockchain/slither.config.json'
           sarif: results.sarif
-          # Fail the job on medium/high findings; informational/low are reported only.
           fail-on: medium
 
       - name: Upload Slither SARIF
@@ -46,3 +48,156 @@ jobs:
         if: always() && steps.slither.outputs.sarif != ''
         with:
           sarif_file: ${{ steps.slither.outputs.sarif }}
+
+  mythril:
+    name: Mythril (Symbolic Execution)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: ./blockchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Mythril
+        run: pipx install mythril
+
+      - name: Run Mythril on core contracts
+        run: |
+          for contract in contracts/core/*.sol; do
+            echo "Analyzing $contract..."
+            myth analyze "$contract" --solc-json mythril.solc.json --execution-timeout 120 --max-depth 50 --sarif-output "${contract##*/}.sarif" || true
+          done
+
+      - name: Merge Mythril SARIF
+        if: always()
+        run: |
+          cargo install sarif-fmt
+          sarif-fmt merge *.sarif -o mythril-merged.sarif
+
+      - name: Upload Mythril SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ./blockchain/mythril-merged.sarif
+          category: mythril
+
+  foundry-test:
+    name: Foundry Tests (Fuzz + Invariant)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./blockchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install dependencies
+        run: forge install
+
+      - name: Run unit tests
+        run: forge test -vvv
+
+      - name: Run fuzz tests (10000 runs)
+        run: forge test --fuzz-runs 10000 -vv
+
+      - name: Run invariant tests
+        run: forge test --match-contract Invariant --invariant-runs 1000 --invariant-depth 50 -vv
+
+      - name: Run gas report
+        run: forge test --gas-report
+        continue-on-error: true
+
+  foundry-coverage:
+    name: Foundry Coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./blockchain
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install dependencies
+        run: forge install
+
+      - name: Run coverage
+        run: forge coverage --report lcov --ir-minimum --ir-optimize --ir-optimize-runs 200
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./blockchain/lcov.info
+          flags: contracts
+          name: contracts-coverage
+
+  solhint:
+    name: Solhint (Linting)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./blockchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: blockchain/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Solhint
+        run: npx solhint 'contracts/**/*.sol' --max-warnings 0
+
+  prettier:
+    name: Prettier (Formatting)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./blockchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: blockchain/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npx prettier --check 'contracts/**/*.sol'
+
+  detect-secrets:
+    name: Detect Secrets (TruffleHog)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./blockchain
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD

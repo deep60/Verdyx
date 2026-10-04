@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 mod aggregation;
+mod commitment;
 mod config;
 mod handlers;
 mod models;
@@ -106,6 +107,13 @@ async fn main() -> Result<()> {
         }
     });
 
+    let service_clone = consensus_service.clone();
+    tokio::spawn(async move {
+        if let Err(e) = workers::regrader::start(service_clone).await {
+            warn!("Regrader error: {}", e);
+        }
+    });
+
     info!("Background workers started");
 
     // Build application state
@@ -158,6 +166,10 @@ async fn main() -> Result<()> {
             post(handlers::consensus::calculate_consensus),
         )
         .route(
+            "/api/v1/consensus/bounty/{bounty_id}/vote",
+            post(handlers::consensus::record_vote),
+        )
+        .route(
             "/api/v1/consensus/submission/{submission_id}",
             get(handlers::consensus::get_submission_consensus),
         )
@@ -165,6 +177,26 @@ async fn main() -> Result<()> {
             "/api/v1/consensus/stats/{bounty_id}",
             get(handlers::consensus::get_consensus_stats),
         )
+        // Commit-reveal voting: hide votes until the window shuts, so a late
+        // voter cannot read the tally and copy whoever is ahead.
+        .route(
+            "/api/v1/voting/bounty/{bounty_id}/phase",
+            get(handlers::voting::get_phase),
+        )
+        .route(
+            "/api/v1/voting/bounty/{bounty_id}/commit",
+            post(handlers::voting::commit_vote),
+        )
+        .route(
+            "/api/v1/voting/bounty/{bounty_id}/reveal",
+            post(handlers::voting::reveal_vote),
+        )
+        // Grading endpoints -- what the crowd got wrong, once we know better
+        .route(
+            "/api/v1/grades/{bounty_id}",
+            get(handlers::grading::get_grade).post(handlers::grading::submit_grade),
+        )
+        .route("/api/v1/grading/stats", get(handlers::grading::get_stats))
         // Dispute endpoints
         .route(
             "/api/v1/disputes/create",

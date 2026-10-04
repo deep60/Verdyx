@@ -14,7 +14,33 @@ pub use thiserror;
 pub use tracing;
 pub use uuid;
 
-// Common error types
+// Export modules
+pub mod blockchain;
+pub mod crypto;
+pub mod database;
+pub mod env;
+pub mod error;
+pub mod messaging;
+pub mod observability;
+pub mod service_metrics;
+pub mod types;
+
+#[cfg(feature = "axum-mw")]
+pub mod metrics_mw;
+#[cfg(feature = "validation")]
+pub mod validation;
+#[cfg(feature = "idempotency")]
+pub mod idempotency;
+#[cfg(feature = "circuit-breaker")]
+pub mod circuit_breaker;
+
+pub use service_metrics::MetricsRegistry;
+
+// Re-export key error types
+pub use error::{AppError, AppResult, ErrorCode, ApiError, ValidationError, BlockchainError, IntoAppError};
+
+// Legacy error type (deprecated - use AppError instead)
+#[deprecated(since = "0.2.0", note = "Use AppError instead")]
 #[derive(Debug, thiserror::Error)]
 pub enum VerdyxError {
     #[error("Database error: {0}")]
@@ -33,15 +59,5 @@ pub enum VerdyxError {
     ExternalService(String),
 }
 
+#[deprecated(since = "0.2.0", note = "Use AppResult instead")]
 pub type Result<T> = std::result::Result<T, VerdyxError>;
-
-// Export modules
-pub mod env;
-pub mod messaging;
-pub mod service_metrics;
-pub mod types;
-
-#[cfg(feature = "axum-mw")]
-pub mod metrics_mw;
-
-pub use service_metrics::MetricsRegistry;

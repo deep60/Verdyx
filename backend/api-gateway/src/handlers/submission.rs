@@ -379,6 +379,12 @@ pub async fn create_submission(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    // Mirror the staked verdict into consensus-service. This is the vote that
+    // carries a stake, so it is the one consensus most needs; like the analyst
+    // vote path it is non-fatal, because the submission is already committed
+    // and must not be lost to a downstream outage.
+    forward_submission_to_consensus(&state, &submission).await;
+
     // Return response
     Ok(Json(SubmissionResponse {
         id: submission.id,
@@ -399,6 +405,88 @@ pub async fn create_submission(
         reward_earned: None,
         reputation_change: None,
     }))
+}
+
+/// Mirror a staked engine/analyst verdict into consensus-service.
+///
+/// Failures are logged, never propagated: the submission row is already
+/// committed, and losing it because consensus-service is briefly unreachable
+/// would be worse than a bounty that scores late.
+async fn forward_submission_to_consensus(
+    state: &AppState,
+    submission: &crate::models::bounty::BountySubmission,
+) {
+    use crate::services::consensus_client::{forward_vote, resolve_verdict, ForwardedVote};
+
+    // A staked verdict is already absolute; run it through the same resolver
+    // so anything outside the known vocabulary is rejected rather than
+    // forwarded as a verdict consensus cannot interpret.
+    let Some(resolved) = resolve_verdict(&submission.verdict, None) else {
+        tracing::warn!(
+            "Submission {} has verdict '{}', which is not an absolute verdict; not forwarded",
+            submission.id,
+            submission.verdict
+        );
+        return;
+    };
+
+    let sample_hash: Option<String> = match sqlx::query_scalar(
+        r#"
+        SELECT s.file_hash
+        FROM bounties b
+        JOIN submissions s ON s.id = b.submission_id
+        WHERE b.id = $1
+        "#,
+    )
+    .bind(submission.bounty_id)
+    .fetch_optional(state.db.pool())
+    .await
+    {
+        Ok(h) => h.flatten(),
+        Err(e) => {
+            tracing::error!(
+                "Could not resolve sample hash for bounty {}: {}",
+                submission.bounty_id,
+                e
+            );
+            None
+        }
+    };
+
+    let reputation_score: i32 =
+        match sqlx::query_scalar("SELECT reputation_score FROM users WHERE id = $1")
+            .bind(submission.engine_id)
+            .fetch_optional(state.db.pool())
+            .await
+        {
+            Ok(r) => r.flatten().unwrap_or(0),
+            Err(e) => {
+                tracing::warn!(
+                    "Could not read reputation for {}: {}; forwarding with 0",
+                    submission.engine_id,
+                    e
+                );
+                0
+            }
+        };
+
+    let recorded = forward_vote(&ForwardedVote {
+        bounty_id: submission.bounty_id,
+        voter_id: submission.engine_id,
+        verdict: resolved,
+        confidence: submission.confidence,
+        reputation_score,
+        sample_hash,
+    })
+    .await;
+
+    if !recorded {
+        tracing::error!(
+            "Staked verdict on submission {} did not reach consensus-service; bounty {} may score without it",
+            submission.id,
+            submission.bounty_id
+        );
+    }
 }
 
 pub async fn get_submissions(
@@ -931,6 +1019,34 @@ pub async fn vote_on_submission(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    // Mirror the vote into consensus-service. The gateway's submission_votes
+    // table is the voter's receipt; consensus-service keeps the store the
+    // aggregator actually reads. Without this forward the vote never reaches
+    // consensus and no bounty can ever be scored, paid out, or re-graded.
+    //
+    // Failure here is logged and reported, never fatal: the vote is already
+    // committed above and must not be lost because a downstream service is
+    // unreachable.
+    let consensus_recorded = match forward_vote_to_consensus(
+        &state,
+        submission_id,
+        voter_id,
+        verdict,
+        confidence,
+    )
+    .await
+    {
+        Ok(recorded) => recorded,
+        Err(e) => {
+            tracing::error!(
+                "Could not prepare consensus forward for vote {}: {}",
+                vote_id,
+                e
+            );
+            false
+        }
+    };
+
     Ok(Json(serde_json::json!({
         "success": true,
         "vote_id": vote_id,
@@ -938,7 +1054,78 @@ pub async fn vote_on_submission(
         "voter_id": voter_id,
         "verdict": verdict,
         "confidence": confidence,
+        "consensus_recorded": consensus_recorded,
     })))
+}
+
+/// Resolve a vote to its bounty and sample, then mirror it into
+/// consensus-service.
+///
+/// Returns whether consensus-service accepted the vote. `Err` covers only the
+/// lookup failing; a rejected or unreachable consensus-service is reported as
+/// `Ok(false)` so the caller can carry on.
+async fn forward_vote_to_consensus(
+    state: &AppState,
+    submission_id: Uuid,
+    voter_id: Uuid,
+    verdict: &str,
+    confidence: f64,
+) -> Result<bool, sqlx::Error> {
+    use crate::services::consensus_client::{forward_vote, resolve_verdict, ForwardedVote};
+
+    // One hop resolves everything the consensus vote needs: which bounty the
+    // submission belongs to, what the submission itself claimed (to interpret
+    // agree/disagree), and the hash of the sample under analysis.
+    let row: Option<(Uuid, Option<String>, Option<String>)> = sqlx::query_as(
+        r#"
+        SELECT bs.bounty_id, bs.verdict, s.file_hash
+        FROM bounty_submissions bs
+        JOIN bounties b   ON b.id = bs.bounty_id
+        JOIN submissions s ON s.id = b.submission_id
+        WHERE bs.id = $1
+        "#,
+    )
+    .bind(submission_id)
+    .fetch_optional(state.db.pool())
+    .await?;
+
+    let Some((bounty_id, submission_verdict, sample_hash)) = row else {
+        tracing::warn!(
+            "Vote on submission {} has no resolvable bounty; not forwarded",
+            submission_id
+        );
+        return Ok(false);
+    };
+
+    let Some(resolved) = resolve_verdict(verdict, submission_verdict.as_deref()) else {
+        // e.g. "disagree" with a suspicious submission -- the voter has told us
+        // what they reject, not what they believe. Recorded locally, but there
+        // is no honest absolute verdict to forward.
+        tracing::info!(
+            "Vote '{}' on submission {} has no absolute verdict; not forwarded",
+            verdict,
+            submission_id
+        );
+        return Ok(false);
+    };
+
+    let reputation_score: i32 =
+        sqlx::query_scalar("SELECT reputation_score FROM users WHERE id = $1")
+            .bind(voter_id)
+            .fetch_optional(state.db.pool())
+            .await?
+            .flatten()
+            .unwrap_or(0);
+
+    Ok(forward_vote(&ForwardedVote {
+        bounty_id,
+        voter_id,
+        verdict: resolved,
+        confidence,
+        reputation_score,
+        sample_hash,
+    })
+    .await)
 }
 
 /// Verify a submission

@@ -25,6 +25,13 @@ pub struct PaymentService {
     provider: Option<BlockchainProvider>,
 }
 
+/// Decimals used by ThreatToken, matching the ERC-20 default.
+///
+/// Everything on the wire is a whole-token `Decimal`; everything on-chain and
+/// every bound in `PaymentConfig` (`min_withdraw_amount`, `max_withdraw_amount`)
+/// is wei. `to_wei` is the only place the two meet.
+const TOKEN_DECIMALS: u32 = 18;
+
 impl PaymentService {
     pub async fn new(
         config: Config,
@@ -241,10 +248,29 @@ impl PaymentService {
         Ok(())
     }
 
+    /// Convert a whole-token amount into base units (wei).
+    ///
+    /// Amounts travel through the API as whole tokens (`0.05` means five
+    /// hundredths of a token); every on-chain value and every bound in
+    /// `PaymentConfig` is denominated in wei. This is the conversion between
+    /// the two, and it must scale by 10^[`TOKEN_DECIMALS`].
+    ///
+    /// Sub-wei dust is **truncated, not rounded**: a payout must never exceed
+    /// what was asked for, and rounding up would mint value out of precision.
     fn to_wei(amount: &Decimal) -> PaymentResult<U256> {
-        // Amounts are stored as whole-token decimals; assume 18 decimals.
-        let scaled = amount.round_dp(0).to_string();
-        U256::from_dec_str(&scaled)
+        if amount.is_sign_negative() {
+            return Err(PaymentError::ValidationError(format!(
+                "amount must not be negative: {amount}"
+            )));
+        }
+
+        let scale = Decimal::from(10u64.pow(TOKEN_DECIMALS));
+        let scaled = amount.checked_mul(scale).ok_or_else(|| {
+            PaymentError::ValidationError(format!("amount too large to represent: {amount}"))
+        })?;
+
+        // trunc() discards anything below one wei.
+        U256::from_dec_str(&scaled.trunc().to_string())
             .map_err(|e| PaymentError::ValidationError(format!("invalid amount: {e}")))
     }
 
@@ -553,5 +579,97 @@ impl PaymentService {
     #[allow(dead_code)]
     fn redis(&self) -> ConnectionManager {
         self.redis_conn.clone()
+    }
+}
+
+#[cfg(test)]
+mod money_tests {
+    use super::*;
+    use std::str::FromStr;
+
+    fn wei(d: &str) -> U256 {
+        PaymentService::to_wei(&Decimal::from_str(d).unwrap()).expect("valid amount")
+    }
+
+    /// One whole token is 10^18 wei. This is the invariant the original
+    /// implementation violated: it rounded the token amount to an integer and
+    /// used that as wei, so every payout was 10^18 times too small.
+    #[test]
+    fn one_token_is_ten_to_the_eighteen_wei() {
+        assert_eq!(wei("1"), U256::from_dec_str("1000000000000000000").unwrap());
+    }
+
+    /// Regression: the README's own example bounty is 0.05 tokens. Under the
+    /// old rounding it became 0 wei -- a winner would have been paid nothing,
+    /// successfully, with a transaction hash to prove it.
+    #[test]
+    fn fractional_amounts_do_not_collapse_to_zero() {
+        assert_eq!(wei("0.05"), U256::from_dec_str("50000000000000000").unwrap());
+        assert_eq!(wei("0.5"), U256::from_dec_str("500000000000000000").unwrap());
+        assert!(!wei("0.000001").is_zero(), "a micro-token must be non-zero in wei");
+    }
+
+    /// Values must clear the configured minimum withdrawal, which is written
+    /// in wei (config.rs defaults to 1 token = 10^18). Before the fix a
+    /// 5-token withdrawal produced 5 wei and was rejected as below minimum.
+    #[test]
+    fn amounts_are_comparable_with_wei_denominated_config_bounds() {
+        let min_withdraw = U256::from_dec_str("1000000000000000000").unwrap(); // 1 token
+        assert!(wei("5") > min_withdraw, "5 tokens must exceed a 1-token minimum");
+        assert!(wei("1") == min_withdraw);
+        assert!(wei("0.5") < min_withdraw);
+    }
+
+    /// Scaling must be monotonic: more tokens is always more wei. A rounding
+    /// scheme that collapses distinct amounts to the same integer breaks
+    /// ordering, and with it every bound check built on it.
+    #[test]
+    fn conversion_is_strictly_monotonic() {
+        let ladder = ["0.001", "0.05", "0.5", "1", "1.5", "2", "10", "1000"];
+        for pair in ladder.windows(2) {
+            assert!(
+                wei(pair[0]) < wei(pair[1]),
+                "{} should convert to fewer wei than {}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    /// Sub-wei dust truncates. Paying out more than was asked for would mint
+    /// value from nothing, so the rounding direction is a safety property,
+    /// not a preference.
+    #[test]
+    fn sub_wei_dust_truncates_and_never_rounds_up() {
+        // 1 wei + a half wei of dust stays 1 wei.
+        let amount = Decimal::from_str("0.0000000000000000015").unwrap();
+        assert_eq!(
+            PaymentService::to_wei(&amount).unwrap(),
+            U256::from(1u64),
+            "dust below one wei must be discarded, not rounded up"
+        );
+    }
+
+    /// Zero is a legitimate amount to convert; it must not error.
+    #[test]
+    fn zero_converts_to_zero() {
+        assert_eq!(wei("0"), U256::zero());
+    }
+
+    /// Negative amounts are rejected explicitly rather than failing deep in
+    /// U256 parsing with an opaque message.
+    #[test]
+    fn negative_amounts_are_rejected() {
+        let err = PaymentService::to_wei(&Decimal::from_str("-1").unwrap());
+        assert!(err.is_err(), "a negative payout must never convert");
+    }
+
+    /// An amount too large to scale must fail cleanly instead of panicking
+    /// inside Decimal multiplication.
+    #[test]
+    fn oversized_amounts_fail_cleanly() {
+        let huge = Decimal::MAX;
+        let result = PaymentService::to_wei(&huge);
+        assert!(result.is_err(), "overflow must be reported, not panic");
     }
 }

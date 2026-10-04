@@ -1,8 +1,11 @@
+#[cfg(feature = "redis")]
 use anyhow::{anyhow, Result};
+#[cfg(feature = "redis")]
 use redis::AsyncCommands;
 use serde::Serialize;
 use tracing::{error, info};
 
+#[cfg(feature = "redis")]
 use super::event_types::VerdyxEvent;
 
 /// Redis Pub/Sub channel prefix for events

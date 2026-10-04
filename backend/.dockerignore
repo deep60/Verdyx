@@ -1,0 +1,18 @@
+# Build context for every backend service image is ./backend (see
+# docker-compose.yml), so Docker reads THIS file, not the repo-root
+# .dockerignore. Without it the whole target/ directory is uploaded to the
+# daemon on every build -- 16GB on a warm local checkout. CI is unaffected
+# (fresh checkout, no target/), but local builds are effectively unusable.
+target/
+**/target/
+**/*.rs.bk
+
+# Never bake secrets into an image layer.
+.env
+.env.*
+!.env.example
+
+# Not needed at build time.
+**/Dockerfile
+.dockerignore
+*.md

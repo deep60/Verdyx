@@ -1,0 +1,11 @@
+[package]
+name = "verdyx-proptest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proptest = "1.0"
+
+[profile.test]
+opt-level = 3
+debug = true
