@@ -38,7 +38,7 @@ mime = "0.3"  # For MIME parsing
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "chrono", "uuid", "migrate"] }
 redis = { version = "0.24", features = ["aio", "tokio-comp"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "catch-panic"] }
-rand = "0.10"  # For nonce generation
+rand = "0.8"  # For nonce generation
 hex = "0.4"  # For hex conversions
 # S3/MinIO storage
 aws-sdk-s3 = "1.0"
