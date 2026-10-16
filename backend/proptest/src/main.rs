@@ -443,3 +443,7 @@ mod regression_tests {
         assert_eq!(r2, 550);
     }
 }
+
+fn main() {
+    println!("Run proptests with: cargo test -p verdyx-proptest");
+}

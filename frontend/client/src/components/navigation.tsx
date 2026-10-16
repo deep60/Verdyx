@@ -51,7 +51,7 @@ export function Navigation() {
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-brand text-white shadow-[0_6px_18px_-6px_hsl(var(--brand-from)/0.7)] transition-transform group-hover:scale-105">
                 <Shield className="h-5 w-5" />
               </span>
-              <span className="text-2xl font-bold font-display tracking-tight text-foreground">
+              <span className="text-[1.7rem] font-extrabold font-display tracking-[-0.06em] text-foreground">
                 Verdyx
               </span>
             </div>

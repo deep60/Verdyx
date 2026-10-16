@@ -2,13 +2,17 @@
 //!
 //! Provides centralized observability setup for all services
 
+#[cfg(feature = "logging")]
 pub mod logging;
 pub mod metrics;
+#[cfg(feature = "otel")]
 pub mod otel;
 pub mod tracing;
 
+#[cfg(feature = "logging")]
 pub use logging::*;
 pub use metrics::*;
+#[cfg(feature = "otel")]
 pub use otel::*;
 pub use tracing::*;
 

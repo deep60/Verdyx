@@ -466,21 +466,22 @@ impl RedisService {
         Ok(item)
     }
 
-    /// Queue item for analysis with priority
-    /// Uses Redis sorted set for priority queue (higher priority = higher score)
-    pub async fn queue_for_analysis(&self, analysis_id: uuid::Uuid, priority: i32) -> Result<()> {
-        let key = "queue:analysis";
-        let member = analysis_id.to_string();
-
+    /// Queue a submission for the analysis-engine worker.
+    ///
+    /// The worker blocks on the Redis list `analysis_queue` (`BRPOPLPUSH`).
+    /// Do not write `queue:analysis` (a sorted set) or `queue:analysis_queue`.
+    /// The value must be the `submissions.id`, not a separate file id.
+    /// `priority` is recorded in logs only; the worker is FIFO.
+    pub async fn queue_for_analysis(&self, submission_id: uuid::Uuid, priority: i32) -> Result<()> {
         let mut conn = self.connection_pool.clone();
         let _: () = conn
-            .zadd(key, &member, priority as f64)
+            .lpush("analysis_queue", submission_id.to_string())
             .await
             .context("Failed to queue analysis")?;
 
         info!(
-            "Queued analysis: {} with priority: {}",
-            analysis_id, priority
+            "Queued submission {} on analysis_queue (priority hint {})",
+            submission_id, priority
         );
         Ok(())
     }

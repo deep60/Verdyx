@@ -15,6 +15,7 @@ import { initCsrfToken } from "@/lib/csrf";
 // Eagerly load the landing page for a fast first paint; lazy-load the rest so
 // heavy dependencies (charts, pdf/xlsx export) stay out of the initial bundle.
 import Home from "@/pages/home";
+import { Scene3D } from "@/components/animations/Scene3D";
 
 const Dashboard = lazy(() => import("@/pages/dashboard"));
 const Marketplace = lazy(() => import("@/pages/marketplace"));
@@ -78,8 +79,13 @@ function App() {
           <AuthProvider>
             <NotificationProvider>
               <TooltipProvider>
-                <Toaster />
-                <Router />
+                <div className="relative min-h-screen stage-3d">
+                  <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+                    <Scene3D />
+                  </div>
+                  <Toaster />
+                  <Router />
+                </div>
               </TooltipProvider>
             </NotificationProvider>
           </AuthProvider>

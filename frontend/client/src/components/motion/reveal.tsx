@@ -34,7 +34,7 @@ export function Reveal({
     <Tag
       ref={ref}
       className={cn(
-        "transition-[opacity,transform] duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform motion-reduce:transition-none",
+        "transition-[opacity,transform] duration-650 ease-expo-out will-change-transform motion-reduce:transition-none",
         className
       )}
       style={{

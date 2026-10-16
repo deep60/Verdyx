@@ -17,8 +17,12 @@ import { SEO } from "@/components/seo";
 import type { ApiSubmission } from "@/lib/api-types";
 
 export default function Profile() {
-  const { user, connectWallet, disconnectWallet } = useAuth();
+  const { user, connectWallet, disconnectWallet, updateProfile, deleteAccount, logout } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
+  const [username, setUsername] = useState(user?.username ?? "");
+  const [email, setEmail] = useState(user?.email ?? "");
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch user submissions
   const { data: submissions } = useQuery<ApiSubmission[]>({
@@ -95,7 +99,7 @@ export default function Profile() {
                       <TrendingUp className="w-4 h-4 mr-2" />
                       Accuracy
                     </span>
-                    <span className="font-semibold text-primary">95.2%</span>
+                    <span className="font-semibold text-muted-foreground">—</span>
                   </div>
                 </div>
                 <Separator />
@@ -267,9 +271,10 @@ export default function Profile() {
                         <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                         <Input
                           id="settings-username"
-                          defaultValue={user.username}
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
                           className="pl-10"
-                          disabled={!isEditing}
+                          disabled={!isEditing || saving}
                         />
                       </div>
                     </div>
@@ -281,9 +286,10 @@ export default function Profile() {
                         <Input
                           id="settings-email"
                           type="email"
-                          defaultValue={user.email}
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
                           className="pl-10"
-                          disabled={!isEditing}
+                          disabled={!isEditing || saving}
                         />
                       </div>
                     </div>
@@ -291,8 +297,24 @@ export default function Profile() {
                     <div className="flex gap-3 pt-4">
                       {isEditing ? (
                         <>
-                          <Button onClick={() => setIsEditing(false)} className="flex-1">
-                            Save Changes
+                          <Button
+                            onClick={async () => {
+                              setSaving(true);
+                              try {
+                                await updateProfile({ username, email });
+                                setIsEditing(false);
+                              } catch (err) {
+                                setUsername(user.username);
+                                setEmail(user.email);
+                                alert(err instanceof Error ? err.message : "Could not save profile");
+                              } finally {
+                                setSaving(false);
+                              }
+                            }}
+                            className="flex-1"
+                            disabled={saving}
+                          >
+                            {saving ? "Saving..." : "Save Changes"}
                           </Button>
                           <Button
                             variant="outline"
@@ -317,8 +339,25 @@ export default function Profile() {
                     <CardDescription>Irreversible account actions</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <Button variant="destructive" className="w-full">
-                      Delete Account
+                    <Button
+                      variant="destructive"
+                      className="w-full"
+                      disabled={deleting}
+                      onClick={async () => {
+                        if (!window.confirm("Delete this account? This cannot be undone.")) {
+                          return;
+                        }
+                        setDeleting(true);
+                        try {
+                          await deleteAccount();
+                          logout();
+                        } catch (err) {
+                          alert(err instanceof Error ? err.message : "Could not delete account");
+                          setDeleting(false);
+                        }
+                      }}
+                    >
+                      {deleting ? "Deleting..." : "Delete Account"}
                     </Button>
                   </CardContent>
                 </Card>

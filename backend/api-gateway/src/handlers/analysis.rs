@@ -185,7 +185,7 @@ pub async fn get_analysis_stats(
     .unwrap_or(0);
 
     let total_engines: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM security_engines WHERE is_active = true")
+        sqlx::query_scalar("SELECT COUNT(*) FROM engines WHERE is_active = true")
             .fetch_one(state.db.pool())
             .await
             .unwrap_or(0);

@@ -133,6 +133,7 @@ fn user_routes() -> Router<AppState> {
     Router::new()
         .route("/me", get(user::get_current_user))
         .route("/me", put(user::update_profile))
+        .route("/me", delete(user::delete_account))
         .route("/me/stats", get(user::get_user_stats))
         .route("/{user_id}", get(user::get_user_by_id))
         .route("/{user_id}/stats", get(user::get_user_stats_by_id))

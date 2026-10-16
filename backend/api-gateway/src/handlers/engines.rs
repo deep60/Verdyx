@@ -44,8 +44,11 @@ pub async fn list_engines(
     // Simple query – if the table doesn't exist yet this returns an empty vec via unwrap_or_default
     let engines = sqlx::query_as::<_, EngineSummary>(
         r#"SELECT id, name, engine_type, description,
-                  accuracy_rate, total_analyses, is_active, created_at
-           FROM security_engines
+                  accuracy_rate::FLOAT8 as accuracy_rate,
+                  total_analyses::BIGINT as total_analyses,
+                  COALESCE(is_active, true) as is_active,
+                  created_at
+           FROM engines
            WHERE is_active = true
            ORDER BY created_at DESC
            LIMIT $1 OFFSET $2"#,
@@ -68,8 +71,11 @@ pub async fn get_engine(
 ) -> Result<Json<EngineSummary>, StatusCode> {
     let engine = sqlx::query_as::<_, EngineSummary>(
         r#"SELECT id, name, engine_type, description,
-                  accuracy_rate, total_analyses, is_active, created_at
-           FROM security_engines
+                  accuracy_rate::FLOAT8 as accuracy_rate,
+                  total_analyses::BIGINT as total_analyses,
+                  COALESCE(is_active, true) as is_active,
+                  created_at
+           FROM engines
            WHERE id = $1"#,
     )
     .bind(engine_id)

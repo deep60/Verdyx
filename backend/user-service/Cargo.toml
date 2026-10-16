@@ -71,8 +71,7 @@ aws-config = "1.0"
 # Async trait support
 async-trait = "0.1"
 
-# Shared module
-shared = { path = "../shared", features = ["axum-mw", "otel", "validation", "idempotency", "circuit-breaker"] }
+shared = { path = "../shared", features = ["axum-mw", "redis"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

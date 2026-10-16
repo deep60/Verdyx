@@ -215,6 +215,32 @@ pub enum AnalysisStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnavailableEngineInfo {
+    pub engine_name: String,
+    pub engine_type: EngineType,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConsensusVoteDistribution {
+    pub malicious: usize,
+    pub benign: usize,
+    pub suspicious: usize,
+    pub unknown: usize,
+    pub total_participating: usize,
+    pub total_engines: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerdictAuditRecord {
+    pub verdict: ThreatVerdict,
+    pub confidence: f32,
+    pub reason: String,
+    pub changed_by: String,
+    pub changed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     pub analysis_id: Uuid,
     pub submission_id: Uuid,
@@ -236,6 +262,18 @@ pub struct AnalysisResult {
     pub error_message: Option<String>,
     pub analysis_cost: Option<f64>,
     pub engine_reputations: HashMap<String, f32>,
+    #[serde(default)]
+    pub participating_engines: Vec<String>,
+    #[serde(default)]
+    pub unavailable_engines: Vec<UnavailableEngineInfo>,
+    #[serde(default)]
+    pub vote_distribution: ConsensusVoteDistribution,
+    #[serde(default)]
+    pub agreement_score: f32,
+    #[serde(default)]
+    pub consensus_explanation: String,
+    #[serde(default)]
+    pub verdict_history: Vec<VerdictAuditRecord>,
 }
 
 impl AnalysisResult {
@@ -261,6 +299,12 @@ impl AnalysisResult {
             error_message: None,
             analysis_cost: None,
             engine_reputations: HashMap::new(),
+            participating_engines: Vec::new(),
+            unavailable_engines: Vec::new(),
+            vote_distribution: ConsensusVoteDistribution::default(),
+            agreement_score: 0.0,
+            consensus_explanation: "Analysis initialized; awaiting engine detections.".to_string(),
+            verdict_history: Vec::new(),
         }
     }
 
@@ -269,42 +313,134 @@ impl AnalysisResult {
         self.update_consensus();
     }
 
-    fn update_consensus(&mut self) {
+    pub fn update_consensus(&mut self) {
         if self.detections.is_empty() {
+            self.consensus_verdict = ThreatVerdict::Unknown;
+            self.consensus_confidence = 0.0;
+            self.agreement_score = 0.0;
+            self.consensus_explanation = "No detections recorded yet.".to_string();
             return;
         }
 
         let mut malicious_count = 0;
         let mut benign_count = 0;
         let mut suspicious_count = 0;
+        let mut unknown_count = 0;
         let mut total_confidence = 0.0;
         let mut max_severity = SeverityLevel::Info;
 
+        let mut participating = Vec::new();
+        let mut unavailable = Vec::new();
+
         for detection in &self.detections {
-            total_confidence += detection.confidence;
+            let is_unavailable = detection.error_message.is_some()
+                || detection.metadata.get("status").and_then(|v| v.as_str()) == Some("unavailable")
+                || matches!(detection.verdict, ThreatVerdict::Unknown);
 
-            match detection.verdict {
-                ThreatVerdict::Malicious => malicious_count += 1,
-                ThreatVerdict::Benign => benign_count += 1,
-                ThreatVerdict::Suspicious => suspicious_count += 1,
-                ThreatVerdict::Unknown => {}
+            if is_unavailable {
+                unknown_count += 1;
+                let reason = detection
+                    .error_message
+                    .clone()
+                    .unwrap_or_else(|| "Engine unavailable or did not produce a verdict".to_string());
+
+                unavailable.push(UnavailableEngineInfo {
+                    engine_name: detection.engine_name.clone(),
+                    engine_type: detection.engine_type.clone(),
+                    reason,
+                });
+            } else {
+                participating.push(detection.engine_name.clone());
+                total_confidence += detection.confidence;
+
+                match detection.verdict {
+                    ThreatVerdict::Malicious => malicious_count += 1,
+                    ThreatVerdict::Benign => benign_count += 1,
+                    ThreatVerdict::Suspicious => suspicious_count += 1,
+                    ThreatVerdict::Unknown => {}
+                }
+
+                max_severity = max_severity.max(detection.severity.clone());
             }
-
-            max_severity = max_severity.max(detection.severity.clone());
         }
 
-        self.consensus_confidence = total_confidence / self.detections.len() as f32;
+        let total_participating = malicious_count + benign_count + suspicious_count;
+        let total_engines = self.detections.len();
+
+        self.participating_engines = participating.clone();
+        self.unavailable_engines = unavailable.clone();
+        self.vote_distribution = ConsensusVoteDistribution {
+            malicious: malicious_count,
+            benign: benign_count,
+            suspicious: suspicious_count,
+            unknown: unknown_count,
+            total_participating,
+            total_engines,
+        };
         self.consensus_severity = max_severity;
 
-        // Simple majority voting for consensus
-        if malicious_count > benign_count && malicious_count > suspicious_count {
-            self.consensus_verdict = ThreatVerdict::Malicious;
-        } else if benign_count > malicious_count && benign_count > suspicious_count {
-            self.consensus_verdict = ThreatVerdict::Benign;
-        } else if suspicious_count > 0 {
-            self.consensus_verdict = ThreatVerdict::Suspicious;
-        } else {
+        if total_participating == 0 {
             self.consensus_verdict = ThreatVerdict::Unknown;
+            self.consensus_confidence = 0.0;
+            self.agreement_score = 0.0;
+            self.consensus_explanation = format!(
+                "Consensus verdict is Unknown. All {} engines were unavailable or reported errors.",
+                total_engines
+            );
+        } else {
+            // Confidence is calculated strictly across active participating engines
+            self.consensus_confidence = (total_confidence / total_participating as f32).clamp(0.0, 1.0);
+
+            // Verdict resolution
+            if malicious_count > benign_count && malicious_count > suspicious_count {
+                self.consensus_verdict = ThreatVerdict::Malicious;
+            } else if benign_count > malicious_count && benign_count > suspicious_count {
+                self.consensus_verdict = ThreatVerdict::Benign;
+            } else if suspicious_count > 0 {
+                self.consensus_verdict = ThreatVerdict::Suspicious;
+            } else {
+                self.consensus_verdict = ThreatVerdict::Unknown;
+            }
+
+            let max_votes = malicious_count.max(benign_count).max(suspicious_count);
+            self.agreement_score = (max_votes as f32 / total_participating as f32) * 100.0;
+
+            let unavailable_note = if !unavailable.is_empty() {
+                let unavail_names: Vec<String> = unavailable.iter().map(|u| u.engine_name.clone()).collect();
+                format!(
+                    " {} engine(s) ({}) were unavailable and excluded from consensus.",
+                    unavailable.len(),
+                    unavail_names.join(", ")
+                )
+            } else {
+                String::new()
+            };
+
+            self.consensus_explanation = format!(
+                "Verdict: {:?} with {:.1}% agreement ({}/{} active engines: {}). Weighted confidence index: {:.2}.{}",
+                self.consensus_verdict,
+                self.agreement_score,
+                max_votes,
+                total_participating,
+                participating.join(", "),
+                self.consensus_confidence,
+                unavailable_note
+            );
+        }
+
+        // Record auditable history entry if verdict differs or history is empty
+        let needs_audit = self.verdict_history.last().map_or(true, |last| {
+            last.verdict != self.consensus_verdict || (last.confidence - self.consensus_confidence).abs() > 0.001
+        });
+
+        if needs_audit {
+            self.verdict_history.push(VerdictAuditRecord {
+                verdict: self.consensus_verdict.clone(),
+                confidence: self.consensus_confidence,
+                reason: self.consensus_explanation.clone(),
+                changed_by: "engine_consensus_aggregator".to_string(),
+                changed_at: Utc::now(),
+            });
         }
     }
 

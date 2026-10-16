@@ -128,6 +128,11 @@ impl SignatureMatcher {
         })
     }
 
+    /// Total number of loaded signatures across all categories
+    pub fn signature_count(&self) -> usize {
+        self.signatures.values().map(|v| v.len()).sum()
+    }
+
     /// Load signatures from directory
     async fn load_signatures(dir: &str) -> Result<HashMap<SignatureType, Vec<Signature>>> {
         let path = Path::new(dir);

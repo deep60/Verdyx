@@ -9,7 +9,13 @@ which applies any pending migrations against its dedicated database
 
 There is no monolithic schema. Files under `database/postgres/migrations/`
 and `database/schema.sql` are **legacy reference only** (see
-`database/postgres/migrations/README.LEGACY.md`).
+`database/postgres/migrations/README.LEGACY.md`). Do not add new files there
+and do not point a service `DATABASE_URL` at a database that was built only
+from those files.
+
+Table purpose, sensitive columns, and who may read them are in
+`docs/database/data-model.md`. Backup, restore, and the indefinite retention
+rule are in `docs/database/retention-and-backup.md`.
 
 ## Why we don't ship reversible "down" migrations
 

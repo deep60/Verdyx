@@ -11,6 +11,12 @@ use crate::storage::S3Client;
 
 /// Redis queue key for analysis tasks
 const ANALYSIS_QUEUE_KEY: &str = "analysis_queue";
+/// Jobs popped but not yet acknowledged. Recovered back onto the queue at startup.
+const ANALYSIS_PROCESSING_KEY: &str = "analysis_queue:processing";
+/// Messages that cannot be processed (bad payload or exhausted retries).
+const ANALYSIS_DEAD_LETTER_KEY: &str = "analysis_queue:dead";
+const ANALYSIS_ATTEMPTS_KEY: &str = "analysis_queue:attempts";
+const MAX_ATTEMPTS: i32 = 3;
 
 /// WebSocket event channel for real-time updates
 const WS_CHANNEL_ANALYSIS_UPDATED: &str = "events:analysis_updated";
@@ -38,13 +44,15 @@ pub async fn start_analysis_worker(
     analysis_engine: Arc<Mutex<AnalysisEngine>>,
 ) -> Result<()> {
     info!("Starting analysis queue consumer worker");
+    if let Err(e) = recover_processing(&redis_client).await {
+        error!("Failed to recover in-flight analysis jobs: {}", e);
+    }
 
     loop {
-        // Step 1: Listen to Redis analysis queue (blocking pop)
-        let submission_id = match pop_from_queue(&redis_client).await {
-            Ok(Some(id)) => id,
+        // Reliable pop: the id stays on the processing list until ack.
+        let popped = match pop_from_queue(&redis_client).await {
+            Ok(Some(value)) => value,
             Ok(None) => {
-                // Timeout, retry
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 continue;
             }
@@ -55,9 +63,21 @@ pub async fn start_analysis_worker(
             }
         };
 
+        let submission_id = match Uuid::parse_str(popped.trim()) {
+            Ok(id) => id,
+            Err(e) => {
+                // Poison payload. Acknowledge it off the processing list so it
+                // cannot block later jobs, and keep the raw value for diagnosis.
+                error!("Discarding poison queue message: {e}");
+                let _ = dead_letter(&redis_client, &popped, "invalid submission id").await;
+                continue;
+            }
+        };
+
+        let _ = drain_artifact_deletions(&redis_client, &s3_client).await;
+
         info!("Received submission for analysis: {}", submission_id);
 
-        // Process the submission
         if let Err(e) = process_submission(
             submission_id,
             &redis_client,
@@ -68,41 +88,149 @@ pub async fn start_analysis_worker(
         .await
         {
             error!("Failed to process submission {}: {}", submission_id, e);
-
-            // Update submission status to failed
-            if let Err(update_err) =
-                update_submission_status(&db_pool, submission_id, "failed").await
+            if let Err(retry_err) = nack(&redis_client, &db_pool, submission_id, &e.to_string()).await
             {
                 error!(
-                    "Failed to update submission {} status to failed: {}",
-                    submission_id, update_err
+                    "Failed to record retry for submission {}: {}",
+                    submission_id, retry_err
                 );
             }
+        } else if let Err(ack_err) = ack(&redis_client, submission_id).await {
+            error!(
+                "Analysis for {} completed but was not acknowledged: {}",
+                submission_id, ack_err
+            );
         }
     }
 }
 
-/// Pop a submission ID from the Redis queue
-async fn pop_from_queue(redis_client: &redis::Client) -> Result<Option<Uuid>> {
+/// Move jobs left on the processing list by a crashed worker back onto the queue.
+async fn recover_processing(redis_client: &redis::Client) -> Result<()> {
+    let mut conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| anyhow!("Failed to connect to Redis: {e}"))?;
+    let mut recovered = 0u32;
+    loop {
+        let value: Option<String> = conn
+            .rpoplpush(ANALYSIS_PROCESSING_KEY, ANALYSIS_QUEUE_KEY)
+            .await
+            .map_err(|e| anyhow!("Failed to recover processing list: {e}"))?;
+        if value.is_none() {
+            break;
+        }
+        recovered += 1;
+    }
+    if recovered > 0 {
+        warn!("Requeued {recovered} analysis job(s) left in processing");
+    }
+    Ok(())
+}
+
+/// Blocking pop that also records the job as in-flight.
+async fn pop_from_queue(redis_client: &redis::Client) -> Result<Option<String>> {
     let mut conn = redis_client
         .get_multiplexed_async_connection()
         .await
         .map_err(|e| anyhow!("Failed to connect to Redis: {e}"))?;
 
-    // BRPOP with 5 second timeout
-    let result: Option<(String, String)> = conn
-        .brpop(ANALYSIS_QUEUE_KEY, 5.0)
+    let value: Option<String> = conn
+        .brpoplpush(ANALYSIS_QUEUE_KEY, ANALYSIS_PROCESSING_KEY, 5.0)
         .await
-        .map_err(|e| anyhow!("BRPOP failed: {e}"))?;
+        .map_err(|e| anyhow!("BRPOPLPUSH failed: {e}"))?;
+    Ok(value)
+}
 
-    match result {
-        Some((_key, value)) => {
-            let submission_id =
-                Uuid::parse_str(&value).map_err(|e| anyhow!("Invalid UUID in queue: {e}"))?;
-            Ok(Some(submission_id))
-        }
-        None => Ok(None), // Timeout
+async fn ack(redis_client: &redis::Client, submission_id: Uuid) -> Result<()> {
+    let mut conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| anyhow!("Failed to connect to Redis: {e}"))?;
+    let id = submission_id.to_string();
+    let _: i32 = conn
+        .lrem(ANALYSIS_PROCESSING_KEY, 1, &id)
+        .await
+        .map_err(|e| anyhow!("Failed to acknowledge job: {e}"))?;
+    let _: i32 = conn.hdel(ANALYSIS_ATTEMPTS_KEY, &id).await.unwrap_or(0);
+    Ok(())
+}
+
+/// Retry a failed job up to MAX_ATTEMPTS, then dead-letter it.
+/// The processing-list copy is always removed so one failure cannot stall the queue.
+async fn nack(
+    redis_client: &redis::Client,
+    db_pool: &PgPool,
+    submission_id: Uuid,
+    error: &str,
+) -> Result<()> {
+    let mut conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| anyhow!("Failed to connect to Redis: {e}"))?;
+    let id = submission_id.to_string();
+    let attempts: i32 = conn
+        .hincr(ANALYSIS_ATTEMPTS_KEY, &id, 1)
+        .await
+        .map_err(|e| anyhow!("Failed to record attempt: {e}"))?;
+    let _: i32 = conn
+        .lrem(ANALYSIS_PROCESSING_KEY, 1, &id)
+        .await
+        .unwrap_or(0);
+
+    let diagnostic = format!("attempt {attempts}/{MAX_ATTEMPTS}: {error}");
+    if attempts >= MAX_ATTEMPTS {
+        let _: i32 = conn
+            .lpush(ANALYSIS_DEAD_LETTER_KEY, &id)
+            .await
+            .unwrap_or(0);
+        record_job_status(db_pool, submission_id, "failed", &diagnostic).await?;
+        error!("Dead-lettered submission {id} after {attempts} attempts");
+    } else {
+        let _: i32 = conn.lpush(ANALYSIS_QUEUE_KEY, &id).await.unwrap_or(0);
+        record_job_status(db_pool, submission_id, "analyzing", &diagnostic).await?;
+        warn!("Requeued submission {id} ({diagnostic})");
     }
+    Ok(())
+}
+
+/// Delete object keys queued by explicit account or submission removal.
+/// A failed delete is dead-lettered so it cannot block the analysis queue.
+async fn drain_artifact_deletions(redis_client: &redis::Client, s3_client: &S3Client) -> Result<()> {
+    let mut conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| anyhow!("Failed to connect to Redis: {e}"))?;
+    for _ in 0..20 {
+        let key: Option<String> = conn
+            .lpop("artifact_deletions", None)
+            .await
+            .map_err(|e| anyhow!("Failed to pop artifact deletion: {e}"))?;
+        let Some(key) = key else { break };
+        if let Err(e) = s3_client.delete_file(&key).await {
+            warn!("Failed to delete artifact {key}: {e}");
+            let _: i32 = conn
+                .lpush("artifact_deletions:dead", format!("{e}: {key}"))
+                .await
+                .unwrap_or(0);
+        }
+    }
+    Ok(())
+}
+
+async fn dead_letter(redis_client: &redis::Client, raw: &str, reason: &str) -> Result<()> {
+    let mut conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| anyhow!("Failed to connect to Redis: {e}"))?;
+    let _: i32 = conn
+        .lrem(ANALYSIS_PROCESSING_KEY, 1, raw)
+        .await
+        .unwrap_or(0);
+    let _: i32 = conn
+        .lpush(ANALYSIS_DEAD_LETTER_KEY, format!("{reason}: {raw}"))
+        .await
+        .unwrap_or(0);
+    Ok(())
 }
 
 /// Process a single submission
@@ -141,10 +269,7 @@ async fn process_submission(
         .as_ref()
         .ok_or_else(|| anyhow!("Submission has no file_path"))?;
 
-    let file_data = s3_client
-        .download_file(file_path)
-        .await
-        .map_err(|e| anyhow!("Failed to download file from S3: {e}"))?;
+    let file_data = load_artifact(s3_client, file_path).await?;
 
     info!(
         "Downloaded file from S3: submission_id={}, size={} bytes",
@@ -192,8 +317,8 @@ async fn process_submission(
     )
     .await?;
 
-    // Update submission status to completed
-    update_submission_status(db_pool, submission_id, "completed").await?;
+    // Update submission status to completed and clear any retry diagnostic.
+    record_job_status(db_pool, submission_id, "completed", "").await?;
 
     // Publish WebSocket event: analysis completed
     publish_ws_event(
@@ -215,6 +340,22 @@ async fn process_submission(
     );
 
     Ok(())
+}
+
+/// Load the bytes the gateway stored. An absolute path that exists on disk
+/// is read directly. Otherwise `file_path` is a storage key for S3 or the
+/// local upload directory.
+async fn load_artifact(s3_client: &S3Client, file_path: &str) -> Result<Vec<u8>> {
+    let path = std::path::Path::new(file_path);
+    if path.is_file() {
+        return tokio::fs::read(path)
+            .await
+            .map_err(|e| anyhow!("Failed to read artifact {file_path}: {e}"));
+    }
+    s3_client
+        .download_file(file_path)
+        .await
+        .map_err(|e| anyhow!("Failed to download artifact {file_path}: {e}"))
 }
 
 /// Fetch submission record from database
@@ -258,35 +399,40 @@ async fn update_submission_status(
     Ok(())
 }
 
+/// Persist status plus a diagnostic the API can return in `metadata.last_error`.
+async fn record_job_status(
+    db_pool: &PgPool,
+    submission_id: Uuid,
+    status: &str,
+    diagnostic: &str,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE submissions
+        SET analysis_status = $1,
+            metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('last_error', $2::text),
+            updated_at = NOW()
+        WHERE id = $3
+        "#,
+    )
+    .bind(status)
+    .bind(diagnostic)
+    .bind(submission_id)
+    .execute(db_pool)
+    .await
+    .map_err(|e| anyhow!("Failed to record job status: {e}"))?;
+    Ok(())
+}
+
 /// Calculate final verdict from analysis result
 fn calculate_verdict(
     analysis_result: &crate::models::analysis_result::AnalysisResult,
 ) -> (bool, f64) {
     use crate::models::analysis_result::ThreatVerdict;
 
-    let mut malicious_count = 0;
-    let mut benign_count = 0;
-    let mut confidence_sum = 0.0;
-    let total_detections = analysis_result.detections.len() as f64;
-
-    if total_detections == 0.0 {
-        return (false, 0.0);
-    }
-
-    for detection in &analysis_result.detections {
-        confidence_sum += detection.confidence;
-
-        match detection.verdict {
-            ThreatVerdict::Malicious => malicious_count += 1,
-            ThreatVerdict::Benign => benign_count += 1,
-            _ => {}
-        }
-    }
-
-    let avg_confidence = confidence_sum / total_detections as f32;
-    let is_malicious = malicious_count > benign_count;
-
-    (is_malicious, avg_confidence as f64)
+    let is_malicious = analysis_result.consensus_verdict == ThreatVerdict::Malicious;
+    let confidence = (analysis_result.agreement_score * 100.0) as f64;
+    (is_malicious, confidence)
 }
 
 /// Store analysis results in database
@@ -297,23 +443,41 @@ async fn store_analysis_results(
     confidence_score: f64,
     analysis_result: &crate::models::analysis_result::AnalysisResult,
 ) -> Result<()> {
-    // Update submission with final results
+    let consensus_meta = serde_json::json!({
+        "consensus_explanation": analysis_result.consensus_explanation,
+        "agreement_score": analysis_result.agreement_score,
+        "participating_engines": analysis_result.participating_engines,
+        "unavailable_engines": analysis_result.unavailable_engines,
+        "vote_distribution": analysis_result.vote_distribution,
+        "verdict_history": analysis_result.verdict_history,
+    });
+
+    // Update submission with final results and explainability metadata
     sqlx::query(
         r#"
         UPDATE submissions
         SET
             is_malicious = $1,
             confidence_score = $2,
+            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb,
             updated_at = NOW()
-        WHERE id = $3
+        WHERE id = $4
         "#,
     )
     .bind(is_malicious)
     .bind(confidence_score)
+    .bind(consensus_meta)
     .bind(submission_id)
     .execute(db_pool)
     .await
     .map_err(|e| anyhow!("Failed to store analysis results: {e}"))?;
+
+    // Replace any detections from a previous attempt so a retry cannot
+    // insert a second set of result rows for the same submission.
+    let _ = sqlx::query("DELETE FROM analysis_results WHERE submission_id = $1")
+        .bind(submission_id)
+        .execute(db_pool)
+        .await;
 
     // Store individual detection results in analysis_results table
     for detection in &analysis_result.detections {

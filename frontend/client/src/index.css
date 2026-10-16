@@ -76,10 +76,10 @@
     --sidebar-border: 250 22% 88%;
     --sidebar-ring: 256 84% 58%;
 
-    --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
-    --font-serif: Georgia, serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+    --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: 'Syne', 'Manrope', system-ui, sans-serif;
+    --font-serif: 'Syne', Georgia, serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
   }
 
   /* Dark theme — the canonical Verdyx "Aurora" palette (deep indigo-black). */
@@ -223,6 +223,21 @@
   }
 
   /* Frosted panel using semantic surface tones */
+  .stage-3d {
+    perspective: 1400px;
+    transform-style: preserve-3d;
+  }
+
+  .tilt-card {
+    transform: translateZ(0) rotateX(8deg) rotateY(-10deg);
+    transform-style: preserve-3d;
+    transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1), border-color 300ms ease;
+  }
+
+  .tilt-card:hover {
+    transform: translateY(-8px) translateZ(28px) rotateX(2deg) rotateY(4deg);
+  }
+
   .glassmorphism {
     background: hsl(var(--card) / 0.55);
     backdrop-filter: blur(16px) saturate(140%);

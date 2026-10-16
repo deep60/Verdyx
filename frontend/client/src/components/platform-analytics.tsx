@@ -144,9 +144,9 @@ export function PlatformAnalytics() {
             <Shield className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats?.totalEngines || engines.length}</div>
+            <div className="text-2xl font-bold">{engines.filter(e => e.isActive !== false).length}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              {Math.round((engines.length || 0) * 0.95)} online
+              {engines.filter(e => e.isActive !== false).length} of {engines.length || stats?.totalEngines || 0} online
             </p>
           </CardContent>
         </Card>

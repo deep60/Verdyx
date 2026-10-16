@@ -8,6 +8,7 @@ pub mod email_scanner;
 /// - Emails (spam, phishing, malicious attachments)
 /// - Archives (zip, tar, rar, etc.)
 pub mod file_scanner;
+pub mod url_policy;
 pub mod url_scanner;
 
 use anyhow::Result;

@@ -26,7 +26,7 @@ impl RedisClient {
             .map_err(|e| RedisError::from((redis::ErrorKind::TypeError, "Serialization failed", e.to_string())))?;
 
         self.connection
-            .set_ex(key, serialized, expiry_seconds as usize)
+            .set_ex(key, serialized, expiry_seconds)
             .await
     }
 

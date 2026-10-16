@@ -65,7 +65,7 @@ sha2 = "0.10"
 hex = "0.4"
 
 # Shared module
-shared = { path = "../shared", features = ["axum-mw", "otel", "validation", "idempotency", "circuit-breaker"] }
+shared = { path = "../shared", features = ["axum-mw"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

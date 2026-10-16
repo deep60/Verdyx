@@ -233,6 +233,7 @@ impl ApiError {
     }
 }
 
+#[cfg(feature = "axum-mw")]
 impl axum::response::IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let status = axum::http::StatusCode::from_u16(self.status_code())
@@ -283,6 +284,7 @@ pub enum AppError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
     
+    #[cfg(feature = "redis")]
     #[error("Redis error: {0}")]
     Redis(#[from] redis::RedisError),
     
@@ -407,6 +409,7 @@ impl AppError {
             ).with_request_id(request_id.unwrap_or_default())
             .with_details(HashMap::from([("detail".into(), e.to_string().into())])),
             
+            #[cfg(feature = "redis")]
             AppError::Redis(e) => ApiError::new(
                 ErrorCode::InternalError,
                 "Cache error"
@@ -464,6 +467,7 @@ impl AppError {
                 BlockchainError::ProviderError(_) => ErrorCode::UpstreamError,
             },
             AppError::Database(_) => ErrorCode::InternalError,
+            #[cfg(feature = "redis")]
             AppError::Redis(_) => ErrorCode::InternalError,
             AppError::Upstream { .. } => ErrorCode::UpstreamError,
             AppError::CircuitOpen { .. } => ErrorCode::CircuitOpen,

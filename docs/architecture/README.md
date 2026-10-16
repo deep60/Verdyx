@@ -4,6 +4,7 @@ Verdyx uses a service-oriented backend with a Rust API gateway, Rust domain serv
 
 ## Files
 
+- `service-ownership.md`: Who owns each write, how services talk, and the submission trace.
 - `system-design.md`: Components, responsibilities, and boundaries.
 - `data-flow.md`: End-to-end request and event flows.
 - `diagrams/system-context.mmd`: Mermaid source for high-level context.

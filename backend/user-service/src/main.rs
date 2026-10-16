@@ -188,6 +188,8 @@ async fn main() -> Result<()> {
         // Profile endpoints
         .route("/api/v1/profile", get(handlers::profile::get_profile))
         .route("/api/v1/profile", put(handlers::profile::update_profile))
+        .route("/api/v1/account", put(handlers::profile::update_account))
+        .route("/api/v1/account", delete(handlers::profile::delete_account))
         .route(
             "/api/v1/profile/avatar",
             post(handlers::profile::upload_avatar),

@@ -6,24 +6,34 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { CloudUpload, Rocket } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 export function FileSubmissionForm() {
-  const [filename, setFilename] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [analysisType, setAnalysisType] = useState("full");
   const [bountyAmount, setBountyAmount] = useState("0.1");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState(false);
-  const [fileSize, setFileSize] = useState<number>(0);
   const [isDragging, setIsDragging] = useState(false);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const submitMutation = useMutation({
-    mutationFn: async (data: Record<string, unknown>) => {
-      const response = await apiRequest("POST", "/api/submissions/file", data);
+    mutationFn: async (body: FormData) => {
+      const headers: Record<string, string> = {};
+      const token = localStorage.getItem("token");
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch("/api/submissions/file", {
+        method: "POST",
+        headers,
+        body,
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || response.statusText);
+      }
       return response.json();
     },
     onSuccess: (data) => {
@@ -33,11 +43,10 @@ export function FileSubmissionForm() {
       });
       queryClient.invalidateQueries({ queryKey: ["/api/submissions"] });
       // Reset form
-      setFilename("");
+      setFile(null);
       setDescription("");
       setBountyAmount("0.1");
       setPriority(false);
-      setFileSize(0);
     },
     onError: () => {
       toast({
@@ -49,18 +58,11 @@ export function FileSubmissionForm() {
   });
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFilename(file.name);
-      setFileSize(file.size);
-    }
+    setFile(e.target.files?.[0] ?? null);
   };
 
-  const selectFile = (file: File | undefined) => {
-    if (file) {
-      setFilename(file.name);
-      setFileSize(file.size);
-    }
+  const selectFile = (next: File | undefined) => {
+    setFile(next ?? null);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
@@ -71,7 +73,7 @@ export function FileSubmissionForm() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!filename) {
+    if (!file) {
       toast({
         title: "No file selected",
         description: "Please select a file to analyze",
@@ -90,15 +92,13 @@ export function FileSubmissionForm() {
       return;
     }
 
-    submitMutation.mutate({
-      filename,
-      fileSize,
-      submissionType: "file",
-      analysisType,
-      bountyAmount: priority ? (parsedBounty + 0.05).toString() : parsedBounty.toString(),
-      priority,
-      description: description || null,
-    });
+    const body = new FormData();
+    body.append("file", file);
+    body.append("analysisType", analysisType);
+    body.append("bountyAmount", priority ? (parsedBounty + 0.05).toString() : parsedBounty.toString());
+    body.append("priority", String(priority));
+    if (description) body.append("description", description);
+    submitMutation.mutate(body);
   };
 
   return (
@@ -126,9 +126,9 @@ export function FileSubmissionForm() {
           accept=".exe,.dll,.apk,.zip,.pdf,.doc,.docx"
           data-testid="input-file"
         />
-        {filename && (
+        {file && (
           <p className="text-sm text-primary mt-2 truncate" data-testid="text-filename">
-            Selected: {filename}
+            Selected: {file.name} ({file.size} bytes)
           </p>
         )}
       </div>

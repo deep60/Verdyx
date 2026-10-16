@@ -1,0 +1,146 @@
+[
+  {
+    "id": "SIG-001",
+    "name": "EICAR-Standard-AV-Test-File",
+    "signature_type": "StringPattern",
+    "threat_family": "EICAR-Test",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Standard anti-malware test signature used by AV vendors to verify detection pipelines without risk.",
+    "metadata": {
+      "reference": "https://www.eicar.org/download-anti-malware-testfile/",
+      "category": "test-signature"
+    },
+    "enabled": true
+  },
+  {
+    "id": "SIG-002",
+    "name": "EICAR-SHA256-Hash",
+    "signature_type": "FileHash",
+    "threat_family": "EICAR-Test",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Hash",
+        "value": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Known SHA-256 hash of the exact 68-byte EICAR standard test file.",
+    "metadata": {
+      "reference": "https://www.eicar.org/",
+      "hash_type": "SHA256"
+    },
+    "enabled": true
+  },
+  {
+    "id": "SIG-003",
+    "name": "Ransomware-WannaCry-Indicator",
+    "signature_type": "StringPattern",
+    "threat_family": "WannaCry",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "WanaCrypt0r",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "String",
+        "value": "@Please_Read_Me@.txt",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Markers associated with the WannaCry / WanaCrypt0r ransomware strain.",
+    "metadata": {
+      "category": "ransomware",
+      "impact": "filesystem_encryption"
+    },
+    "enabled": true
+  },
+  {
+    "id": "SIG-004",
+    "name": "PowerShell-Encoded-Download-Cradle",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)powershell.*-(?:enc|encodedcommand)\\s+[A-Za-z0-9+/=]{20,}",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)DownloadString\\s*\\(\\s*['\"]https?://",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "PowerShell hidden/encoded execution cradle downloading remote second-stage payloads.",
+    "metadata": {
+      "category": "living_off_the_land",
+      "mitre_technique": "T1059.001"
+    },
+    "enabled": true
+  },
+  {
+    "id": "SIG-005",
+    "name": "Webshell-C99-R57-Header",
+    "signature_type": "StringPattern",
+    "threat_family": "Webshell",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "c99shell",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "String",
+        "value": "r57shell",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Signature identifying well-known legacy PHP webshell interfaces.",
+    "metadata": {
+      "category": "webshell",
+      "mitre_technique": "T1505.003"
+    },
+    "enabled": true
+  },
+  {
+    "id": "SIG-006",
+    "name": "Bash-Interactive-Reverse-Shell",
+    "signature_type": "StringPattern",
+    "threat_family": "ReverseShell",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "bash\\s+-i\\s+>&\\s+/dev/tcp/\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}/\\d+",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Classic interactive bash socket redirection to remote TCP host and port.",
+    "metadata": {
+      "category": "c2_channel",
+      "mitre_technique": "T1059.004"
+    },
+    "enabled": true
+  }
+]

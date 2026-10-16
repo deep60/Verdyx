@@ -116,43 +116,83 @@ pub async fn get_user_by_id(
     }))
 }
 
-/// Update current user profile
+fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": message,
+            "status": status.as_u16(),
+        })),
+    )
+}
+
+/// Update current user profile.
 ///
-/// PUT /api/v1/users/me — profile is owned by user-service.
-/// NOTE: user-service currently supports updating profile fields (e.g. `bio`);
-/// username/email changes are not yet exposed by user-service and are ignored.
+/// PUT /api/v1/users/me — identity and profile writes are owned by user-service.
+/// This handler validates the obvious shape, then forwards the change. It does
+/// not update the gateway's copy of `users`.
 pub async fn update_profile(
     State(state): State<AppState>,
     headers: HeaderMap,
     _claims: crate::middleware::auth::Claims,
     Json(payload): Json<UpdateProfileRequest>,
-) -> Result<Json<UserProfile>, StatusCode> {
+) -> Result<Json<UserProfile>, (StatusCode, Json<serde_json::Value>)> {
     if let Some(ref username) = payload.username {
-        if username.is_empty() {
-            return Err(StatusCode::BAD_REQUEST);
+        if !(3..=50).contains(&username.len())
+            || !username
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                "username must be 3-50 characters and contain only letters, numbers, or underscore",
+            ));
+        }
+    }
+    if let Some(ref email) = payload.email {
+        let ok = email.len() <= 255
+            && email.split_once('@').is_some_and(|(local, domain)| {
+                !local.is_empty() && domain.contains('.') && !domain.ends_with('.')
+            });
+        if !ok {
+            return Err(api_err(StatusCode::BAD_REQUEST, "email is not valid"));
         }
     }
 
-    let hm = bearer_map(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let hm = bearer_map(&headers).ok_or_else(|| {
+        api_err(StatusCode::UNAUTHORIZED, "missing or invalid bearer token")
+    })?;
 
-    // Forward the profile fields user-service owns.
-    if payload.bio.is_some() {
-        let body = serde_json::json!({ "bio": payload.bio });
-        let resp = state
-            .proxy
-            .put("user-service", "/api/v1/profile", body, Some(hm.clone()))
-            .await
-            .map_err(|_| StatusCode::BAD_GATEWAY)?;
-        if !resp.status().is_success() {
-            return Err(
-                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY)
-            );
-        }
-    }
-
-    let u = fetch_identity(&state, hm)
+    let body = serde_json::json!({
+        "username": payload.username,
+        "email": payload.email,
+        "bio": payload.bio,
+    });
+    let resp = state
+        .proxy
+        .put("user-service", "/api/v1/account", body, Some(hm.clone()))
         .await
-        .map_err(|c| StatusCode::from_u16(c).unwrap_or(StatusCode::BAD_GATEWAY))?;
+        .map_err(|_| api_err(StatusCode::BAD_GATEWAY, "user-service unavailable"))?;
+    if !resp.status().is_success() {
+        let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let text = resp.text().await.unwrap_or_default();
+        let message = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| {
+                v.get("error")
+                    .and_then(|e| e.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| "profile update failed".to_string());
+        return Err(api_err(status, &message));
+    }
+
+    let u = fetch_identity(&state, hm).await.map_err(|c| {
+        api_err(
+            StatusCode::from_u16(c).unwrap_or(StatusCode::BAD_GATEWAY),
+            "updated, but the new profile could not be read",
+        )
+    })?;
     Ok(Json(identity_to_profile(u)))
 }
 
@@ -314,35 +354,38 @@ pub struct Activity {
     pub timestamp: DateTime<Utc>,
 }
 
-/// Delete user account (soft-delete)
+/// Delete the current account.
 ///
 /// DELETE /api/v1/users/me
+///
+/// user-service owns the soft-delete and the audit row. The gateway does not
+/// write `users` itself — that copy was drifting from the identity service.
 pub async fn delete_account(
     State(state): State<AppState>,
-    claims: crate::middleware::auth::Claims,
-) -> Result<StatusCode, StatusCode> {
-    // Soft-delete: anonymise personal data but keep the record for audit
-    sqlx::query(
-        r#"
-        UPDATE users
-        SET email = CONCAT('deleted_', id::text, '@removed'),
-            username = CONCAT('deleted_', id::text),
-            password_hash = '',
-            wallet_address = NULL,
-            is_verified = false,
-            updated_at = NOW()
-        WHERE id = $1
-        "#,
-    )
-    .bind(claims.sub)
-    .execute(state.db.pool())
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to delete account: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
+    headers: HeaderMap,
+    _claims: crate::middleware::auth::Claims,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    let hm = bearer_map(&headers).ok_or_else(|| {
+        api_err(StatusCode::UNAUTHORIZED, "missing or invalid bearer token")
     })?;
-
-    Ok(StatusCode::NO_CONTENT)
+    let resp = state
+        .proxy
+        .delete("user-service", "/api/v1/account", Some(hm))
+        .await
+        .map_err(|_| api_err(StatusCode::BAD_GATEWAY, "user-service unavailable"))?;
+    if resp.status().is_success() {
+        // Explicit account removal also removes that user's uploads and queues
+        // their object keys for deletion. There is no time-based purge.
+        if let Ok(paths) = state.db.file_paths_for_user(_claims.sub).await {
+            for path in paths {
+                let _ = state.redis.push_to_queue("artifact_deletions", &path).await;
+            }
+        }
+        let _ = state.db.delete_file_submissions_for_user(_claims.sub).await;
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    Err(api_err(status, "account deletion failed"))
 }
 
 /// Get another user's stats by ID

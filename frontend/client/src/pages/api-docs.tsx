@@ -148,17 +148,16 @@ print(f"Threat score: {results.json()['confidence']}")`;
                 
                 <div className="space-y-4 mt-6">
                   <div className="flex items-center justify-between text-sm">
-                    <span>Rate Limit</span>
-                    <Badge variant="outline" className="font-mono">1000 req/hour</Badge>
+                    <span>Version</span>
+                    <Badge variant="outline" className="font-mono">v1</Badge>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span>Response Time</span>
-                    <Badge variant="outline" className="font-mono">{"< 500ms"}</Badge>
+                    <span>Auth</span>
+                    <Badge variant="outline" className="font-mono">Bearer JWT</Badge>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Uptime</span>
-                    <Badge className="bg-accent text-accent-foreground font-mono">99.9%</Badge>
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Latency and uptime are not published here. Use /api/v1/health and service /metrics.
+                  </p>
                 </div>
 
                 <Button className="w-full mt-6" data-testid="button-get-api-key">

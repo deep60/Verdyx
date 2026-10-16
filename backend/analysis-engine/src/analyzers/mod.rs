@@ -4,6 +4,33 @@ use std::collections::HashMap;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+use serde::{Deserialize, Serialize};
+
+/// Detailed status item for an individual analyzer engine
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineStatusItem {
+    pub id: String,
+    pub name: String,
+    pub engine_type: String,
+    pub is_optional: bool,
+    pub status: String, // "online" | "unavailable" | "disabled" | "degraded"
+    pub version: String,
+    pub details: String,
+    pub error: Option<String>,
+}
+
+/// Comprehensive engine health and capability report
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailedEngineReport {
+    pub engines: Vec<EngineStatusItem>,
+    pub total_engines: usize,
+    pub active_engines: usize,
+    pub unavailable_engines: usize,
+    pub default_engines: Vec<String>,
+    pub optional_engines: Vec<String>,
+}
 
 // Re-export all analyzer modules
 pub mod dynamic_analyzer;
@@ -77,6 +104,9 @@ pub mod yara_stub {
         pub fn get_stats(&self) -> HashMap<String, String> {
             HashMap::new()
         }
+        pub fn rule_count(&self) -> usize {
+            0
+        }
         pub fn reload_rules(&mut self) -> Result<()> {
             Ok(())
         }
@@ -104,6 +134,7 @@ pub mod clamav_stub {
     pub struct ClamAvAnalyzerConfig {
         pub host: String,
         pub port: u16,
+        pub address: String,
         pub enabled: bool,
     }
     impl Default for ClamAvAnalyzerConfig {
@@ -111,6 +142,7 @@ pub mod clamav_stub {
             Self {
                 host: "localhost".into(),
                 port: 3310,
+                address: "localhost:3310".into(),
                 enabled: false,
             }
         }
@@ -124,6 +156,11 @@ pub mod clamav_stub {
             Self { _config: config }
         }
         pub async fn scan_file(&self, _data: &[u8], _filename: &str) -> Result<DetectionResult> {
+            Err(anyhow::anyhow!(
+                "ClamAV not compiled (enable 'clamav' feature)"
+            ))
+        }
+        pub async fn ping(&self) -> Result<()> {
             Err(anyhow::anyhow!(
                 "ClamAV not compiled (enable 'clamav' feature)"
             ))
@@ -381,21 +418,39 @@ impl AnalysisEngine {
             match yara_res {
                 Ok(det) => detections.push(det),
                 Err(e) => {
-                    warn!("Yara analysis failed: {}", e);
+                    warn!("Yara analysis unavailable: {}", e);
+                    detections.push(Self::create_unavailable_detection(
+                        "YARA",
+                        if cfg!(feature = "yara-engine") { "libyara" } else { "not compiled" },
+                        EngineType::Yara,
+                        e.to_string(),
+                    ));
                     analysis_errors.push(format!("Yara: {e}"));
                 }
             }
             match clamav_res {
                 Ok(det) => detections.push(det),
                 Err(e) => {
-                    warn!("ClamAV analysis failed: {}", e);
+                    warn!("ClamAV analysis unavailable: {}", e);
+                    detections.push(Self::create_unavailable_detection(
+                        "ClamAV",
+                        if cfg!(feature = "clamav") { "clamd" } else { "not compiled" },
+                        EngineType::Yara,
+                        e.to_string(),
+                    ));
                     analysis_errors.push(format!("ClamAV: {e}"));
                 }
             }
             match ml_res {
                 Ok(det) => detections.push(det),
                 Err(e) => {
-                    warn!("ML analysis failed: {}", e);
+                    warn!("ML analysis unavailable: {}", e);
+                    detections.push(Self::create_unavailable_detection(
+                        "ML Engine",
+                        if cfg!(feature = "ml-engine") { "ort" } else { "not compiled" },
+                        EngineType::Ml,
+                        e.to_string(),
+                    ));
                     analysis_errors.push(format!("ML: {e}"));
                 }
             }
@@ -421,14 +476,38 @@ impl AnalysisEngine {
             if let Ok(det) = self.run_static_analysis(request).await {
                 detections.push(det);
             }
-            if let Ok(det) = self.run_yara_analysis(request).await {
-                detections.push(det);
+            match self.run_yara_analysis(request).await {
+                Ok(det) => detections.push(det),
+                Err(e) => {
+                    detections.push(Self::create_unavailable_detection(
+                        "YARA",
+                        if cfg!(feature = "yara-engine") { "libyara" } else { "not compiled" },
+                        EngineType::Yara,
+                        e.to_string(),
+                    ));
+                }
             }
-            if let Ok(det) = self.run_clamav_analysis(request).await {
-                detections.push(det);
+            match self.run_clamav_analysis(request).await {
+                Ok(det) => detections.push(det),
+                Err(e) => {
+                    detections.push(Self::create_unavailable_detection(
+                        "ClamAV",
+                        if cfg!(feature = "clamav") { "clamd" } else { "not compiled" },
+                        EngineType::Yara,
+                        e.to_string(),
+                    ));
+                }
             }
-            if let Ok(det) = self.run_ml_analysis(request).await {
-                detections.push(det);
+            match self.run_ml_analysis(request).await {
+                Ok(det) => detections.push(det),
+                Err(e) => {
+                    detections.push(Self::create_unavailable_detection(
+                        "ML Engine",
+                        if cfg!(feature = "ml-engine") { "ort" } else { "not compiled" },
+                        EngineType::Ml,
+                        e.to_string(),
+                    ));
+                }
             }
             if let Ok(det) = self.run_heuristic_analysis(request).await {
                 detections.push(det);
@@ -687,11 +766,179 @@ impl AnalysisEngine {
         info!("All analyzer caches cleared");
     }
 
-    /// Reload YARA rules
-    pub fn reload_yara_rules(&mut self) -> Result<()> {
-        self.yara_engine
-            .reload_rules()
-            .map_err(|e| anyhow!("Failed to reload YARA rules: {e}"))
+    /// Create an explicit DetectionResult representing an unavailable or disabled engine
+    pub fn create_unavailable_detection(
+        engine_name: &str,
+        engine_version: &str,
+        engine_type: EngineType,
+        error_msg: String,
+    ) -> DetectionResult {
+        let mut metadata = HashMap::new();
+        metadata.insert("status".to_string(), serde_json::json!("unavailable"));
+        metadata.insert("reason".to_string(), serde_json::json!(error_msg));
+
+        DetectionResult {
+            detection_id: Uuid::new_v4(),
+            engine_name: engine_name.to_string(),
+            engine_version: engine_version.to_string(),
+            engine_type,
+            verdict: ThreatVerdict::Unknown,
+            confidence: 0.0,
+            severity: SeverityLevel::Info,
+            categories: vec![],
+            metadata,
+            detected_at: Utc::now(),
+            processing_time_ms: 0,
+            error_message: Some(error_msg),
+        }
+    }
+
+    /// Produce a comprehensive live health and capability report for all analyzers
+    pub async fn get_engine_status_report(&self) -> DetailedEngineReport {
+        let mut engines = Vec::new();
+
+        // 1. Static Analyzer (Default)
+        engines.push(EngineStatusItem {
+            id: "static_analyzer".to_string(),
+            name: "Static Analyzer".to_string(),
+            engine_type: "static".to_string(),
+            is_optional: false,
+            status: "online".to_string(),
+            version: "goblin 0.10".to_string(),
+            details: "Executable header parsing (PE/ELF/Mach-O), section entropy, and string/IoC extraction".to_string(),
+            error: None,
+        });
+
+        // 2. Hash Analyzer (Default)
+        engines.push(EngineStatusItem {
+            id: "hash_analyzer".to_string(),
+            name: "Hash Analyzer".to_string(),
+            engine_type: "hash".to_string(),
+            is_optional: false,
+            status: "online".to_string(),
+            version: "1.0.0".to_string(),
+            details: "Cryptographic hash generation (SHA-256, MD5, SHA-1) with known-threat cache".to_string(),
+            error: None,
+        });
+
+        // 3. Heuristic Engine (Default)
+        engines.push(EngineStatusItem {
+            id: "heuristic_engine".to_string(),
+            name: "Heuristic Engine".to_string(),
+            engine_type: "heuristic".to_string(),
+            is_optional: false,
+            status: "online".to_string(),
+            version: self.heuristic_engine.version().to_string(),
+            details: "Behavioral heuristics pattern matcher with multi-category threat scoring".to_string(),
+            error: None,
+        });
+
+        // 4. Signature Matcher (Default)
+        let sig_count = self.signature_matcher.signature_count();
+        engines.push(EngineStatusItem {
+            id: "signature_matcher".to_string(),
+            name: "Signature Matcher".to_string(),
+            engine_type: "signature".to_string(),
+            is_optional: false,
+            status: "online".to_string(),
+            version: "1.0.0".to_string(),
+            details: format!("Pattern matching across {} active signature definitions", sig_count),
+            error: None,
+        });
+
+        // 5. YARA Engine (Optional)
+        let yara_compiled = cfg!(feature = "yara-engine");
+        let (yara_status, yara_version, yara_details, yara_error) = if yara_compiled {
+            let rule_count = self.yara_engine.rule_count();
+            if rule_count > 0 {
+                ("online", "libyara", format!("Operational with {} compiled rule set(s)", rule_count), None)
+            } else {
+                ("unavailable", "libyara", "No rule files loaded".to_string(), Some("No YARA rule files found in rules directory".to_string()))
+            }
+        } else {
+            ("unavailable", "not compiled", "Native YARA feature disabled".to_string(), Some("YARA engine not compiled (enable cargo feature 'yara-engine', requires libyara)".to_string()))
+        };
+        engines.push(EngineStatusItem {
+            id: "yara_engine".to_string(),
+            name: "YARA Engine".to_string(),
+            engine_type: "yara".to_string(),
+            is_optional: true,
+            status: yara_status.to_string(),
+            version: yara_version.to_string(),
+            details: yara_details,
+            error: yara_error,
+        });
+
+        // 6. ClamAV Scanner (Optional)
+        let clamav_compiled = cfg!(feature = "clamav");
+        let (clam_status, clam_version, clam_details, clam_error) = if clamav_compiled {
+            if !self.config.clamav_analyzer.enabled {
+                ("disabled", "clamd", "ClamAV analyzer disabled via configuration".to_string(), None)
+            } else {
+                match self.clamav_analyzer.ping().await {
+                    Ok(_) => ("online", "clamd", format!("ClamAV daemon reachable at {}", self.config.clamav_analyzer.address), None),
+                    Err(e) => ("unavailable", "clamd", format!("Cannot connect to ClamAV daemon at {}", self.config.clamav_analyzer.address), Some(e.to_string())),
+                }
+            }
+        } else {
+            ("unavailable", "not compiled", "Native ClamAV feature disabled".to_string(), Some("ClamAV engine not compiled (enable cargo feature 'clamav', requires running clamd)".to_string()))
+        };
+        engines.push(EngineStatusItem {
+            id: "clamav".to_string(),
+            name: "ClamAV Scanner".to_string(),
+            engine_type: "clamav".to_string(),
+            is_optional: true,
+            status: clam_status.to_string(),
+            version: clam_version.to_string(),
+            details: clam_details,
+            error: clam_error,
+        });
+
+        // 7. ML Engine (Optional)
+        let ml_compiled = cfg!(feature = "ml-engine");
+        let (ml_status, ml_version, ml_details, ml_error) = if ml_compiled {
+            if !self.config.ml_analyzer.enabled {
+                ("disabled", "ort", "ML analyzer disabled via configuration".to_string(), None)
+            } else if self.ml_analyzer.is_available() {
+                ("online", "ort 2.0.0-rc.13", "ONNX threat classifier and anomaly detector models loaded".to_string(), None)
+            } else {
+                ("unavailable", "ort 2.0.0-rc.13", "ONNX model artifacts missing or empty".to_string(), Some("ONNX model files (threat_classifier.onnx, anomaly_detector.onnx) are empty or not found in ml_models/".to_string()))
+            }
+        } else {
+            ("unavailable", "not compiled", "Native ML feature disabled".to_string(), Some("ML engine not compiled (enable cargo feature 'ml-engine', requires ONNX Runtime)".to_string()))
+        };
+        engines.push(EngineStatusItem {
+            id: "ml_engine".to_string(),
+            name: "Machine Learning Classifier".to_string(),
+            engine_type: "ml".to_string(),
+            is_optional: true,
+            status: ml_status.to_string(),
+            version: ml_version.to_string(),
+            details: ml_details,
+            error: ml_error,
+        });
+
+        let total_engines = engines.len();
+        let active_engines = engines.iter().filter(|e| e.status == "online").count();
+        let unavailable_engines = engines.iter().filter(|e| e.status == "unavailable").count();
+
+        DetailedEngineReport {
+            engines,
+            total_engines,
+            active_engines,
+            unavailable_engines,
+            default_engines: vec![
+                "static_analyzer".to_string(),
+                "hash_analyzer".to_string(),
+                "heuristic_engine".to_string(),
+                "signature_matcher".to_string(),
+            ],
+            optional_engines: vec![
+                "yara_engine".to_string(),
+                "clamav".to_string(),
+                "ml_engine".to_string(),
+            ],
+        }
     }
 }
 

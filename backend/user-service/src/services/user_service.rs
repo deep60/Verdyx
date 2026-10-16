@@ -239,6 +239,161 @@ impl UserService {
         })
     }
 
+    /// Change the signed-in user's username and/or email.
+    ///
+    /// Identity lives only in this service. Callers must not update `users`
+    /// elsewhere. A successful change is written to `account_audit_events`.
+    pub async fn update_identity(
+        &self,
+        user_id: Uuid,
+        username: Option<String>,
+        email: Option<String>,
+    ) -> UserResult<User> {
+        if username.is_none() && email.is_none() {
+            return self.get_user_by_id(user_id).await;
+        }
+
+        let username = username.map(|value| value.trim().to_string());
+        let email = email.map(|value| value.trim().to_ascii_lowercase());
+
+        if let Some(ref name) = username {
+            validate_username(name)?;
+        }
+        if let Some(ref addr) = email {
+            validate_email(addr)?;
+        }
+
+        let current = self.get_user_by_id(user_id).await?;
+        if !current.is_active {
+            return Err(UserError::Unauthorized(
+                "account is no longer active".to_string(),
+            ));
+        }
+
+        if let Some(ref name) = username {
+            if name != &current.username {
+                let taken: Option<Uuid> = sqlx::query_scalar(
+                    "SELECT id FROM users WHERE username = $1 AND id <> $2",
+                )
+                .bind(name)
+                .bind(user_id)
+                .fetch_optional(&self.db_pool)
+                .await
+                .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+                if taken.is_some() {
+                    return Err(UserError::AlreadyExists);
+                }
+            }
+        }
+        if let Some(ref addr) = email {
+            if addr != &current.email {
+                let taken: Option<Uuid> =
+                    sqlx::query_scalar("SELECT id FROM users WHERE email = $1 AND id <> $2")
+                        .bind(addr)
+                        .bind(user_id)
+                        .fetch_optional(&self.db_pool)
+                        .await
+                        .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+                if taken.is_some() {
+                    return Err(UserError::AlreadyExists);
+                }
+            }
+        }
+
+        let email_changed = email.as_ref().is_some_and(|addr| addr != &current.email);
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            UPDATE users
+            SET username = COALESCE($1, username),
+                email = COALESCE($2, email),
+                email_verified = CASE WHEN $3 THEN false ELSE email_verified END,
+                updated_at = NOW()
+            WHERE id = $4 AND is_active = true
+            RETURNING *
+            "#,
+        )
+        .bind(&username)
+        .bind(&email)
+        .bind(email_changed)
+        .bind(user_id)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| UserError::DatabaseError(e.to_string()))?
+        .ok_or(UserError::NotFound)?;
+
+        self.record_audit(
+            user_id,
+            "identity.updated",
+            serde_json::json!({
+                "username_changed": username.is_some(),
+                "email_changed": email_changed,
+            }),
+        )
+        .await?;
+        Ok(user)
+    }
+
+    /// Soft-delete the account. The row stays so foreign keys and the audit
+    /// trail remain valid. Login material and the wallet link are cleared.
+    pub async fn delete_account(&self, user_id: Uuid) -> UserResult<()> {
+        let current = self.get_user_by_id(user_id).await?;
+        if !current.is_active {
+            return Ok(());
+        }
+
+        let deleted_username = format!("deleted_{}", user_id.simple());
+        let deleted_email = format!("deleted_{user_id}@removed.invalid");
+        let updated = sqlx::query(
+            r#"
+            UPDATE users
+            SET is_active = false,
+                username = $2,
+                email = $3,
+                password_hash = '',
+                ethereum_address = NULL,
+                email_verified = false,
+                updated_at = NOW()
+            WHERE id = $1 AND is_active = true
+            "#,
+        )
+        .bind(user_id)
+        .bind(&deleted_username)
+        .bind(&deleted_email)
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+
+        if updated.rows_affected() == 0 {
+            return Err(UserError::NotFound);
+        }
+
+        self.record_audit(user_id, "account.deleted", serde_json::json!({}))
+            .await?;
+        let _ = self.logout(user_id).await;
+        Ok(())
+    }
+
+    async fn record_audit(
+        &self,
+        user_id: Uuid,
+        action: &str,
+        detail: serde_json::Value,
+    ) -> UserResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO account_audit_events (user_id, action, actor_id, detail)
+            VALUES ($1, $2, $1, $3)
+            "#,
+        )
+        .bind(user_id)
+        .bind(action)
+        .bind(detail)
+        .execute(&self.db_pool)
+        .await
+        .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+        Ok(())
+    }
+
     /// Logout user
     pub async fn logout(&self, user_id: Uuid) -> UserResult<()> {
         let session_key = format!("session:{user_id}");
@@ -688,4 +843,29 @@ impl UserService {
             .map_err(|e| UserError::DatabaseError(e.to_string()))?
             .ok_or(UserError::NotFound)
     }
+}
+
+fn validate_username(username: &str) -> UserResult<()> {
+    if !(3..=50).contains(&username.len())
+        || !username
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(UserError::ValidationError(
+            "username must be 3-50 characters and contain only letters, numbers, or underscore"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_email(email: &str) -> UserResult<()> {
+    let (local, domain) = email
+        .split_once('@')
+        .filter(|(local, domain)| !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.'))
+        .ok_or_else(|| UserError::ValidationError("email is not valid".to_string()))?;
+    if email.len() > 255 || local.len() > 64 || domain.len() > 190 {
+        return Err(UserError::ValidationError("email is not valid".to_string()));
+    }
+    Ok(())
 }

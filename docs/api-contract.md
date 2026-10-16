@@ -124,6 +124,35 @@ Response: `ApiResponse<AuthUser>`
 Headers: `Authorization: Bearer <accessToken>`  
 Response: `ApiResponse<AuthUser>`
 
+### `PUT /api/users/me`
+
+Headers: `Authorization: Bearer <accessToken>`
+
+Request (all fields optional, at least one required to change anything):
+
+```json
+{
+  "username": "string",
+  "email": "string",
+  "bio": "string"
+}
+```
+
+`username`: 3–50 characters, ASCII letters, numbers, or `_`.
+`email`: valid mailbox, stored lowercased. Changing it clears email verification.
+
+Success: the current user profile JSON (`username`, `email`, and the other profile fields the gateway already returns).
+
+Errors: `{ "error": "string", "status": 400|401|409|502 }`. `409` means the username or email is taken.
+
+### `DELETE /api/users/me`
+
+Headers: `Authorization: Bearer <accessToken>`
+
+Success: `204` empty body. The account is soft-deleted by user-service and an `account.deleted` audit row is written. The client must drop its tokens.
+
+Errors: `{ "error": "string", "status": 401|502 }`.
+
 ### `POST /api/auth/logout`
 Headers: `Authorization: Bearer <accessToken>`  
 Response:

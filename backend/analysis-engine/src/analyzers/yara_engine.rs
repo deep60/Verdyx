@@ -86,6 +86,11 @@ impl YaraEngine {
         Ok(engine)
     }
 
+    /// Number of loaded compiled rule files
+    pub fn rule_count(&self) -> usize {
+        self.rulesets.len()
+    }
+
     /// Discover and compile every rule file under the configured directory.
     /// Files that fail to compile are skipped with a warning rather than
     /// aborting the whole engine.

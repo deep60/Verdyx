@@ -507,6 +507,79 @@ impl DatabaseService {
         Ok(())
     }
 
+    /// One submission, only if this user uploaded it. Missing and not-owned
+    /// both return None so callers can respond 404 without confirming the id exists.
+    pub async fn get_file_submission_for_user(
+        &self,
+        submission_id: Uuid,
+        submitter_id: Uuid,
+    ) -> Result<Option<crate::handlers::submission::FileSubmissionListItem>> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, submitter_id, original_filename, file_hash, url,
+                file_size, mime_type, submission_type,
+                COALESCE(analysis_status, 'pending') AS analysis_status,
+                is_malicious, created_at,
+                metadata ->> 'description'  AS description,
+                metadata ->> 'analysisType' AS analysis_type,
+                metadata ->> 'bountyAmount' AS bounty_amount,
+                (metadata ->> 'priority')::boolean AS priority,
+                file_path
+            FROM submissions
+            WHERE id = $1 AND submitter_id = $2
+            "#,
+        )
+        .bind(submission_id)
+        .bind(submitter_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to load owned submission")?;
+
+        Ok(row.map(|r| {
+            let analysis_status: String = r.get("analysis_status");
+            crate::handlers::submission::FileSubmissionListItem {
+                id: r.get("id"),
+                submitter_id: r.get("submitter_id"),
+                original_filename: r.get("original_filename"),
+                file_hash: r.get("file_hash"),
+                url: r.get("url"),
+                file_size: r.get("file_size"),
+                mime_type: r.get("mime_type"),
+                submission_type: r.get("submission_type"),
+                status: analysis_status.clone(),
+                analysis_status,
+                is_malicious: r.get("is_malicious"),
+                description: r.get("description"),
+                analysis_type: r.get("analysis_type"),
+                bounty_amount: r.get("bounty_amount"),
+                priority: r.get("priority"),
+                created_at: r.get("created_at"),
+            }
+        }))
+    }
+
+    /// File paths for a user's uploads, used to delete objects when the account
+    /// or those submissions are explicitly removed.
+    pub async fn file_paths_for_user(&self, submitter_id: Uuid) -> Result<Vec<String>> {
+        let rows: Vec<(Option<String>,)> =
+            sqlx::query_as("SELECT file_path FROM submissions WHERE submitter_id = $1")
+                .bind(submitter_id)
+                .fetch_all(&self.pool)
+                .await
+                .context("Failed to list artifact paths")?;
+        Ok(rows.into_iter().filter_map(|(p,)| p).collect())
+    }
+
+    pub async fn delete_file_submissions_for_user(&self, submitter_id: Uuid) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM submissions WHERE submitter_id = $1")
+            .bind(submitter_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete user submissions")?;
+        Ok(result.rows_affected())
+    }
+
     /// List one user's own file/URL submissions, newest first.
     ///
     /// Reads `submissions` (what a user uploaded), NOT `bounty_submissions`

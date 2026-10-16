@@ -38,7 +38,7 @@ export function KineticText({
         <Fragment key={i}>
           <span
             aria-hidden
-            className="inline-block transition-[opacity,transform] duration-[650ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform motion-reduce:transition-none"
+            className="inline-block transition-[opacity,transform] duration-650 ease-expo-out will-change-transform motion-reduce:transition-none"
             style={{
               transitionDelay: `${delay + i * stagger}ms`,
               opacity: inView ? 1 : 0,

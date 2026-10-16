@@ -1,5 +1,6 @@
 pub mod connection_pool;
 pub mod postgres;
+#[cfg(feature = "redis")]
 pub mod redis;
 pub mod migrations;
 
@@ -22,8 +23,10 @@ pub use sqlx::{
     Row,
     Error as SqlxError,
     postgres::{PgPool, PgRow, PgConnection},
-    types::{Uuid, DateTime, Decimal},
+    types::Uuid,
 };
+pub use chrono::{DateTime, Utc};
+pub use rust_decimal::Decimal;
 
 // Database configuration structure
 #[derive(Debug, Clone)]

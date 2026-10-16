@@ -16,11 +16,12 @@
 
 ## 3. Analysis Submission Flow
 
-1. Analyst submits via `POST /api/v1/analysis/submit`.
-2. Gateway authenticates and validates payload.
-3. Analysis/submission services persist data and queue work.
-4. Analysis engine performs scanner/analyzer pipeline.
-5. Result updates flow back to persistence and query routes.
+The dashboard path is `POST /api/submissions/file`, not a second writer in submission-service. See `service-ownership.md` for the full trace, retry rules, and which service owns each table.
+
+1. Client submits via `POST /api/submissions/file` with a Bearer JWT.
+2. Gateway authenticates, persists the submission as `pending`, and pushes the id onto Redis `analysis_queue`.
+3. The analysis-engine worker claims the id onto `analysis_queue:processing`, scans, and writes `analysis_status` plus `analysis_results` on that same row.
+4. Status is read back with `GET /api/submissions` or `GET /api/submissions/:id`. `metadata.last_error` carries the last worker diagnostic.
 
 ## 4. Read Flows
 
@@ -36,19 +37,17 @@
 sequenceDiagram
   participant C as Client
   participant G as API Gateway
-  participant S as Submission/Analysis Domain
   participant A as Analysis Engine
   participant D as PostgreSQL
   participant R as Redis
 
-  C->>G: POST /api/v1/analysis/submit (JWT)
+  C->>G: POST /api/v1/submissions/file (JWT)
   G->>G: auth + validation
-  G->>S: submit request
-  S->>D: persist submission
-  S->>R: enqueue/notify
-  R->>A: analysis work signal
-  A->>D: persist analysis result
-  C->>G: GET /api/v1/analysis/:id
+  G->>D: persist submission pending
+  G->>R: LPUSH analysis_queue
+  R->>A: BRPOPLPUSH to processing
+  A->>D: analysis_status + analysis_results
+  C->>G: GET /api/v1/submissions/:id
   G->>D: fetch result
-  G-->>C: result payload
+  G-->>C: status, verdict, metadata.last_error
 ```

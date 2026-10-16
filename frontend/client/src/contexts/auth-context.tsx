@@ -25,6 +25,8 @@ interface AuthContextType {
   logout: () => void;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
+  updateProfile: (input: { username: string; email: string }) => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -308,6 +310,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateProfile = async (input: { username: string; email: string }) => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("Not signed in");
+    }
+    const response = await fetch("/api/users/me", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ username: input.username, email: input.email }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Profile update failed (${response.status})`);
+    }
+    const updated = await response.json();
+    const next = {
+      ...(user as User),
+      username: updated.username ?? input.username,
+      email: updated.email ?? input.email,
+    };
+    setUser(next);
+    localStorage.setItem("user", JSON.stringify(next));
+  };
+
+  const deleteAccount = async () => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("Not signed in");
+    }
+    const response = await fetch("/api/users/me", {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok && response.status !== 204) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Account deletion failed (${response.status})`);
+    }
+    setUser(null);
+    localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+    clearAuthCookies();
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -319,6 +368,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         connectWallet,
         disconnectWallet,
+        updateProfile,
+        deleteAccount,
       }}
     >
       {children}

@@ -1,9 +1,8 @@
 //! Application metrics collection and reporting
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
-use parking_lot::RwLock;
 
 /// Simple metrics collector
 pub struct MetricsCollector {
@@ -21,24 +20,24 @@ impl MetricsCollector {
 
     /// Increment a counter
     pub fn increment_counter(&self, name: &str, value: u64) {
-        let counters = self.counters.read();
+        let counters = self.counters.read().unwrap();
         if let Some(counter) = counters.get(name) {
             counter.fetch_add(value, Ordering::Relaxed);
         } else {
             drop(counters);
-            let mut counters = self.counters.write();
+            let mut counters = self.counters.write().unwrap();
             counters.insert(name.to_string(), AtomicU64::new(value));
         }
     }
 
     /// Set a gauge value
     pub fn set_gauge(&self, name: &str, value: u64) {
-        let gauges = self.gauges.read();
+        let gauges = self.gauges.read().unwrap();
         if let Some(gauge) = gauges.get(name) {
             gauge.store(value, Ordering::Relaxed);
         } else {
             drop(gauges);
-            let mut gauges = self.gauges.write();
+            let mut gauges = self.gauges.write().unwrap();
             gauges.insert(name.to_string(), AtomicU64::new(value));
         }
     }
@@ -47,6 +46,7 @@ impl MetricsCollector {
     pub fn get_counter(&self, name: &str) -> Option<u64> {
         self.counters
             .read()
+            .unwrap()
             .get(name)
             .map(|counter| counter.load(Ordering::Relaxed))
     }
@@ -55,6 +55,7 @@ impl MetricsCollector {
     pub fn get_gauge(&self, name: &str) -> Option<u64> {
         self.gauges
             .read()
+            .unwrap()
             .get(name)
             .map(|gauge| gauge.load(Ordering::Relaxed))
     }
@@ -64,6 +65,7 @@ impl MetricsCollector {
         let counters: HashMap<String, u64> = self
             .counters
             .read()
+            .unwrap()
             .iter()
             .map(|(k, v)| (k.clone(), v.load(Ordering::Relaxed)))
             .collect();
@@ -71,6 +73,7 @@ impl MetricsCollector {
         let gauges: HashMap<String, u64> = self
             .gauges
             .read()
+            .unwrap()
             .iter()
             .map(|(k, v)| (k.clone(), v.load(Ordering::Relaxed)))
             .collect();

@@ -27,7 +27,7 @@ tokio = { workspace = true }
 rust_decimal = { version = "1.33", features = ["serde-with-str"] }
 
 # Async trait support
-async-trait = { version = "0.1", optional = true }
+async-trait = "0.1"
 
 # Optional axum integration (feature `axum-mw`). Off by default so services
 # that don't use axum (or are on a different axum version) are unaffected.
@@ -74,7 +74,7 @@ otel = [
     "dep:opentelemetry-semantic-conventions",
 ]
 # Circuit breaker middleware for downstream calls
-circuit-breaker = ["dep:tower", "dep:governor", "dep:async-trait"]
+circuit-breaker = ["dep:tower", "dep:governor"]
 # Request validation middleware
 validation = ["dep:validator", "dep:serde_qs"]
 # Idempotency key support

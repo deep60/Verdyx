@@ -75,24 +75,24 @@ module.exports = {
   		},
   		fontFamily: {
   			sans: [
-  				'Inter',
+  				'Manrope',
   				'system-ui',
   				'-apple-system',
   				'Segoe UI',
   				'sans-serif'
   			],
   			display: [
-  				'Space Grotesk',
-  				'Inter',
+  				'Syne',
+  				'Manrope',
   				'system-ui',
   				'sans-serif'
   			],
   			serif: [
-  				'Georgia',
+  				'Syne',
   				'serif'
   			],
   			mono: [
-  				'JetBrains Mono',
+  				'IBM Plex Mono',
   				'ui-monospace',
   				'SFMono-Regular',
   				'monospace'
@@ -196,6 +196,12 @@ module.exports = {
   			'fade-up': 'fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both',
   			'fade-in': 'fade-in 0.6s ease-out both',
   			shimmer: 'shimmer 2.5s linear infinite'
+  		},
+  		transitionDuration: {
+  			'650': '650ms'
+  		},
+  		transitionTimingFunction: {
+  			'expo-out': 'cubic-bezier(0.22, 1, 0.36, 1)'
   		}
   	}
   },

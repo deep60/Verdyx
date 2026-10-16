@@ -21,6 +21,8 @@ import {
   User,
   Brain,
   FileSearch,
+  Info,
+  AlertCircle,
 } from "lucide-react";
 import { StatCardSkeleton, SubmissionSkeleton } from "@/components/loading-skeleton";
 import { ErrorState } from "@/components/error-state";
@@ -264,6 +266,37 @@ export default function AnalysisDetails() {
                   <div className="text-sm text-muted-foreground">Clean Votes</div>
                 </div>
               </div>
+
+              {consensus.explanation && (
+                <div className="mt-6 p-4 rounded-lg bg-card/60 border border-primary/20 text-sm">
+                  <div className="flex items-center gap-2 font-semibold text-primary mb-1">
+                    <Info className="h-4 w-4" />
+                    <span>Consensus Formulation</span>
+                  </div>
+                  <p className="text-muted-foreground leading-relaxed">{consensus.explanation}</p>
+                </div>
+              )}
+
+              {consensus.unavailableEngines && consensus.unavailableEngines.length > 0 && (
+                <div className="mt-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-xs">
+                  <div className="flex items-center gap-2 font-semibold text-destructive mb-2">
+                    <AlertCircle className="h-4 w-4" />
+                    <span>Excluded Unavailable Engines ({consensus.unavailableEngines.length})</span>
+                  </div>
+                  <div className="space-y-1 text-muted-foreground">
+                    {consensus.unavailableEngines.map((unavail, idx) => (
+                      <div key={idx} className="flex items-center justify-between">
+                        <span className="font-medium text-foreground">{unavail.engineName}</span>
+                        <span>{unavail.reason}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <p className="mt-4 text-xs text-muted-foreground italic text-center">
+                {consensus.confidenceNote || "Confidence reflects calibrated engine agreement concordance (0-100%), not a statistical posterior probability."}
+              </p>
             </CardContent>
           </Card>
         )}

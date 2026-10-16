@@ -49,14 +49,14 @@ export default function Home() {
             <span className="font-medium tracking-tight">Engine v2.0 Live &mdash; Multi-Engine Consensus</span>
           </div>
 
-          <h1 className="text-4xl md:text-6xl lg:text-[4.75rem] font-bold font-display text-foreground tracking-[-0.03em] mb-8 leading-[1.05]">
+          <h1 className="text-5xl md:text-7xl lg:text-[6.4rem] font-extrabold font-display text-foreground tracking-[-0.055em] mb-8 leading-[0.92]">
             <KineticText text="Verifiable malware analysis," stagger={45} /><br />
             <Reveal as="span" className="text-gradient-brand inline-block" delay={340} y={16}>
               powered by consensus.
             </Reveal>
           </h1>
 
-          <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed">
+          <p className="text-lg md:text-[1.35rem] font-medium text-muted-foreground max-w-2xl mx-auto mb-10 leading-[1.55] tracking-[-0.015em]">
             The first distributed threat intelligence engine. Submit telemetry via API, let independent nodes run YARA, ClamAV, and ML engines, and receive a cryptographically backed consensus score.
           </p>
 
@@ -141,7 +141,7 @@ export default function Home() {
               }
             ].map((Feature, idx) => (
               <Reveal key={idx} delay={idx * 120}>
-                <div className="relative h-full p-8 rounded-2xl border border-border/60 bg-card/40 hover:border-primary/40 hover:bg-card/70 hover:-translate-y-1 transition-all duration-300 group">
+                <div className="tilt-card relative h-full p-8 rounded-2xl border border-border/60 bg-card/50 hover:border-primary/40 hover:bg-card/80 group">
                   <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/10 border border-primary/20 mb-6 group-hover:bg-primary/15 transition-colors">
                     <Feature.icon className="w-6 h-6 text-primary group-hover:scale-110 transition-transform duration-300" />
                   </div>

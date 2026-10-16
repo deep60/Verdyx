@@ -12,11 +12,20 @@ use sha2::{Digest, Sha256};
 use std::env;
 use tracing::{debug, info};
 
-/// S3 client for file storage operations
+/// S3 client for file storage operations.
+///
+/// `STORAGE_BACKEND=local` stores objects on disk so the engine can run
+/// without MinIO. Production should set `STORAGE_BACKEND=s3` and a real
+/// S3 or R2 endpoint.
 #[derive(Clone)]
 pub struct S3Client {
-    client: Client,
-    bucket: String,
+    backend: StorageBackend,
+}
+
+#[derive(Clone)]
+enum StorageBackend {
+    S3 { client: Client, bucket: String },
+    Local { root: std::path::PathBuf },
 }
 
 /// File metadata returned from S3/MinIO
@@ -33,6 +42,17 @@ pub struct FileMetadata {
 impl S3Client {
     /// Create a new S3 client configured for MinIO or AWS S3
     pub async fn new() -> Result<Self> {
+        let backend_name = env::var("STORAGE_BACKEND").unwrap_or_else(|_| "s3".to_string());
+        if backend_name.eq_ignore_ascii_case("local") {
+            let root = env::var("UPLOAD_DIR").unwrap_or_else(|_| "./uploads".to_string());
+            let root = std::path::PathBuf::from(root);
+            std::fs::create_dir_all(&root).context("Failed to create local upload directory")?;
+            info!("Using local file storage at {}", root.display());
+            return Ok(Self {
+                backend: StorageBackend::Local { root },
+            });
+        }
+
         let endpoint = env::var("S3_ENDPOINT").unwrap_or_else(|_| "http://minio:9000".to_string());
         let region = env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string());
         let bucket = env::var("S3_BUCKET").unwrap_or_else(|_| "verdyx-submissions".to_string());
@@ -61,7 +81,9 @@ impl S3Client {
         let client = Client::from_conf(s3_config);
 
         // Ensure bucket exists
-        let s3_client = Self { client, bucket };
+        let s3_client = Self {
+            backend: StorageBackend::S3 { client, bucket },
+        };
         s3_client.ensure_bucket_exists().await?;
 
         info!("S3 client initialized successfully");
@@ -69,21 +91,35 @@ impl S3Client {
     }
 
     /// Ensure the bucket exists, create if it doesn't
+    fn local_path(&self, key: &str) -> Result<std::path::PathBuf> {
+        let StorageBackend::Local { root } = &self.backend else {
+            return Err(anyhow::anyhow!("not local storage"));
+        };
+        let rel = key.trim_start_matches('/');
+        if rel.contains("..") {
+            return Err(anyhow::anyhow!("invalid storage key"));
+        }
+        Ok(root.join(rel))
+    }
+
     async fn ensure_bucket_exists(&self) -> Result<()> {
-        match self.client.head_bucket().bucket(&self.bucket).send().await {
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            return Ok(());
+        };
+        match client.head_bucket().bucket(bucket).send().await {
             Ok(_) => {
-                debug!("Bucket '{}' exists", self.bucket);
+                debug!("Bucket '{}' exists", bucket);
                 Ok(())
             }
             Err(_) => {
-                info!("Bucket '{}' doesn't exist, creating...", self.bucket);
-                self.client
+                info!("Bucket '{}' doesn't exist, creating...", bucket);
+                client
                     .create_bucket()
-                    .bucket(&self.bucket)
+                    .bucket(bucket)
                     .send()
                     .await
                     .context("Failed to create bucket")?;
-                info!("Bucket '{}' created successfully", self.bucket);
+                info!("Bucket '{}' created successfully", bucket);
                 Ok(())
             }
         }
@@ -108,16 +144,24 @@ impl S3Client {
             hash
         );
 
+        if let StorageBackend::Local { .. } = &self.backend {
+            let path = self.local_path(key)?;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(path, &data).with_context(|| format!("Failed to write {key}"))?;
+            info!("File stored locally: key={}, hash={}", key, hash);
+            return Ok(hash);
+        }
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            unreachable!();
+        };
+
         // Create byte stream
         let body = ByteStream::from(data);
 
         // Build put object request
-        let mut request = self
-            .client
-            .put_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .body(body);
+        let mut request = client.put_object().bucket(bucket).key(key).body(body);
 
         // Add content type if provided
         if let Some(ct) = content_type {
@@ -141,10 +185,17 @@ impl S3Client {
     pub async fn download_file(&self, key: &str) -> Result<Vec<u8>> {
         debug!("Downloading file: key={}", key);
 
-        let response = self
-            .client
+        if let StorageBackend::Local { .. } = &self.backend {
+            let path = self.local_path(key)?;
+            return std::fs::read(&path).with_context(|| format!("Failed to read {}", path.display()));
+        }
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            unreachable!();
+        };
+
+        let response = client
             .get_object()
-            .bucket(&self.bucket)
+            .bucket(bucket)
             .key(key)
             .send()
             .await
@@ -170,9 +221,20 @@ impl S3Client {
     pub async fn delete_file(&self, key: &str) -> Result<()> {
         debug!("Deleting file: key={}", key);
 
-        self.client
+        if let StorageBackend::Local { .. } = &self.backend {
+            let path = self.local_path(key)?;
+            if path.exists() {
+                std::fs::remove_file(path)?;
+            }
+            return Ok(());
+        }
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            unreachable!();
+        };
+
+        client
             .delete_object()
-            .bucket(&self.bucket)
+            .bucket(bucket)
             .key(key)
             .send()
             .await
@@ -186,10 +248,26 @@ impl S3Client {
     pub async fn get_file_metadata(&self, key: &str) -> Result<FileMetadata> {
         debug!("Getting metadata for file: key={}", key);
 
-        let response = self
-            .client
+        if let StorageBackend::Local { .. } = &self.backend {
+            let path = self.local_path(key)?;
+            let meta = std::fs::metadata(&path)
+                .with_context(|| format!("Failed to stat {}", path.display()))?;
+            return Ok(FileMetadata {
+                key: key.to_string(),
+                size: meta.len() as i64,
+                content_type: None,
+                etag: None,
+                last_modified: meta.modified().ok().map(chrono::DateTime::from),
+                sha256_hash: "unknown".to_string(),
+            });
+        }
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            unreachable!();
+        };
+
+        let response = client
             .head_object()
-            .bucket(&self.bucket)
+            .bucket(bucket)
             .key(key)
             .send()
             .await
@@ -225,7 +303,26 @@ impl S3Client {
     ) -> Result<Vec<String>> {
         debug!("Listing files with prefix: {:?}", prefix);
 
-        let mut request = self.client.list_objects_v2().bucket(&self.bucket);
+        if let StorageBackend::Local { root } = &self.backend {
+            let mut keys = Vec::new();
+            if root.exists() {
+                for entry in std::fs::read_dir(root)? {
+                    let entry = entry?;
+                    if entry.file_type()?.is_file() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            if prefix.is_none_or(|p| name.starts_with(p)) {
+                                keys.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(keys);
+        }
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            unreachable!();
+        };
+        let mut request = client.list_objects_v2().bucket(bucket);
 
         if let Some(p) = prefix {
             request = request.prefix(p);
@@ -249,9 +346,15 @@ impl S3Client {
 
     /// Check if a file exists in S3/MinIO
     pub async fn file_exists(&self, key: &str) -> bool {
-        self.client
+        if let StorageBackend::Local { .. } = &self.backend {
+            return self.local_path(key).map(|p| p.exists()).unwrap_or(false);
+        }
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            return false;
+        };
+        client
             .head_object()
-            .bucket(&self.bucket)
+            .bucket(bucket)
             .key(key)
             .send()
             .await
@@ -264,12 +367,17 @@ impl S3Client {
         key: &str,
         expires_in_secs: Option<u64>,
     ) -> Result<String> {
+        if let StorageBackend::Local { .. } = &self.backend {
+            return Ok(format!("file://{}", self.local_path(key)?.display()));
+        }
+        let StorageBackend::S3 { client, bucket } = &self.backend else {
+            unreachable!();
+        };
         let expires = std::time::Duration::from_secs(expires_in_secs.unwrap_or(3600));
 
-        let presigned = self
-            .client
+        let presigned = client
             .get_object()
-            .bucket(&self.bucket)
+            .bucket(bucket)
             .key(key)
             .presigned(
                 aws_sdk_s3::presigning::PresigningConfig::expires_in(expires)

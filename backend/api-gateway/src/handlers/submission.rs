@@ -226,6 +226,7 @@ use crate::AppState;
 pub async fn upload_file(
     State(state): State<AppState>,
     headers: HeaderMap,
+    claims: crate::middleware::auth::Claims,
     mut multipart: Multipart,
 ) -> Result<Json<FileUploadResponse>, StatusCode> {
     // Check content length
@@ -305,20 +306,40 @@ pub async fn upload_file(
                 tracing::warn!("Failed to store file metadata: {} — proceeding without persistence", e);
             }
 
-            // Trigger automatic analysis by pushing to the Redis analysis queue
-            if let Ok(redis_url) = std::env::var("REDIS_URL") {
-                if let Ok(client) = redis::Client::open(redis_url) {
-                    if let Ok(mut conn) = client.get_multiplexed_async_connection().await {
-                        let _: Result<(), _> = redis::AsyncCommands::lpush(
-                            &mut conn,
-                            "analysis_queue",
-                            file_id.to_string(),
-                        )
-                        .await;
-                        tracing::info!(file_id = %file_id, "Queued file for automatic analysis");
-                    }
-                }
+            // The worker reads submission ids from the list `analysis_queue`
+            // and loads `submissions.file_path`. A bare file id is not a job.
+            let submission_id = Uuid::new_v4();
+            let now = Utc::now();
+            sqlx::query(
+                r#"
+                INSERT INTO submissions (
+                    id, submitter_id, original_filename, file_hash, file_size,
+                    mime_type, file_path, submission_type, analysis_status,
+                    created_at, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'file', 'pending', $8, $8)
+                "#,
+            )
+            .bind(submission_id)
+            .bind(claims.sub)
+            .bind(&filename)
+            .bind(&file_hash)
+            .bind(data.len() as i64)
+            .bind(&file_type_str)
+            .bind(&file_path)
+            .bind(now)
+            .execute(state.db.pool())
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to insert submission for upload: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            if let Err(e) = state.redis.queue_for_analysis(submission_id, 1).await {
+                tracing::error!("Failed to enqueue submission {}: {}", submission_id, e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
             }
+            tracing::info!(submission_id = %submission_id, file_path = %file_path, "Queued submission for analysis");
 
             return Ok(Json(FileUploadResponse {
                 file_id,
@@ -816,53 +837,94 @@ async fn process_single_submission(
 ///
 /// POST /api/v1/submissions/file
 ///
-/// Accepts the payload shape sent by the frontend FileSubmissionForm and
-/// inserts a row in the `submissions` table (not `bounty_submissions`).
+/// Multipart field `file` is required. Optional fields: `analysisType`,
+/// `bountyAmount`, `priority`, `description`. The bytes are written to disk,
+/// `submissions.file_path` is set to that path, and the submission id is
+/// pushed onto the Redis list `analysis_queue` that the worker reads.
 pub async fn create_file_submission(
     State(state): State<AppState>,
     claims: crate::middleware::auth::Claims,
-    Json(request): Json<CreateFileSubmissionRequest>,
+    mut multipart: Multipart,
 ) -> Result<Json<FileSubmissionResponse>, StatusCode> {
-    let filename = request
-        .original_filename
-        .as_deref()
-        .or(request.filename.as_deref())
-        .unwrap_or("unknown");
+    let mut filename: Option<String> = None;
+    let mut file_bytes: Option<Vec<u8>> = None;
+    let mut analysis_type: Option<String> = None;
+    let mut bounty_amount: Option<String> = None;
+    let mut priority = false;
+    let mut description: Option<String> = None;
 
-    if filename == "unknown" && request.filename.is_none() {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| StatusCode::BAD_REQUEST)?
+    {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "file" {
+            filename = field.file_name().map(|s| s.to_string()).or(filename);
+            file_bytes = Some(field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?.to_vec());
+        } else {
+            let text = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?;
+            match name.as_str() {
+                "analysisType" | "analysis_type" => analysis_type = Some(text),
+                "bountyAmount" | "bounty_amount" => bounty_amount = Some(text),
+                "priority" => priority = text == "true" || text == "1",
+                "description" => description = Some(text),
+                "filename" if filename.is_none() => filename = Some(text),
+                _ => {}
+            }
+        }
+    }
+
+    let filename = filename.ok_or(StatusCode::BAD_REQUEST)?;
+    let data = file_bytes.ok_or(StatusCode::BAD_REQUEST)?;
+    if data.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
+    let file_hash = calculate_file_hash(&data);
     let submission_id = Uuid::new_v4();
     let now = Utc::now();
-    // Authenticated user from JWT claims
-    let submitter_id = claims.sub;
+    let upload_root = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| {
+        state.config.services.upload_path.clone()
+    });
+    let file_path = format!("{upload_root}/{submission_id}");
+    if let Some(parent) = std::path::Path::new(&file_path).parent() {
+        fs::create_dir_all(parent)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    let mut file = fs::File::create(&file_path)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    file.write_all(&data)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let metadata = serde_json::json!({
-        "analysisType": request.analysis_type,
-        "bountyAmount": request.bounty_amount,
-        "priority": request.priority.unwrap_or(false),
-        "description": request.description,
+        "analysisType": analysis_type,
+        "bountyAmount": bounty_amount,
+        "priority": priority,
+        "description": description,
     });
 
     sqlx::query(
         r#"
         INSERT INTO submissions (
-            id, submitter_id, original_filename, file_hash,
-            file_size, submission_type, analysis_status,
+            id, submitter_id, original_filename, file_hash, file_size,
+            mime_type, file_path, submission_type, analysis_status,
             metadata, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'file', 'pending', $8, $9, $9)
         "#,
     )
     .bind(submission_id)
-    .bind(submitter_id)
-    .bind(filename)
-    .bind(&request.file_hash)
-    .bind(request.file_size)
-    .bind(&request.submission_type)
+    .bind(claims.sub)
+    .bind(&filename)
+    .bind(&file_hash)
+    .bind(data.len() as i64)
+    .bind(detect_file_type(&data))
+    .bind(&file_path)
     .bind(&metadata)
-    .bind(now)
     .bind(now)
     .execute(state.db.pool())
     .await
@@ -871,15 +933,20 @@ pub async fn create_file_submission(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    if let Err(e) = state.redis.queue_for_analysis(submission_id, if priority { 2 } else { 1 }).await {
+        tracing::error!("Failed to enqueue submission {}: {}", submission_id, e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
     Ok(Json(FileSubmissionResponse {
         id: submission_id,
-        submitter_id,
-        original_filename: Some(filename.to_string()),
-        file_hash: request.file_hash,
-        file_size: request.file_size,
-        submission_type: request.submission_type,
+        submitter_id: claims.sub,
+        original_filename: Some(filename),
+        file_hash: Some(file_hash),
+        file_size: Some(data.len() as i64),
+        submission_type: "file".to_string(),
         analysis_status: "pending".to_string(),
-        description: request.description,
+        description,
         created_at: now,
     }))
 }
@@ -934,12 +1001,37 @@ pub async fn list_submissions(
     Ok(Json(rows))
 }
 
-/// Get single submission (alias for get_submission_details)
+/// GET /api/v1/submissions/:id — only the authenticated owner's upload.
+/// A missing id and someone else's id both return 404.
 pub async fn get_submission(
-    state: State<AppState>,
-    path: Path<Uuid>,
-) -> Result<Json<DetailedSubmissionResponse>, StatusCode> {
-    get_submission_details(state, path).await
+    State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
+    Path(submission_id): Path<Uuid>,
+) -> Result<Json<FileSubmissionListItem>, StatusCode> {
+    state
+        .db
+        .get_file_submission_for_user(submission_id, claims.sub)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to load submission {}: {}", submission_id, e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?
+        .ok_or(StatusCode::NOT_FOUND)
+        .map(Json)
+}
+
+async fn require_owned_submission(
+    state: &AppState,
+    submission_id: Uuid,
+    owner: Uuid,
+) -> Result<(), StatusCode> {
+    state
+        .db
+        .get_file_submission_for_user(submission_id, owner)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(|_| ())
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 /// Vote on a submission
@@ -1249,22 +1341,25 @@ pub async fn start_analysis(
     claims: crate::middleware::auth::Claims,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Verify the caller owns this submission or is an admin
-    if let Ok(Some(sub)) = state.db.get_extended_submission_by_id(submission_id).await {
-        if sub.submission.engine_id != claims.sub
-            && claims.role != "admin"
-            && claims.role != "moderator"
-        {
-            tracing::warn!(
-                "User {} denied start_analysis on submission {} (owner: {})",
-                claims.sub,
-                submission_id,
-                sub.submission.engine_id
-            );
-            return Err(StatusCode::FORBIDDEN);
+    // File uploads are owned by submitter_id. Do not fall through to another
+    // user's bounty row when this id is a private upload.
+    let owns_upload = state
+        .db
+        .get_file_submission_for_user(submission_id, claims.sub)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some();
+    if !owns_upload {
+        if let Ok(Some(sub)) = state.db.get_extended_submission_by_id(submission_id).await {
+            if sub.submission.engine_id != claims.sub
+                && claims.role != "admin"
+                && claims.role != "moderator"
+            {
+                return Err(StatusCode::NOT_FOUND);
+            }
+        } else {
+            return Err(StatusCode::NOT_FOUND);
         }
-    } else {
-        return Err(StatusCode::NOT_FOUND);
     }
 
     // Update status to Processing
@@ -1301,35 +1396,26 @@ pub async fn start_analysis(
 /// Returns analysis results associated with the submission's bounty.
 pub async fn get_submission_analyses(
     State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Look up the bounty_id for this submission, then fetch analyses
-    let bounty_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT bounty_id FROM bounty_submissions WHERE id = $1")
-            .bind(submission_id)
-            .fetch_optional(state.db.pool())
-            .await
-            .map_err(|e| {
-                tracing::error!("DB error: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-
-    let bid = bounty_id.unwrap_or(submission_id); // fallback: treat id as bounty_id
+    require_owned_submission(&state, submission_id, claims.sub).await?;
 
     let rows: Vec<serde_json::Value> = sqlx::query_scalar(
         r#"SELECT row_to_json(t) FROM (
-             SELECT id, file_hash, status, verdict,
-                    confidence::float8 as confidence,
-                    created_at, completed_at
-             FROM analyses
-             WHERE bounty_id = $1
+             SELECT id, submission_id, verdict, confidence_score, analysis_status, created_at
+             FROM analysis_results
+             WHERE submission_id = $1
              ORDER BY created_at DESC
            ) t"#,
     )
-    .bind(bid)
+    .bind(submission_id)
     .fetch_all(state.db.pool())
     .await
-    .unwrap_or_default();
+    .map_err(|e| {
+        tracing::error!("Failed to load analyses for {}: {}", submission_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(Json(serde_json::json!(rows)))
 }
@@ -1341,38 +1427,31 @@ pub async fn get_submission_analyses(
 /// Returns the aggregated verdict across all analyses.
 pub async fn get_submission_consensus(
     State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Aggregate verdict counts for analyses related to this submission
-    let bounty_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT bounty_id FROM bounty_submissions WHERE id = $1")
-            .bind(submission_id)
-            .fetch_optional(state.db.pool())
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let bid = bounty_id.unwrap_or(submission_id);
+    require_owned_submission(&state, submission_id, claims.sub).await?;
 
     let malicious: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM analyses WHERE bounty_id = $1 AND verdict = 'malicious'",
+        "SELECT COUNT(*) FROM analysis_results WHERE submission_id = $1 AND verdict = 'malicious'",
     )
-    .bind(bid)
+    .bind(submission_id)
     .fetch_one(state.db.pool())
     .await
     .unwrap_or(0);
 
     let suspicious: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM analyses WHERE bounty_id = $1 AND verdict = 'suspicious'",
+        "SELECT COUNT(*) FROM analysis_results WHERE submission_id = $1 AND verdict = 'suspicious'",
     )
-    .bind(bid)
+    .bind(submission_id)
     .fetch_one(state.db.pool())
     .await
     .unwrap_or(0);
 
     let clean: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM analyses WHERE bounty_id = $1 AND verdict = 'benign'",
+        "SELECT COUNT(*) FROM analysis_results WHERE submission_id = $1 AND verdict IN ('benign', 'clean')",
     )
-    .bind(bid)
+    .bind(submission_id)
     .fetch_one(state.db.pool())
     .await
     .unwrap_or(0);
@@ -1398,12 +1477,80 @@ pub async fn get_submission_consensus(
         0.0
     };
 
+    let submission_meta: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT metadata FROM submissions WHERE id = $1",
+    )
+    .bind(submission_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .unwrap_or_default()
+    .flatten();
+
+    let participating_engines: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT engine_name FROM analysis_results WHERE submission_id = $1 AND verdict NOT IN ('Unavailable', 'unavailable', 'Unknown', 'unknown')",
+    )
+    .bind(submission_id)
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap_or_default();
+
+    let default_explanation = format!(
+        "Verdict: {} determined with {:.1}% engine agreement across {} participating analyzers ({} malicious, {} suspicious, {} clean).",
+        final_verdict,
+        (confidence * 10.0).round() / 10.0,
+        total,
+        malicious,
+        suspicious,
+        clean
+    );
+
+    let explanation = submission_meta
+        .as_ref()
+        .and_then(|m| m.get("consensus_explanation"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or(default_explanation);
+
+    let unavailable_engines = submission_meta
+        .as_ref()
+        .and_then(|m| m.get("unavailable_engines"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
+    let vote_dist = submission_meta
+        .as_ref()
+        .and_then(|m| m.get("vote_distribution"))
+        .cloned()
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "malicious": malicious,
+                "suspicious": suspicious,
+                "clean": clean,
+                "totalParticipating": total,
+                "totalEngines": total,
+            })
+        });
+
+    let verdict_history = submission_meta
+        .as_ref()
+        .and_then(|m| m.get("verdict_history"))
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+
     Ok(Json(serde_json::json!({
+        "submissionId": submission_id,
         "finalVerdict": final_verdict,
         "confidenceScore": (confidence * 10.0).round() / 10.0,
+        "agreementScore": (confidence / 100.0),
+        "confidenceNote": "Agreement score reflects weighted concordance across participating engines (0-100%), not an uncalibrated Bayesian posterior probability.",
         "maliciousVotes": malicious,
         "suspiciousVotes": suspicious,
         "cleanVotes": clean,
         "totalVotes": total,
+        "participatingEngines": participating_engines,
+        "unavailableEngines": unavailable_engines,
+        "voteDistribution": vote_dist,
+        "explanation": explanation,
+        "verdictHistory": verdict_history,
     })))
 }

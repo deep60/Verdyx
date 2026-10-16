@@ -4,6 +4,8 @@
 
 Verdyx is organized around an API gateway fronting multiple domain services. The gateway handles auth, request shaping, and route orchestration while domain services own business logic and persistence boundaries.
 
+Ownership, sync versus async calls, and the submission trace are in `service-ownership.md`. That file wins if this overview and the code disagree about who writes a table.
+
 ## 2. Core Components
 
 ### API Gateway

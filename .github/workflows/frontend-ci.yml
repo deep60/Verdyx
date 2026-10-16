@@ -60,7 +60,7 @@ jobs:
         with:
           lcov-file: ./frontend/coverage/lcov.info
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
 
   build:
     name: Build Application

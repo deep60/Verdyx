@@ -34,6 +34,60 @@ pub async fn get_profile(
     }))
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct UpdateAccountRequest {
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub bio: Option<String>,
+}
+
+/// Update username, email, and/or bio. Identity changes are validated and audited
+/// in user-service. Other services must not write the users table for this.
+pub async fn update_account(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
+    Json(req): Json<UpdateAccountRequest>,
+) -> Result<Json<UserPublic>, AppError> {
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
+
+    let user = state
+        .user_service
+        .update_identity(user_id, req.username, req.email)
+        .await?;
+
+    if req.bio.is_some() {
+        let _ = state
+            .user_service
+            .update_profile(
+                user_id,
+                UpdateProfileRequest {
+                    display_name: None,
+                    bio: req.bio,
+                    location: None,
+                    website: None,
+                    twitter: None,
+                    github: None,
+                    specializations: None,
+                },
+            )
+            .await?;
+    }
+
+    Ok(Json(user.into()))
+}
+
+/// Soft-delete the current account. Requires the caller's own access token.
+pub async fn delete_account(
+    State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
+) -> Result<axum::http::StatusCode, AppError> {
+    let user_id = Uuid::parse_str(&claims.sub)
+        .map_err(|_| AppError::Unauthorized("Invalid token".to_string()))?;
+    state.user_service.delete_account(user_id).await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 /// Update current user's profile
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,

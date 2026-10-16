@@ -6,14 +6,21 @@
 /// - Phishing detection
 /// - Malicious link detection
 /// - Safe browsing integration
-/// - Certificate validation
+/// - Certificate validation (facts come from a real handshake, never placeholders)
+/// - SSRF controls: only public http(s) destinations, re-checked on every redirect
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
 use tracing::{info, warn};
-use url::Url;
+use url::{Host, Url};
 use uuid::Uuid;
 
+use super::url_policy::{
+    is_fetch_refusal, is_public_ip, parse_certificate, refusal, validate_url_policy,
+    MAX_FETCH_BYTES,
+};
 use super::{
     ArtifactType, Finding, FindingCategory, ScanResult, Scanner, ScannerConfig, ThreatLevel,
 };
@@ -262,16 +269,27 @@ impl Scanner for UrlScanner {
             });
         }
 
-        // Check redirect chain
-        let redirect_chain = if self.config.check_redirect_chain {
-            self.check_redirect_chain(url_string)
-                .await
-                .unwrap_or_else(|e| {
-                    warn!("Failed to check redirect chain: {}", e);
-                    vec![url_string.to_string()]
-                })
+        // Refuse private, link-local, and metadata destinations before any
+        // socket is opened. Hostnames that only fail once DNS is consulted are
+        // rejected inside the fetch helpers, still before connect.
+        let mut fetch_denials: Vec<String> = Vec::new();
+        let start_blocked = if let Err(e) = validate_url_policy(&parsed) {
+            fetch_denials.push(e.to_string());
+            true
         } else {
+            false
+        };
+
+        // Check redirect chain. Each hop is validated and DNS-pinned; a blocked
+        // Location is recorded and not requested.
+        let redirect_chain = if start_blocked || !self.config.check_redirect_chain {
             vec![url_string.to_string()]
+        } else {
+            let inspection = self.inspect_redirects(&parsed).await;
+            if let Some(denied) = inspection.denied {
+                push_denial(&mut fetch_denials, denied);
+            }
+            inspection.visited
         };
 
         if redirect_chain.len() > 1 {
@@ -288,39 +306,81 @@ impl Scanner for UrlScanner {
             });
         }
 
-        // Check SSL (for HTTPS URLs)
+        // Check TLS only by performing a handshake to a destination that already
+        // passed the SSRF policy. Issuer and expiry stay empty unless a peer
+        // certificate was actually parsed.
         let ssl_info = if self.config.check_ssl && parsed.scheme() == "https" {
-            Some(self.check_ssl(&url_info.parsed_url.domain))
+            if start_blocked {
+                Some(ssl_not_checked(
+                    fetch_denials
+                        .first()
+                        .map(String::as_str)
+                        .unwrap_or("destination blocked before TLS handshake"),
+                ))
+            } else {
+                Some(self.check_ssl(&parsed).await)
+            }
         } else {
             None
         };
 
         if let Some(ref ssl) = ssl_info {
-            if !ssl.has_ssl {
+            let refused = ssl.certificate_errors.iter().any(|e| is_fetch_refusal(e));
+            if refused {
+                if let Some(reason) = ssl.certificate_errors.iter().find(|e| is_fetch_refusal(e)) {
+                    push_denial(&mut fetch_denials, reason.clone());
+                }
+            } else if !ssl.has_ssl || !ssl.is_valid {
+                let detail = if ssl.certificate_errors.is_empty() {
+                    "HTTPS endpoint did not present a trusted certificate".to_string()
+                } else {
+                    ssl.certificate_errors.join(", ")
+                };
                 base_result.add_finding(Finding {
                     finding_id: Uuid::new_v4(),
                     category: FindingCategory::Suspicious,
-                    title: "No SSL certificate".to_string(),
-                    description: "HTTPS URL lacks valid SSL certificate".to_string(),
-                    severity: ThreatLevel::High,
-                    evidence: vec!["Missing SSL".to_string()],
-                    recommendation: Some("Do not enter sensitive information".to_string()),
-                });
-            } else if !ssl.is_valid {
-                base_result.add_finding(Finding {
-                    finding_id: Uuid::new_v4(),
-                    category: FindingCategory::Suspicious,
-                    title: "Invalid SSL certificate".to_string(),
-                    description: format!("SSL errors: {}", ssl.certificate_errors.join(", ")),
+                    title: "TLS check failed".to_string(),
+                    description: detail,
                     severity: ThreatLevel::High,
                     evidence: ssl.certificate_errors.clone(),
-                    recommendation: Some("Proceed with caution".to_string()),
+                    recommendation: Some("Do not enter sensitive information".to_string()),
                 });
             }
         }
 
-        // Attempt to fetch and analyze content
-        let content_analysis = self.analyze_content(url_string).await.ok();
+        // Fetch page content only when the submitted URL itself is allowed.
+        // Redirects inside the fetch are validated the same way.
+        let content_analysis = if start_blocked {
+            None
+        } else {
+            match self.analyze_content(&parsed).await {
+                Ok(content) => Some(content),
+                Err(e) => {
+                    let msg = e.to_string();
+                    if is_fetch_refusal(&msg) {
+                        push_denial(&mut fetch_denials, msg);
+                    } else {
+                        warn!("Content analysis skipped: {}", e);
+                    }
+                    None
+                }
+            }
+        };
+
+        for reason in &fetch_denials {
+            base_result.add_finding(Finding {
+                finding_id: Uuid::new_v4(),
+                category: FindingCategory::NetworkThreat,
+                title: "Outbound fetch blocked".to_string(),
+                description: reason.clone(),
+                severity: ThreatLevel::High,
+                evidence: vec![url_string.to_string(), reason.clone()],
+                recommendation: Some(
+                    "The URL or a redirect target is not a public http(s) address and was not requested."
+                        .to_string(),
+                ),
+            });
+        }
 
         if let Some(ref content) = content_analysis {
             if content.has_login_form && content.has_password_field {
@@ -538,58 +598,213 @@ impl UrlScanner {
         indicators
     }
 
-    /// Check redirect chain
-    async fn check_redirect_chain(&self, url: &str) -> Result<Vec<String>> {
-        let mut chain = vec![url.to_string()];
-        let mut current_url = url.to_string();
+    /// Walk redirects without ever requesting a destination that fails the
+    /// SSRF policy. `visited` contains only URLs that were actually requested.
+    async fn inspect_redirects(&self, start: &Url) -> RedirectInspection {
+        let mut visited = Vec::new();
+        let mut current = start.clone();
+        let mut denied = None;
 
-        for _ in 0..self.config.max_redirects {
-            let client = reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .timeout(std::time::Duration::from_secs(self.config.timeout_seconds))
-                .build()?;
-
-            match client.get(&current_url).send().await {
+        for _ in 0..=self.config.max_redirects {
+            if visited
+                .iter()
+                .any(|seen: &String| seen == &current.to_string())
+            {
+                break;
+            }
+            match self.send_once(&current).await {
                 Ok(response) => {
-                    if let Some(location) = response.headers().get("location") {
-                        if let Ok(next_url) = location.to_str() {
-                            chain.push(next_url.to_string());
-                            current_url = next_url.to_string();
-                        } else {
+                    visited.push(current.to_string());
+                    match redirect_target(&current, &response) {
+                        Ok(Some(next)) => current = next,
+                        Ok(None) => break,
+                        Err(e) => {
+                            let msg = e.to_string();
+                            if is_fetch_refusal(&msg) {
+                                denied = Some(msg);
+                            } else {
+                                warn!("Stopping redirect walk: {e}");
+                            }
                             break;
                         }
-                    } else {
-                        break;
                     }
                 }
-                Err(_) => break,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if is_fetch_refusal(&msg) {
+                        denied = Some(msg);
+                    } else {
+                        warn!("Redirect check could not fetch {}: {e}", current);
+                    }
+                    break;
+                }
             }
         }
 
-        Ok(chain)
+        if visited.is_empty() {
+            visited.push(start.to_string());
+        }
+        RedirectInspection { visited, denied }
     }
 
-    /// Check SSL certificate
-    fn check_ssl(&self, _domain: &str) -> SslInfo {
-        // Simplified SSL check - in production, use proper TLS verification
-        SslInfo {
-            has_ssl: true,
-            is_valid: true,
-            issuer: Some("Let's Encrypt".to_string()),
-            expiry_days: Some(90),
-            certificate_errors: Vec::new(),
+    /// One request with redirects disabled, proxies disabled, and DNS pinned to
+    /// an address that was checked immediately beforehand.
+    async fn send_once(&self, url: &Url) -> Result<reqwest::Response> {
+        let endpoint = self.resolve_endpoint(url).await?;
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(Duration::from_secs(self.config.timeout_seconds))
+            .connect_timeout(Duration::from_secs(
+                self.config.timeout_seconds.min(10).max(1),
+            ))
+            .user_agent(&self.config.user_agent);
+        // Literal IPs are not resolved by reqwest. Hostnames must be pinned so
+        // a second lookup cannot swap in a private address (DNS rebinding).
+        if matches!(url.host(), Some(Host::Domain(_))) {
+            builder = builder.resolve(&endpoint.host, SocketAddr::new(endpoint.ip, endpoint.port));
+        }
+        let client = builder.build()?;
+        client
+            .get(endpoint.url.clone())
+            .send()
+            .await
+            .map_err(|e| anyhow!("request to {} failed: {e}", endpoint.url))
+    }
+
+    /// Policy check, then DNS. Returns only after every resolved address is public.
+    async fn resolve_endpoint(&self, url: &Url) -> Result<ResolvedEndpoint> {
+        validate_url_policy(url)?;
+        let host = url
+            .host_str()
+            .ok_or_else(|| refusal(url, "missing host"))?
+            .trim_end_matches('.')
+            .to_string();
+        let port = url
+            .port_or_known_default()
+            .ok_or_else(|| refusal(url, "missing port"))?;
+
+        let ip = match url.host() {
+            Some(Host::Ipv4(v4)) => IpAddr::V4(v4),
+            Some(Host::Ipv6(v6)) => IpAddr::V6(v6),
+            Some(Host::Domain(domain)) => self.resolve_domain(url, domain, port).await?,
+            None => return Err(refusal(url, "missing host")),
+        };
+        if !is_public_ip(ip) {
+            return Err(refusal(url, format!("{ip} is not a public address")));
+        }
+        Ok(ResolvedEndpoint {
+            url: url.clone(),
+            host,
+            ip,
+            port,
+        })
+    }
+
+    async fn resolve_domain(&self, url: &Url, domain: &str, port: u16) -> Result<IpAddr> {
+        let lookup = tokio::net::lookup_host((domain, port));
+        let addrs = tokio::time::timeout(Duration::from_secs(self.config.timeout_seconds), lookup)
+            .await
+            .map_err(|_| anyhow!("DNS lookup timed out for {domain}"))?
+            .map_err(|e| anyhow!("DNS lookup failed for {domain}: {e}"))?;
+        let ips: Vec<IpAddr> = addrs.map(|addr| addr.ip()).collect();
+        if ips.is_empty() {
+            return Err(anyhow!("DNS lookup returned no addresses for {domain}"));
+        }
+        // Fail closed if any record is internal. A mixed answer is enough for
+        // a rebinding or split-horizon trick to reach metadata or RFC1918.
+        if let Some(bad) = ips.iter().find(|ip| !is_public_ip(**ip)) {
+            return Err(refusal(
+                url,
+                format!("{domain} resolves to non-public address {bad}"),
+            ));
+        }
+        Ok(ips[0])
+    }
+
+    /// Perform a real TLS handshake and report only facts taken from it.
+    ///
+    /// A blocked destination does not produce `is_valid: true` or a made-up
+    /// issuer/expiry. Those fields are filled only after the peer certificate
+    /// has been parsed.
+    async fn check_ssl(&self, url: &Url) -> SslInfo {
+        match self.inspect_tls(url).await {
+            Ok(info) => info,
+            Err(e) => ssl_not_checked(&e.to_string()),
         }
     }
 
-    /// Analyze page content
-    async fn analyze_content(&self, url: &str) -> Result<ContentAnalysis> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(self.config.timeout_seconds))
-            .user_agent(&self.config.user_agent)
-            .build()?;
+    async fn inspect_tls(&self, url: &Url) -> Result<SslInfo> {
+        if url.scheme() != "https" {
+            return Err(anyhow!("TLS was not checked: URL is not https"));
+        }
+        let endpoint = self.resolve_endpoint(url).await?;
+        let addr = SocketAddr::new(endpoint.ip, endpoint.port);
+        let tcp = tokio::time::timeout(
+            Duration::from_secs(self.config.timeout_seconds),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await
+        .map_err(|_| anyhow!("TLS connection to {} timed out", endpoint.url))??;
 
-        let response = client.get(url).send().await?;
-        let html = response.text().await?;
+        let connector = native_tls::TlsConnector::builder()
+            .build()
+            .map_err(|e| anyhow!("failed to build TLS connector: {e}"))?;
+        let connector = tokio_native_tls::TlsConnector::from(connector);
+        // `connect` verifies the certificate against `endpoint.host` using the
+        // system trust store. Do not disable that check.
+        let tls = connector
+            .connect(&endpoint.host, tcp)
+            .await
+            .map_err(|e| anyhow!("TLS handshake failed: {e}"))?;
+
+        let peer = tls
+            .get_ref()
+            .peer_certificate()
+            .map_err(|e| anyhow!("failed to read peer certificate: {e}"))?
+            .ok_or_else(|| anyhow!("TLS handshake completed without a peer certificate"))?;
+        let der = peer
+            .to_der()
+            .map_err(|e| anyhow!("peer certificate could not be encoded: {e}"))?;
+        match parse_certificate(&der).and_then(|parsed| certificate_facts(parsed)) {
+            Ok(info) => Ok(info),
+            Err(e) => Ok(SslInfo {
+                has_ssl: true,
+                is_valid: true,
+                issuer: None,
+                expiry_days: None,
+                certificate_errors: vec![format!("peer certificate could not be parsed: {e}")],
+            }),
+        }
+    }
+
+    /// Fetch and analyze page content. Redirects are followed manually so each
+    /// hop is policy-checked and DNS-pinned. The body is capped.
+    async fn analyze_content(&self, url: &Url) -> Result<ContentAnalysis> {
+        let mut current = url.clone();
+        let mut seen = Vec::new();
+        let mut final_response = None;
+
+        for _ in 0..=self.config.max_redirects {
+            if seen
+                .iter()
+                .any(|seen_url: &String| seen_url == &current.to_string())
+            {
+                return Err(anyhow!("redirect loop at {current}"));
+            }
+            seen.push(current.to_string());
+            let response = self.send_once(&current).await?;
+            match redirect_target(&current, &response)? {
+                Some(next) => current = next,
+                None => {
+                    final_response = Some(response);
+                    break;
+                }
+            }
+        }
+
+        let response = final_response.ok_or_else(|| anyhow!("too many redirects"))?;
+        let html = read_body_limited(response, MAX_FETCH_BYTES).await?;
         let html_lower = html.to_lowercase();
 
         let has_login_form = html_lower.contains("<form")
@@ -688,8 +903,91 @@ impl UrlScanner {
     }
 }
 
+struct RedirectInspection {
+    visited: Vec<String>,
+    denied: Option<String>,
+}
+
+struct ResolvedEndpoint {
+    url: Url,
+    host: String,
+    ip: IpAddr,
+    port: u16,
+}
+
+fn push_denial(denials: &mut Vec<String>, reason: String) {
+    if !denials.iter().any(|existing| existing == &reason) {
+        denials.push(reason);
+    }
+}
+
+fn ssl_not_checked(reason: &str) -> SslInfo {
+    SslInfo {
+        has_ssl: false,
+        is_valid: false,
+        issuer: None,
+        expiry_days: None,
+        certificate_errors: vec![reason.to_string()],
+    }
+}
+
+fn certificate_facts(parsed: super::url_policy::ParsedCertificate) -> Result<SslInfo> {
+    let now = chrono::Utc::now().timestamp();
+    let mut errors = Vec::new();
+    if now < parsed.not_before {
+        errors.push("certificate is not yet valid".to_string());
+    }
+    if now > parsed.not_after {
+        errors.push("certificate is expired".to_string());
+    }
+    Ok(SslInfo {
+        has_ssl: true,
+        is_valid: errors.is_empty(),
+        issuer: Some(parsed.issuer),
+        expiry_days: Some((parsed.not_after - now) / 86_400),
+        certificate_errors: errors,
+    })
+}
+
+fn redirect_target(current: &Url, response: &reqwest::Response) -> Result<Option<Url>> {
+    if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+        return Ok(None);
+    }
+    let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
+        return Ok(None);
+    };
+    let location = location
+        .to_str()
+        .map_err(|_| anyhow!("redirect Location is not valid UTF-8"))?;
+    let next = current
+        .join(location)
+        .map_err(|e| anyhow!("invalid redirect Location: {e}"))?;
+    validate_url_policy(&next)?;
+    Ok(Some(next))
+}
+
+async fn read_body_limited(mut response: reqwest::Response, max_bytes: usize) -> Result<String> {
+    let mut body = Vec::new();
+    while body.len() < max_bytes {
+        match response.chunk().await? {
+            Some(chunk) => {
+                let room = max_bytes - body.len();
+                if chunk.len() > room {
+                    body.extend_from_slice(&chunk[..room]);
+                    break;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            None => break,
+        }
+    }
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
 #[cfg(test)]
 mod tests {
+    use super::certificate_facts;
+    use crate::scanners::url_policy::{is_public_ip, parse_certificate, validate_url_policy};
     use super::*;
 
     #[tokio::test]
@@ -751,5 +1049,147 @@ mod tests {
         assert!(indicators
             .iter()
             .any(|i| matches!(i.indicator_type, PhishingIndicatorType::SuspiciousTld)));
+    }
+
+    #[test]
+    fn rejects_private_link_local_and_metadata_destinations() {
+        let blocked = [
+            "http://127.0.0.1/",
+            "http://10.1.2.3/",
+            "http://192.168.1.1/login",
+            "http://172.16.0.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://0.0.0.0/",
+            "http://100.64.0.1/",
+            "http://[::1]/",
+            "http://[fe80::1]/",
+            "http://[fd00::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://[::ffff:169.254.169.254]/",
+            "http://metadata.google.internal/computeMetadata/v1/",
+            "http://instance-data.ec2.internal/",
+            "file:///etc/passwd",
+            "gopher://example.com/",
+            "http://user:pass@example.com/",
+            "http://localhost/",
+            "http://printer.local/",
+        ];
+        for raw in blocked {
+            let url = Url::parse(raw).unwrap();
+            assert!(
+                validate_url_policy(&url).is_err(),
+                "{raw} should be refused"
+            );
+        }
+
+        let allowed = Url::parse("https://example.com/path").unwrap();
+        assert!(validate_url_policy(&allowed).is_ok());
+    }
+
+    #[test]
+    fn redirect_to_metadata_is_rejected_before_fetch() {
+        let current = Url::parse("https://example.com/start").unwrap();
+        let metadata = current
+            .join("http://169.254.169.254/latest/meta-data/")
+            .unwrap();
+        assert!(validate_url_policy(&metadata).is_err());
+
+        let scheme_relative = current
+            .join("//metadata.google.internal/computeMetadata/v1/")
+            .unwrap();
+        assert!(validate_url_policy(&scheme_relative).is_err());
+
+        let relative = current.join("/still-here").unwrap();
+        assert!(validate_url_policy(&relative).is_ok());
+        assert_eq!(relative.host_str(), Some("example.com"));
+    }
+
+    #[test]
+    fn decimal_ip_obfuscation_is_treated_as_the_address_it_encodes() {
+        let url = Url::parse("http://2130706433/").unwrap();
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert!(validate_url_policy(&url).is_err());
+    }
+
+    #[tokio::test]
+    async fn private_scan_does_not_connect_or_invent_tls_facts() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("https://127.0.0.1:{port}/latest/meta-data/");
+
+        let scanner = UrlScanner::new(UrlScannerConfig {
+            timeout_seconds: 2,
+            ..UrlScannerConfig::default()
+        })
+        .unwrap();
+        let result = scanner.scan(url.as_bytes(), None).await.unwrap();
+
+        let accepted = tokio::time::timeout(Duration::from_millis(50), listener.accept()).await;
+        assert!(accepted.is_err(), "scanner opened a connection to loopback");
+        assert!(result
+            .base
+            .findings
+            .iter()
+            .any(|f| f.title == "Outbound fetch blocked"));
+
+        let ssl = result.ssl_info.expect("https scan records an ssl result");
+        assert!(!ssl.is_valid);
+        assert!(ssl.issuer.is_none());
+        assert!(ssl.expiry_days.is_none());
+        assert!(ssl
+            .certificate_errors
+            .iter()
+            .all(|e| !e.contains("Let's Encrypt") && !e.contains("90")));
+    }
+
+    #[test]
+    fn certificate_facts_come_from_the_parsed_certificate() {
+        fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+            let mut out = vec![tag];
+            assert!(body.len() < 128);
+            out.push(body.len() as u8);
+            out.extend_from_slice(body);
+            out
+        }
+
+        let cn_oid = [0x55, 0x04, 0x03];
+        let issuer = tlv(
+            0x30,
+            &tlv(
+                0x31,
+                &tlv(0x30, &[tlv(0x06, &cn_oid), tlv(0x0c, b"Test CA")].concat()),
+            ),
+        );
+        let validity = tlv(
+            0x30,
+            &[tlv(0x17, b"250101000000Z"), tlv(0x17, b"350101000000Z")].concat(),
+        );
+        let tbs = tlv(
+            0x30,
+            &[
+                tlv(0x02, &[0x01]),
+                tlv(0x30, &tlv(0x06, &cn_oid)),
+                issuer,
+                validity,
+            ]
+            .concat(),
+        );
+        let cert = tlv(0x30, &tbs);
+
+        let info = certificate_facts(parse_certificate(&cert).unwrap()).unwrap();
+        assert!(info.has_ssl);
+        assert!(info.is_valid);
+        assert_eq!(info.issuer.as_deref(), Some("CN=Test CA"));
+        assert_ne!(info.expiry_days, Some(90));
+        assert!(info.expiry_days.unwrap_or(0) > 90);
+        assert!(info.certificate_errors.is_empty());
+    }
+
+    #[test]
+    fn public_addresses_are_allowed() {
+        assert!(is_public_ip("1.1.1.1".parse().unwrap()));
+        assert!(is_public_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_public_ip("169.254.169.254".parse().unwrap()));
+        assert!(!is_public_ip("::ffff:10.0.0.1".parse().unwrap()));
     }
 }

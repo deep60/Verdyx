@@ -1,5 +1,8 @@
 # Verdyx Database Layer
 
+Column purpose, ownership, and sensitive fields: `docs/database/data-model.md`.
+Retention and backup: `docs/database/retention-and-backup.md`.
+
 > ## ⚠️ SOURCE OF TRUTH (read this first)
 >
 > The **authoritative schema is the per-service `migrations/` folder inside each

@@ -73,10 +73,35 @@ export interface ApiConsensus {
   submissionId?: string;
   finalVerdict?: string;
   confidenceScore?: number | string;
+  agreementScore?: number;
+  confidenceNote?: string;
   maliciousVotes?: number;
   suspiciousVotes?: number;
   cleanVotes?: number;
   benignVotes?: number;
+  totalVotes?: number;
+  participatingEngines?: string[];
+  unavailableEngines?: Array<{
+    engineName: string;
+    engineType?: string;
+    reason: string;
+  }>;
+  explanation?: string;
+  voteDistribution?: {
+    malicious: number;
+    benign: number;
+    suspicious: number;
+    unknown: number;
+    totalParticipating: number;
+    totalEngines: number;
+  };
+  verdictHistory?: Array<{
+    verdict: string;
+    confidence: number;
+    reason: string;
+    changedBy: string;
+    changedAt: string;
+  }>;
 }
 
 export interface ApiStats {

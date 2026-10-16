@@ -96,9 +96,9 @@ pub use common::{
 
 /// Empty body type for validation middleware (used when no body is expected)
 #[derive(Debug, Clone, Copy, Default, serde::Deserialize, serde::Serialize)]
-#[serde(transparent)]
 pub struct EmptyBody;
 
+#[cfg(feature = "validation")]
 impl validator::Validate for EmptyBody {}
 
 // Type aliases for commonly used Result types

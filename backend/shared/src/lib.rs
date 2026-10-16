@@ -15,7 +15,9 @@ pub use tracing;
 pub use uuid;
 
 // Export modules
+#[cfg(feature = "blockchain")]
 pub mod blockchain;
+#[cfg(feature = "crypto")]
 pub mod crypto;
 pub mod database;
 pub mod env;

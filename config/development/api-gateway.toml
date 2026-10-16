@@ -9,7 +9,7 @@ graceful_shutdown_timeout_seconds = 30
 environment = "development"
 
 [database]
-url = "postgresql://verdyx_user:verdyx_password@localhost:5432/verdyx"
+url = "postgresql://neondb_owner:npg_zCFbN0nJ7hPA@ep-proud-tree-atfwoa66.c-9.us-east-1.aws.neon.tech/verdyx_gateway?sslmode=require"
 max_connections = 25
 min_connections = 5
 connection_timeout_seconds = 30

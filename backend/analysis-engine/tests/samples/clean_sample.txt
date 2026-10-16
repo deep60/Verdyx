@@ -1,0 +1,2 @@
+Hello world! This is a completely benign test file for the Verdyx analysis pipeline.
+It contains no malicious payloads, no encoded commands, and standard ASCII text.

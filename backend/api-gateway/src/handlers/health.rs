@@ -42,11 +42,16 @@ pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<He
     let redis_ready = state.redis.health_check().await.unwrap_or(false);
     let blockchain_ready = state.blockchain.health_check().await;
 
-    // Determine overall status
-    let overall_status = if db_ready && redis_ready && blockchain_ready {
-        ServiceStatus::Healthy
+    // Database and Redis are required for the public API. Blockchain is
+    // reported, but a dead RPC must not take the whole site down.
+    let overall_status = if db_ready && redis_ready {
+        if blockchain_ready {
+            ServiceStatus::Healthy
+        } else {
+            ServiceStatus::Degraded
+        }
     } else {
-        ServiceStatus::Degraded
+        ServiceStatus::Unhealthy
     };
 
     let uptime = start_time.elapsed().as_secs();
@@ -77,7 +82,7 @@ pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<He
 
     // Reflect health in the HTTP status so external monitors see a non-2xx
     // when the gateway is degraded, while still returning the diagnostic body.
-    let status_code = if response.status == ServiceStatus::Healthy {
+    let status_code = if db_ready && redis_ready {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE

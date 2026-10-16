@@ -128,14 +128,14 @@ pub async fn get_user(
     State(state): State<Arc<AppState>>,
     Extension(claims): Extension<Claims>,
     Path(user_id): Path<Uuid>,
-) -> Result<Json<User>, AppError> {
+) -> Result<Json<UserPublic>, AppError> {
     if !claims.is_admin {
         return Err(AppError::Unauthorized("Admin access required".to_string()));
     }
 
     let user = state.user_service.get_user_by_id(user_id).await?;
-
-    Ok(Json(user))
+    // Never return password_hash, 2FA secrets, or other credential material.
+    Ok(Json(user.into()))
 }
 
 /// Suspend user (admin only)

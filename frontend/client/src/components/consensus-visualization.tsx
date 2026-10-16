@@ -12,6 +12,10 @@ interface ConsensusVisualizationProps {
     maliciousVotes: number;
     cleanVotes: number;
     suspiciousVotes: number;
+    participatingEngines?: string[];
+    unavailableEngines?: Array<{ engineName: string; reason: string }>;
+    explanation?: string;
+    confidenceNote?: string;
   };
 }
 
@@ -239,6 +243,19 @@ export function ConsensusVisualization({ consensus }: ConsensusVisualizationProp
           <Progress value={confidence} className="mt-4 h-2" />
         </CardContent>
       </Card>
+
+      {consensus.explanation && (
+        <Card className="glassmorphism border-primary/20">
+          <CardContent className="p-4">
+            <div className="text-xs font-semibold text-primary mb-1">Consensus Formulation Details</div>
+            <p className="text-xs text-muted-foreground leading-relaxed">{consensus.explanation}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      <p className="text-xs text-muted-foreground italic text-center">
+        {consensus.confidenceNote || "Confidence reflects calibrated engine agreement concordance (0-100%), not a statistical posterior probability."}
+      </p>
     </div>
   );
 }

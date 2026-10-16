@@ -6,7 +6,7 @@ server:
 
 # Test DB is isolated from development to avoid accidental data loss.
 database:
-  url: postgresql://verdyx_user:verdyx_password@localhost:5432/verdyx_test
+  url: postgresql://neondb_owner:npg_zCFbN0nJ7hPA@ep-proud-tree-atfwoa66.c-9.us-east-1.aws.neon.tech/verdyx_gateway?sslmode=require
   max_connections: 10
   min_connections: 2
 

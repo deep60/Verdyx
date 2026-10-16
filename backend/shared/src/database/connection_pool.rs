@@ -194,22 +194,24 @@ pub struct DatabaseStats {
 }
 
 /// Transaction helper for running multiple operations atomically
-pub async fn with_transaction<F, R>(pool: &DbPool, f: F) -> DatabaseResult<R>
+pub async fn with_transaction<F, Fut, R>(pool: &DbPool, f: F) -> DatabaseResult<R>
 where
-    F: FnOnce(&mut sqlx::Transaction<'_, Postgres>) -> std::pin::Pin<Box<dyn std::future::Future<Output = DatabaseResult<R>> + Send + '_>>,
+    F: FnOnce(&mut sqlx::Transaction<'_, Postgres>) -> Fut,
+    Fut: std::future::Future<Output = DatabaseResult<R>>,
 {
     let mut tx = pool
         .begin()
         .await
         .map_err(DatabaseError::Connection)?;
     
-    match f(&mut tx).await {
+    let res = f(&mut tx).await;
+    match res {
         Ok(result) => {
             tx.commit()
                 .await
                 .map_err(|e| DatabaseError::Transaction(e.to_string()))?;
             Ok(result)
-        },
+        }
         Err(e) => {
             if let Err(rollback_err) = tx.rollback().await {
                 warn!("Failed to rollback transaction: {}", rollback_err);

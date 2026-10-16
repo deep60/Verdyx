@@ -4,7 +4,7 @@ port = 8083
 workers = 4
 
 [database]
-url = "postgresql://verdyx_user:verdyx_password@localhost:5432/verdyx"
+url = "postgresql://neondb_owner:npg_zCFbN0nJ7hPA@ep-proud-tree-atfwoa66.c-9.us-east-1.aws.neon.tech/verdyx_bounty?sslmode=require"
 max_connections = 20
 min_connections = 5
 connect_timeout = 30
