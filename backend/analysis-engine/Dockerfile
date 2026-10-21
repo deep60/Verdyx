@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM rust:1.94-slim-bookworm AS builder
 
 # Install build dependencies. YARA is installed from Debian bookworm-backports
@@ -19,6 +20,10 @@ RUN echo "deb http://deb.debian.org/debian bookworm-backports main" \
 
 WORKDIR /app
 
+ENV CARGO_BUILD_JOBS=2 \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+    CARGO_PROFILE_RELEASE_LTO=false
+
 # Copy entire workspace
 COPY Cargo.toml Cargo.lock ./
 COPY shared ./shared
@@ -31,17 +36,13 @@ COPY payment-service ./payment-service
 COPY reputation-service ./reputation-service
 COPY submission-service ./submission-service
 COPY user-service ./user-service
+COPY proptest ./proptest
 
-# Build analysis-engine with the real native scanners compiled in:
-#   - clamav:      streams to the clamd daemon (docker-compose runs it).
-#   - yara-engine: links the system libyara installed above and compiles the
-#                  rule files under ./rules at startup.
-# ml-engine stays OFF: the ML analyzer is fully implemented and wired in, but
-# the shipped ml_models/*.onnx are empty placeholders and the ONNX Runtime
-# shared library is not bundled in this runtime image. See
-# analysis-engine/ml_models/README.md for how to enable it once real models
-# and the runtime lib are provided.
-RUN cargo build --release --bin analysis-engine --features clamav,yara-engine
+# Build analysis-engine with locked BuildKit cache mounts to prevent OOM
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --release --bin analysis-engine --features clamav,yara-engine && \
+    cp /app/target/release/analysis-engine /app/app-bin
 
 FROM debian:bookworm-slim
 
@@ -60,15 +61,11 @@ RUN echo "deb http://deb.debian.org/debian bookworm-backports main" \
 
 RUN useradd -m -u 1000 app
 
-# Run from /app so the service's relative paths (./rules, ./temp, ./models)
-# resolve to a writable, app-owned location instead of / (which caused the
-# "Permission denied (os error 13)" when create_dir_all ran as non-root).
 WORKDIR /app
 
-COPY --from=builder /app/target/release/analysis-engine /usr/local/bin/app
+COPY --from=builder /app/app-bin /usr/local/bin/app
 
-# Ship the signature/YARA rules and pre-create the writable working dirs the
-# service touches at startup (signature matcher, file handler upload/temp).
+# Ship the signature/YARA rules and pre-create the writable working dirs
 COPY analysis-engine/rules ./rules
 RUN mkdir -p ./rules/signatures ./rules/yara ./temp/verdyx-uploads ./models ./logs && \
     chown -R app:app /usr/local/bin/app /app

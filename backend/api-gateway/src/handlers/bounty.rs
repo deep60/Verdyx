@@ -227,6 +227,7 @@ pub async fn get_bounty(
 
 pub async fn submit_analysis(
     State(state): State<crate::AppState>,
+    _claims: crate::middleware::auth::Claims,
     Path(bounty_id): Path<Uuid>,
     Json(request): Json<SubmitAnalysisRequest>,
 ) -> Result<Json<SubmissionResponse>, StatusCode> {
@@ -289,6 +290,7 @@ pub async fn submit_analysis(
 
 pub async fn finalize_bounty(
     State(state): State<crate::AppState>,
+    _claims: crate::middleware::auth::Claims,
     Path(bounty_id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
     use ethers::types::U256;
@@ -500,18 +502,26 @@ pub async fn get_bounty_stats(
             .unwrap_or(0);
 
     let participants: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT engine_id) FROM analysis_results WHERE bounty_id = $1",
+        "SELECT COUNT(DISTINCT COALESCE(engine_id::text, engine_name)) FROM analysis_results WHERE bounty_id = $1",
     )
     .bind(bounty_id)
     .fetch_one(state.db.pool())
     .await
     .unwrap_or(0);
 
+    let total_staked: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(stake_amount)::text, '0') FROM bounty_submissions WHERE bounty_id = $1",
+    )
+    .bind(bounty_id)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or_else(|_| "0".to_string());
+
     Ok(Json(serde_json::json!({
         "bounty_id": bounty_id,
         "submissions": submissions,
         "participants": participants,
-        "total_staked": "0"
+        "total_staked": total_staked
     })))
 }
 

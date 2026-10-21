@@ -507,6 +507,119 @@ impl DatabaseService {
         Ok(())
     }
 
+    /// One submission by ID (regardless of submitter, used for public/guest report viewing).
+    pub async fn get_file_submission_any(
+        &self,
+        submission_id: Uuid,
+    ) -> Result<Option<crate::handlers::submission::FileSubmissionListItem>> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, submitter_id, original_filename, file_hash, url,
+                file_size, mime_type, submission_type,
+                COALESCE(analysis_status, 'pending') AS analysis_status,
+                is_malicious, created_at,
+                metadata ->> 'description'  AS description,
+                metadata ->> 'analysisType' AS analysis_type,
+                metadata ->> 'bountyAmount' AS bounty_amount,
+                (metadata ->> 'priority')::boolean AS priority,
+                file_path
+            FROM submissions
+            WHERE id = $1
+            "#,
+        )
+        .bind(submission_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to load submission by id")?;
+
+        Ok(row.map(|r| {
+            let analysis_status: String = r.get("analysis_status");
+            let submitter_id: Uuid = r.get("submitter_id");
+            let original_filename: Option<String> = r.get("original_filename");
+            crate::handlers::submission::FileSubmissionListItem {
+                id: r.get("id"),
+                submitter_id,
+                user_id: submitter_id,
+                filename: original_filename.clone(),
+                file_name: original_filename.clone(),
+                original_filename,
+                file_hash: r.get("file_hash"),
+                url: r.get("url"),
+                file_size: r.get("file_size"),
+                mime_type: r.get("mime_type"),
+                submission_type: r.get("submission_type"),
+                status: analysis_status.clone(),
+                analysis_status,
+                is_malicious: r.get("is_malicious"),
+                description: r.get("description"),
+                analysis_type: r.get("analysis_type"),
+                bounty_amount: r.get("bounty_amount"),
+                priority: r.get("priority"),
+                created_at: r.get("created_at"),
+            }
+        }))
+    }
+
+    /// List recent file/URL submissions across the platform (used when guest views Dashboard/Marketplace).
+    pub async fn list_recent_file_submissions(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::handlers::submission::FileSubmissionListItem>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id, submitter_id, original_filename, file_hash, url,
+                file_size, mime_type, submission_type,
+                COALESCE(analysis_status, 'pending') AS analysis_status,
+                is_malicious, created_at,
+                metadata ->> 'description'  AS description,
+                metadata ->> 'analysisType' AS analysis_type,
+                metadata ->> 'bountyAmount' AS bounty_amount,
+                (metadata ->> 'priority')::boolean AS priority
+            FROM submissions
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+            "#,
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to list recent file submissions")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let analysis_status: String = r.get("analysis_status");
+                let submitter_id: Uuid = r.get("submitter_id");
+                let original_filename: Option<String> = r.get("original_filename");
+                crate::handlers::submission::FileSubmissionListItem {
+                    id: r.get("id"),
+                    submitter_id,
+                    user_id: submitter_id,
+                    filename: original_filename.clone(),
+                    file_name: original_filename.clone(),
+                    original_filename,
+                    file_hash: r.get("file_hash"),
+                    url: r.get("url"),
+                    file_size: r.get("file_size"),
+                    mime_type: r.get("mime_type"),
+                    submission_type: r.get("submission_type"),
+                    status: analysis_status.clone(),
+                    analysis_status,
+                    is_malicious: r.get("is_malicious"),
+                    description: r.get("description"),
+                    analysis_type: r.get("analysis_type"),
+                    bounty_amount: r.get("bounty_amount"),
+                    priority: r.get("priority"),
+                    created_at: r.get("created_at"),
+                }
+            })
+            .collect())
+    }
+
     /// One submission, only if this user uploaded it. Missing and not-owned
     /// both return None so callers can respond 404 without confirming the id exists.
     pub async fn get_file_submission_for_user(
@@ -538,10 +651,15 @@ impl DatabaseService {
 
         Ok(row.map(|r| {
             let analysis_status: String = r.get("analysis_status");
+            let submitter_id: Uuid = r.get("submitter_id");
+            let original_filename: Option<String> = r.get("original_filename");
             crate::handlers::submission::FileSubmissionListItem {
                 id: r.get("id"),
-                submitter_id: r.get("submitter_id"),
-                original_filename: r.get("original_filename"),
+                submitter_id,
+                user_id: submitter_id,
+                filename: original_filename.clone(),
+                file_name: original_filename.clone(),
+                original_filename,
                 file_hash: r.get("file_hash"),
                 url: r.get("url"),
                 file_size: r.get("file_size"),
@@ -623,10 +741,15 @@ impl DatabaseService {
             .into_iter()
             .map(|r| {
                 let analysis_status: String = r.get("analysis_status");
+                let submitter_id: Uuid = r.get("submitter_id");
+                let original_filename: Option<String> = r.get("original_filename");
                 crate::handlers::submission::FileSubmissionListItem {
                     id: r.get("id"),
-                    submitter_id: r.get("submitter_id"),
-                    original_filename: r.get("original_filename"),
+                    submitter_id,
+                    user_id: submitter_id,
+                    filename: original_filename.clone(),
+                    file_name: original_filename.clone(),
+                    original_filename,
                     file_hash: r.get("file_hash"),
                     url: r.get("url"),
                     file_size: r.get("file_size"),

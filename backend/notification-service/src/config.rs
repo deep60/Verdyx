@@ -61,9 +61,12 @@ impl Config {
                 smtp_port: std::env::var("SMTP_PORT")
                     .unwrap_or_else(|_| "587".to_string())
                     .parse()?,
-                smtp_username: std::env::var("SMTP_USERNAME").unwrap_or_default(),
+                smtp_username: std::env::var("SMTP_USERNAME")
+                    .or_else(|_| std::env::var("SMTP_USER"))
+                    .unwrap_or_default(),
                 smtp_password: std::env::var("SMTP_PASSWORD").unwrap_or_default(),
                 from_address: std::env::var("EMAIL_FROM_ADDRESS")
+                    .or_else(|_| std::env::var("EMAIL_FROM"))
                     .unwrap_or_else(|_| "noreply@verdyx.io".to_string()),
                 from_name: std::env::var("EMAIL_FROM_NAME")
                     .unwrap_or_else(|_| "Verdyx".to_string()),
@@ -93,6 +96,7 @@ impl Config {
             webhook: WebhookConfig {
                 signing_secret: std::env::var("WEBHOOK_SIGNING_SECRET").ok(),
                 max_retries: std::env::var("WEBHOOK_MAX_RETRIES")
+                    .or_else(|_| std::env::var("MAX_RETRY_ATTEMPTS"))
                     .unwrap_or_else(|_| "3".to_string())
                     .parse()?,
                 timeout_seconds: std::env::var("WEBHOOK_TIMEOUT")

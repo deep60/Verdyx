@@ -29,8 +29,15 @@ export default function Profile() {
     queryKey: ["/api/submissions"],
   });
 
-  const userSubmissions = submissions?.filter((s) => s.userId === user?.id) || [];
-  const completedAnalyses = userSubmissions.filter((s) => s.status === "completed").length;
+  const userSubmissions =
+    submissions?.filter((s) => (s.submitterId || s.userId) === user?.id) || [];
+  const completedAnalyses = userSubmissions.filter(
+    (s) => (s.analysisStatus || s.status) === "completed"
+  ).length;
+  const accuracyDisplay =
+    completedAnalyses > 0 && userSubmissions.length > 0
+      ? `${((completedAnalyses / userSubmissions.length) * 100).toFixed(1)}%`
+      : "—";
 
   if (!user) {
     return null;
@@ -99,7 +106,7 @@ export default function Profile() {
                       <TrendingUp className="w-4 h-4 mr-2" />
                       Accuracy
                     </span>
-                    <span className="font-semibold text-muted-foreground">—</span>
+                    <span className="font-semibold text-muted-foreground">{accuracyDisplay}</span>
                   </div>
                 </div>
                 <Separator />
@@ -219,30 +226,39 @@ export default function Profile() {
                   <CardContent>
                     {userSubmissions.length > 0 ? (
                       <div className="space-y-3">
-                        {userSubmissions.map((submission) => (
-                          <div
-                            key={submission.id}
-                            className="flex items-center justify-between p-3 bg-muted/20 rounded-lg border border-border"
-                          >
-                            <div className="flex-1">
-                              <div className="font-medium">{submission.fileName}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {new Date(submission.createdAt ?? "").toLocaleDateString()}
-                              </div>
-                            </div>
-                            <Badge
-                              variant={
-                                submission.status === "completed"
-                                  ? "default"
-                                  : submission.status === "analyzing"
-                                  ? "secondary"
-                                  : "outline"
-                              }
+                        {userSubmissions.map((submission) => {
+                          const subStatus = submission.analysisStatus || submission.status || "pending";
+                          const displayName =
+                            submission.originalFilename ||
+                            submission.filename ||
+                            submission.fileName ||
+                            submission.url ||
+                            submission.id;
+                          return (
+                            <div
+                              key={submission.id}
+                              className="flex items-center justify-between p-3 bg-muted/20 rounded-lg border border-border"
                             >
-                              {submission.status}
-                            </Badge>
-                          </div>
-                        ))}
+                              <div className="flex-1">
+                                <div className="font-medium">{displayName}</div>
+                                <div className="text-sm text-muted-foreground">
+                                  {new Date(submission.createdAt ?? "").toLocaleDateString()}
+                                </div>
+                              </div>
+                              <Badge
+                                variant={
+                                  subStatus === "completed"
+                                    ? "default"
+                                    : subStatus === "analyzing"
+                                    ? "secondary"
+                                    : "outline"
+                                }
+                              >
+                                {subStatus}
+                              </Badge>
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="text-center py-12">

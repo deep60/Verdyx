@@ -1,6 +1,11 @@
+# syntax=docker/dockerfile:1
 FROM rust:1.94-slim-bookworm AS builder
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+
+ENV CARGO_BUILD_JOBS=2 \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+    CARGO_PROFILE_RELEASE_LTO=false
 
 # Copy entire workspace (required for Cargo workspace)
 COPY Cargo.toml Cargo.lock ./
@@ -14,18 +19,22 @@ COPY payment-service ./payment-service
 COPY reputation-service ./reputation-service
 COPY submission-service ./submission-service
 COPY user-service ./user-service
+COPY proptest ./proptest
 
-# Build only this service
-RUN cargo build --release --bin api-gateway
+# Build with locked BuildKit cache mounts so services share compiled crates and do not OOM
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --release --bin api-gateway && \
+    cp /app/target/release/api-gateway /app/app-bin
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates libssl3 libpq5 curl && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 app
 WORKDIR /app
-COPY --from=builder /app/target/release/api-gateway /usr/local/bin/app
+COPY --from=builder /app/app-bin /usr/local/bin/app
 # Contract ABIs are read at runtime relative to the working directory.
 COPY --from=builder /app/api-gateway/abis ./abis
-RUN chown -R app:app /usr/local/bin/app /app
+RUN mkdir -p ./uploads ./temp/verdyx-uploads && chown -R app:app /usr/local/bin/app /app
 USER app
 EXPOSE 8080
 CMD ["/usr/local/bin/app"]

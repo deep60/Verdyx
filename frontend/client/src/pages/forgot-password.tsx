@@ -10,6 +10,7 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [resetUrl, setResetUrl] = useState<string | null>(null);
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -23,14 +24,20 @@ export default function ForgotPassword() {
         body: JSON.stringify({ email }),
       });
 
+      const data = await response.json().catch(() => ({}));
+
       if (response.ok) {
+        if (data.resetUrl) {
+          setResetUrl(data.resetUrl);
+        }
         setIsSubmitted(true);
         toast({
-          title: "Reset link sent",
-          description: "Check your email for password reset instructions",
+          title: "Reset link generated",
+          description: data.resetUrl
+            ? "Click 'Reset Password Now' below to set your new password."
+            : "Check your email for password reset instructions",
         });
       } else {
-        const data = await response.json();
         toast({
           title: "Error",
           description: data.message || "Failed to send reset link",
@@ -58,13 +65,20 @@ export default function ForgotPassword() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <CardTitle>Check your email</CardTitle>
+            <CardTitle>{resetUrl ? "Reset Link Ready" : "Check your email"}</CardTitle>
             <CardDescription>
-              We've sent password reset instructions to {email}
+              {resetUrl
+                ? `Password reset link generated for ${email}`
+                : `We've sent password reset instructions to ${email}`}
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Button asChild className="w-full">
+          <CardContent className="space-y-3">
+            {resetUrl && (
+              <Button asChild className="w-full">
+                <a href={resetUrl}>Reset Password Now</a>
+              </Button>
+            )}
+            <Button asChild variant={resetUrl ? "outline" : "default"} className="w-full">
               <a href="/login">Back to login</a>
             </Button>
           </CardContent>

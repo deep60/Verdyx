@@ -6,14 +6,27 @@ import { BountyCard } from "@/components/bounty-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import { EngineCardSkeleton, BountyCardSkeleton } from "@/components/loading-skeleton";
 import { ErrorState } from "@/components/error-state";
 import { EmptyState } from "@/components/empty-state";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PlusCircle, Info, Search, FileX, Shield } from "lucide-react";
 import { SEO } from "@/components/seo";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/auth-context";
+import { useLocation } from "wouter";
 import type { ApiEngine, ApiSubmission, ApiStats } from "@/lib/api-types";
 
 type SortOption = "newest" | "oldest" | "highest" | "lowest";
@@ -27,6 +40,19 @@ export default function Marketplace() {
   const [bountyFilter, setBountyFilter] = useState<BountyFilter>("all");
   const [engineSort, setEngineSort] = useState<SortOption>("newest");
   const [bountySort, setBountySort] = useState<SortOption>("highest");
+
+  // Register Engine modal state
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [newEngineName, setNewEngineName] = useState("");
+  const [newEngineType, setNewEngineType] = useState("ml");
+  const [newEngineEndpoint, setNewEngineEndpoint] = useState("");
+  const [newEngineStake, setNewEngineStake] = useState("1.0");
+  const [newEngineDescription, setNewEngineDescription] = useState("");
+
+  const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
+  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
 
   const {
     data: engines = [],
@@ -50,9 +76,41 @@ export default function Marketplace() {
     queryKey: ["/api/analysis/stats"],
   });
 
+  const registerEngineMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/engines", {
+        name: newEngineName.trim(),
+        engineType: newEngineType,
+        apiEndpoint: newEngineEndpoint.trim() || undefined,
+        stakeAmount: newEngineStake,
+        description: newEngineDescription.trim() || undefined,
+      });
+      return res.json();
+    },
+    onSuccess: (created) => {
+      toast({
+        title: "Security Engine Registered",
+        description: `${created.name} is now active on the network.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/engines"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/analysis/stats"] });
+      setRegisterOpen(false);
+      setNewEngineName("");
+      setNewEngineEndpoint("");
+      setNewEngineDescription("");
+    },
+    onError: (err) => {
+      toast({
+        title: "Registration failed",
+        description: err instanceof Error ? err.message : "Could not register security engine",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Combine submissions with bounties for display
   const activeBountySubmissions = submissions
-    .filter((sub) => sub.status === "pending")
+    .filter((sub) => (sub.status || sub.analysisStatus) === "pending")
     .map((sub) => ({
       submission: sub,
       bounty: { amount: sub.bountyAmount, status: "active" },
@@ -62,11 +120,11 @@ export default function Marketplace() {
   const filteredEngines = useMemo(() => {
     const filtered = engines.filter((engine) => {
       const matchesSearch = engine.name.toLowerCase().includes(engineSearch.toLowerCase());
-      const matchesFilter = engineFilter === "all" || engine.type === engineFilter;
+      const eType = engine.type || engine.engineType || "";
+      const matchesFilter = engineFilter === "all" || eType === engineFilter;
       return matchesSearch && matchesFilter;
     });
 
-    // Sort engines
     filtered.sort((a, b) => {
       switch (engineSort) {
         case "newest":
@@ -74,9 +132,9 @@ export default function Marketplace() {
         case "oldest":
           return new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime();
         case "highest":
-          return Number(b.accuracy || 0) - Number(a.accuracy || 0);
+          return Number(b.accuracy || b.accuracyRate || 0) - Number(a.accuracy || a.accuracyRate || 0);
         case "lowest":
-          return Number(a.accuracy || 0) - Number(b.accuracy || 0);
+          return Number(a.accuracy || a.accuracyRate || 0) - Number(b.accuracy || b.accuracyRate || 0);
         default:
           return 0;
       }
@@ -88,12 +146,17 @@ export default function Marketplace() {
   // Filter and sort bounties
   const filteredBounties = useMemo(() => {
     const filtered = activeBountySubmissions.filter(({ submission }) => {
-      const matchesSearch = (submission.fileName || submission.filename || "").toLowerCase().includes(bountySearch.toLowerCase());
+      const nameStr =
+        submission.originalFilename ||
+        submission.filename ||
+        submission.fileName ||
+        submission.url ||
+        "";
+      const matchesSearch = nameStr.toLowerCase().includes(bountySearch.toLowerCase());
       const matchesFilter = bountyFilter === "all" || submission.analysisType === bountyFilter;
       return matchesSearch && matchesFilter;
     });
 
-    // Sort bounties
     filtered.sort((a, b) => {
       switch (bountySort) {
         case "newest":
@@ -204,11 +267,29 @@ export default function Marketplace() {
                     Join our network of security experts and automated tools. Stake cryptocurrency on your analysis accuracy and earn rewards for correct verdicts.
                   </p>
                   <div className="flex flex-wrap justify-center gap-4">
-                    <Button className="glow-effect" data-testid="button-register-engine">
+                    <Button
+                      className="glow-effect"
+                      onClick={() => {
+                        if (!isAuthenticated) {
+                          toast({
+                            title: "Sign in required",
+                            description: "Please log in to register a security engine.",
+                          });
+                          setLocation("/login");
+                          return;
+                        }
+                        setRegisterOpen(true);
+                      }}
+                      data-testid="button-register-engine"
+                    >
                       <PlusCircle className="w-4 h-4 mr-2" />
                       Register Engine
                     </Button>
-                    <Button variant="outline" data-testid="button-learn-more">
+                    <Button
+                      variant="outline"
+                      onClick={() => setLocation("/features/engines")}
+                      data-testid="button-learn-more"
+                    >
                       <Info className="w-4 h-4 mr-2" />
                       Learn More
                     </Button>
@@ -314,7 +395,7 @@ export default function Marketplace() {
               <Card className="glassmorphism text-center">
                 <CardContent className="p-6">
                   <div className="text-3xl font-bold font-display tracking-tight text-secondary mb-2">
-                    {stats?.avgResponseTime || "24.7s"}
+                    {stats?.avgResponseTime || "1.2s"}
                   </div>
                   <div className="text-sm text-muted-foreground">Avg Response Time</div>
                 </CardContent>
@@ -322,7 +403,7 @@ export default function Marketplace() {
               <Card className="glassmorphism text-center">
                 <CardContent className="p-6">
                   <div className="text-3xl font-bold font-display tracking-tight text-primary mb-2">
-                    {stats?.totalRewardsPaid || "312.8"} ETH
+                    {stats?.totalRewardsPaid || "0"} ETH
                   </div>
                   <div className="text-sm text-muted-foreground">Rewards Paid Out</div>
                 </CardContent>
@@ -331,6 +412,89 @@ export default function Marketplace() {
           </section>
         </div>
       </main>
+
+      {/* Register Security Engine Modal */}
+      <Dialog open={registerOpen} onOpenChange={setRegisterOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Register Security Engine</DialogTitle>
+            <DialogDescription>
+              Connect your automated scanner or analyst node to participate in bounty consensus.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!newEngineName.trim()) return;
+              registerEngineMutation.mutate();
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="engine-name">Engine Name</Label>
+              <Input
+                id="engine-name"
+                placeholder="e.g., SentinelYARA v2"
+                value={newEngineName}
+                onChange={(e) => setNewEngineName(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Engine Type</Label>
+              <Select value={newEngineType} onValueChange={setNewEngineType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ml">Machine Learning</SelectItem>
+                  <SelectItem value="signature">Signature / YARA</SelectItem>
+                  <SelectItem value="hybrid">Hybrid Static + Dynamic</SelectItem>
+                  <SelectItem value="human">Human Threat Researcher</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="engine-endpoint">Webhook / API Endpoint (Optional)</Label>
+              <Input
+                id="engine-endpoint"
+                type="url"
+                placeholder="https://scanner.example.com/v1/analyze"
+                value={newEngineEndpoint}
+                onChange={(e) => setNewEngineEndpoint(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="engine-stake">Initial Stake (ETH)</Label>
+              <Input
+                id="engine-stake"
+                type="number"
+                step="0.1"
+                value={newEngineStake}
+                onChange={(e) => setNewEngineStake(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="engine-desc">Description</Label>
+              <Textarea
+                id="engine-desc"
+                rows={3}
+                placeholder="Describe detection capabilities and supported file formats..."
+                value={newEngineDescription}
+                onChange={(e) => setNewEngineDescription(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setRegisterOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={registerEngineMutation.isPending}>
+                {registerEngineMutation.isPending ? "Registering..." : "Register Engine"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -82,6 +82,9 @@ services:
       - REPUTATION_SYSTEM_ADDRESS=${REPUTATION_SYSTEM_ADDRESS}
       - BOUNTY_MANAGER_ADDRESS=${BOUNTY_MANAGER_ADDRESS}
       - CHAIN_ID=${CHAIN_ID:-31337}
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -142,9 +145,10 @@ services:
       retries: 3
       start_period: 10s
 
-  # MinIO (S3-compatible object storage)
+  # MinIO (S3-compatible object storage — using pgsty/silo after MinIO removed Docker Hub & Quay images in Sept 2026)
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+    platform: linux/amd64
     container_name: verdyx-minio
     command: server /data --console-address ":9001"
     env_file:
@@ -166,7 +170,7 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ClamAV Antivirus Scanner
+  # ClamAV Antivirus Scanner (clamav-debian publishes native arm64 + amd64 manifests)
   clamav:
     image: clamav/clamav-debian:latest
     container_name: verdyx-clamav
@@ -198,9 +202,11 @@ services:
     environment:
       - RUST_LOG=info
       - DATABASE_URL=postgresql://${POSTGRES_USER:-verdyx_user}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/verdyx_analysis
+      - GATEWAY_DATABASE_URL=postgresql://${POSTGRES_USER:-verdyx_user}:${POSTGRES_PASSWORD}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/verdyx_gateway
       - REDIS_URL=redis://:${REDIS_PASSWORD}@${REDIS_HOST:-redis}:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
+      - UPLOAD_DIR=/app/uploads
       # S3/MinIO Configuration for file storage
       - S3_ENDPOINT=http://minio:9000
       - S3_REGION=us-east-1
@@ -212,6 +218,8 @@ services:
       # ClamAV configuration
       - CLAMAV_HOST=clamav:3310
       - ENABLE_CLAMAV=true
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -250,9 +258,12 @@ services:
       - SERVER_PORT=8080
       # Blockchain Configuration
       - BLOCKCHAIN_RPC_URL=${BLOCKCHAIN_RPC_URL}
+      - BLOCKCHAIN_PRIVATE_KEY=${BLOCKCHAIN_PRIVATE_KEY:-}
       - THREAT_TOKEN_ADDRESS=${THREAT_TOKEN_ADDRESS}
       - REPUTATION_SYSTEM_ADDRESS=${REPUTATION_SYSTEM_ADDRESS}
       - BOUNTY_MANAGER_ADDRESS=${BOUNTY_MANAGER_ADDRESS}
+      - BOUNTY_MANAGER_ABI_PATH=${BOUNTY_MANAGER_ABI_PATH:-/app/abis/BountyManager.abi.json}
+      - THREAT_TOKEN_ABI_PATH=${THREAT_TOKEN_ABI_PATH:-/app/abis/ThreatToken.abi.json}
       - CHAIN_ID=${CHAIN_ID:-31337}
     depends_on:
       postgres:
@@ -573,6 +584,7 @@ services:
   watchtower:
     image: containrrr/watchtower:latest
     container_name: verdyx-watchtower
+    profiles: ["prod"]
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -714,6 +726,7 @@ volumes:
   redis_data:
   minio_data:
   clamav_data:
+  uploads_data:
   prometheus_data:
   alertmanager_data:
   grafana_data:

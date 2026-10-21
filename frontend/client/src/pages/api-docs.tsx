@@ -1,22 +1,30 @@
+import { useState } from "react";
 import { Navigation } from "@/components/navigation";
 import { ParticleBackground } from "@/components/particle-background";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Key, Copy } from "lucide-react";
+import { Key, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { KineticText } from "@/components/motion/kinetic-text";
 import { SEO } from "@/components/seo";
+import { apiRequest } from "@/lib/queryClient";
+import { useAuth } from "@/contexts/auth-context";
+import { useLocation } from "wouter";
 
 export default function ApiDocs() {
   const { toast } = useToast();
+  const { isAuthenticated } = useAuth();
+  const [, setLocation] = useLocation();
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
 
-  const copyToClipboard = async (text: string) => {
+  const copyToClipboard = async (text: string, label = "Code snippet copied successfully") => {
     try {
       await navigator.clipboard.writeText(text);
       toast({
         title: "Copied to clipboard",
-        description: "Code snippet copied successfully",
+        description: label,
       });
     } catch (_error) {
       toast({
@@ -27,56 +35,95 @@ export default function ApiDocs() {
     }
   };
 
+  const handleGenerateApiKey = async () => {
+    if (!isAuthenticated) {
+      toast({
+        title: "Authentication required",
+        description: "Please sign in to generate an API key.",
+      });
+      setLocation("/login");
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const res = await apiRequest("POST", "/api/auth/api-key", {
+        name: "Developer CLI Key",
+      });
+      const data = await res.json();
+      if (data.api_key) {
+        setGeneratedKey(data.api_key);
+        toast({
+          title: "API Key generated",
+          description: "Copy and store your key securely — it is only shown once.",
+        });
+      }
+    } catch (err) {
+      toast({
+        title: "Could not generate API key",
+        description: err instanceof Error ? err.message : "Please try again",
+        variant: "destructive",
+      });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const codeExample = `import requests
 
 # Submit file for analysis
 response = requests.post(
-    'https://api.verdyx.io/v1/submit',
+    'https://api.verdyx.io/api/v1/submissions/file',
     headers={
-        'Authorization': 'Bearer YOUR_API_KEY',
-        'Content-Type': 'multipart/form-data'
+        'Authorization': 'Bearer ${generatedKey || "YOUR_API_KEY"}'
     },
     files={
         'file': open('suspicious.exe', 'rb')
     },
     data={
-        'bounty': 0.1,
-        'priority': true
+        'bountyAmount': '0.1',
+        'analysisType': 'full',
+        'priority': 'true'
     }
 )
 
-analysis_id = response.json()['id']
+submission_id = response.json()['id']
 
-# Get results
+# Trigger analysis & fetch consensus results
+requests.post(
+    f'https://api.verdyx.io/api/v1/submissions/{submission_id}/start-analysis',
+    headers={'Authorization': 'Bearer ${generatedKey || "YOUR_API_KEY"}'}
+)
 results = requests.get(
-    f'https://api.verdyx.io/v1/analysis/{analysis_id}'
+    f'https://api.verdyx.io/api/v1/submissions/{submission_id}/consensus',
+    headers={'Authorization': 'Bearer ${generatedKey || "YOUR_API_KEY"}'}
 )
 
-print(f"Threat score: {results.json()['confidence']}")`;
+print(f"Consensus verdict: {results.json()['finalVerdict']}")`;
 
   const endpoints = [
     {
       method: "POST",
-      path: "/api/v1/submit",
-      description: "Submit file or URL for analysis",
+      path: "/api/v1/submissions/file",
+      description: "Submit file or URL for threat analysis",
       methodColor: "bg-accent text-accent-foreground",
     },
     {
-      method: "GET", 
-      path: "/api/v1/analysis/:id",
-      description: "Get analysis results",
+      method: "GET",
+      path: "/api/v1/submissions/:id/consensus",
+      description: "Get multi-engine consensus and confidence score",
       methodColor: "bg-primary text-primary-foreground",
     },
     {
       method: "GET",
-      path: "/api/v1/engines", 
+      path: "/api/v1/engines",
       description: "List available security engines",
       methodColor: "bg-primary text-primary-foreground",
     },
     {
       method: "GET",
       path: "/api/v1/bounties",
-      description: "Get active bounties", 
+      description: "Get active bounties",
       methodColor: "bg-primary text-primary-foreground",
     },
   ];
@@ -145,7 +192,7 @@ print(f"Threat score: {results.json()['confidence']}")`;
                     </pre>
                   </CardContent>
                 </Card>
-                
+
                 <div className="space-y-4 mt-6">
                   <div className="flex items-center justify-between text-sm">
                     <span>Version</span>
@@ -153,16 +200,37 @@ print(f"Threat score: {results.json()['confidence']}")`;
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span>Auth</span>
-                    <Badge variant="outline" className="font-mono">Bearer JWT</Badge>
+                    <Badge variant="outline" className="font-mono">Bearer JWT / API Key</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Latency and uptime are not published here. Use /api/v1/health and service /metrics.
+                    Real-time service health and Prometheus metrics are exposed at /api/v1/health and /api/v1/health/metrics.
                   </p>
                 </div>
 
-                <Button className="w-full mt-6" data-testid="button-get-api-key">
+                {generatedKey && (
+                  <div className="mt-4 p-3 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-between gap-2">
+                    <code className="text-xs font-mono text-primary truncate" data-testid="text-generated-api-key">
+                      {generatedKey}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => copyToClipboard(generatedKey, "API key copied to clipboard")}
+                    >
+                      <Check className="w-4 h-4 mr-1" />
+                      Copy
+                    </Button>
+                  </div>
+                )}
+
+                <Button
+                  className="w-full mt-6"
+                  onClick={handleGenerateApiKey}
+                  disabled={generating}
+                  data-testid="button-get-api-key"
+                >
                   <Key className="w-4 h-4 mr-2" />
-                  Get API Key
+                  {generating ? "Generating..." : generatedKey ? "Generate New API Key" : "Get API Key"}
                 </Button>
               </CardContent>
             </Card>
@@ -176,12 +244,12 @@ print(f"Threat score: {results.json()['confidence']}")`;
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  All API requests require authentication using API keys. Include your API key in the Authorization header:
+                  All API requests require authentication using a Bearer JWT or generated API key in the Authorization header:
                 </p>
                 <Card className="bg-muted/10 border-border">
                   <CardContent className="p-4">
                     <code className="text-sm font-mono text-accent">
-                      Authorization: Bearer YOUR_API_KEY
+                      Authorization: Bearer {generatedKey || "YOUR_API_KEY"}
                     </code>
                   </CardContent>
                 </Card>
@@ -200,17 +268,11 @@ print(f"Threat score: {results.json()['confidence']}")`;
                   <CardContent className="p-4">
                     <pre className="text-sm font-mono text-accent">
 {`{
-  "id": "uuid",
-  "status": "analyzing|completed|failed",
-  "confidence": 94.2,
-  "verdict": "malicious|clean|suspicious",
-  "engines": [
-    {
-      "name": "DeepScan AI",
-      "verdict": "malicious",
-      "confidence": 96.5
-    }
-  ]
+  "submissionId": "uuid",
+  "finalVerdict": "malicious|benign|suspicious",
+  "confidenceScore": 94.2,
+  "totalVotes": 3,
+  "participatingEngines": ["ClamAV", "YARA", "Heuristic"]
 }`}
                     </pre>
                   </CardContent>

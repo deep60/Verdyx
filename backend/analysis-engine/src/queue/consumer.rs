@@ -28,6 +28,7 @@ struct Submission {
     pub id: Uuid,
     pub submitter_id: Option<Uuid>,
     pub file_hash: Option<String>,
+    pub url: Option<String>,
     pub original_filename: Option<String>,
     pub file_size: Option<i64>,
     pub mime_type: Option<String>,
@@ -44,6 +45,14 @@ pub async fn start_analysis_worker(
     analysis_engine: Arc<Mutex<AnalysisEngine>>,
 ) -> Result<()> {
     info!("Starting analysis queue consumer worker");
+
+    // Ensure submissions.confidence_score is DOUBLE PRECISION so 0..100 f64 scores never overflow DECIMAL(5,4)
+    let _ = sqlx::query(
+        "ALTER TABLE submissions ALTER COLUMN confidence_score TYPE DOUBLE PRECISION USING confidence_score::DOUBLE PRECISION",
+    )
+    .execute(&db_pool)
+    .await;
+
     if let Err(e) = recover_processing(&redis_client).await {
         error!("Failed to recover in-flight analysis jobs: {}", e);
     }
@@ -263,16 +272,22 @@ async fn process_submission(
     )
     .await?;
 
-    // Step 3: Download file from S3
-    let file_path = submission
-        .file_path
-        .as_ref()
-        .ok_or_else(|| anyhow!("Submission has no file_path"))?;
-
-    let file_data = load_artifact(s3_client, file_path).await?;
+    // Step 3: Load artifact bytes (from disk/S3 for files, or URL bytes for URL submissions)
+    let file_data = match submission.file_path.as_deref() {
+        Some(fp) if !fp.is_empty() => load_artifact(s3_client, fp).await?,
+        _ if submission.submission_type == "url" => {
+            let target_url = submission
+                .url
+                .as_deref()
+                .or(submission.original_filename.as_deref())
+                .ok_or_else(|| anyhow!("URL submission has no url"))?;
+            target_url.as_bytes().to_vec()
+        }
+        _ => return Err(anyhow!("Submission has no file_path")),
+    };
 
     info!(
-        "Downloaded file from S3: submission_id={}, size={} bytes",
+        "Loaded artifact for analysis: submission_id={}, size={} bytes",
         submission_id,
         file_data.len()
     );
@@ -281,6 +296,7 @@ async fn process_submission(
     let filename = submission
         .original_filename
         .clone()
+        .or_else(|| submission.url.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
     let analysis_request = FileAnalysisRequest {
@@ -362,7 +378,7 @@ async fn load_artifact(s3_client: &S3Client, file_path: &str) -> Result<Vec<u8>>
 async fn fetch_submission_from_db(db_pool: &PgPool, submission_id: Uuid) -> Result<Submission> {
     let submission = sqlx::query_as::<_, Submission>(
         r#"
-        SELECT id, submitter_id, file_hash, original_filename, file_size,
+        SELECT id, submitter_id, file_hash, url, original_filename, file_size,
                mime_type, file_path, submission_type, analysis_status
         FROM submissions
         WHERE id = $1
@@ -482,22 +498,25 @@ async fn store_analysis_results(
     // Store individual detection results in analysis_results table
     for detection in &analysis_result.detections {
         let detection_meta = serde_json::to_value(&detection.metadata).unwrap_or_default();
+        let verdict_lower = format!("{:?}", detection.verdict).to_lowercase();
+        let conf_f64 = detection.confidence as f64;
         if let Err(e) = sqlx::query(
             r#"
             INSERT INTO analysis_results (
                 id, submission_id, engine_name, engine_version,
-                verdict, confidence, severity, categories,
-                metadata, detected_at, processing_time_ms
+                verdict, confidence, confidence_score, severity, categories,
+                metadata, analysis_status, detected_at, processing_time_ms
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11, $12)
             "#,
         )
         .bind(detection.detection_id)
         .bind(submission_id)
         .bind(&detection.engine_name)
         .bind(&detection.engine_version)
-        .bind(format!("{:?}", detection.verdict))
-        .bind(detection.confidence)
+        .bind(&verdict_lower)
+        .bind(conf_f64)
+        .bind(conf_f64)
         .bind(format!("{:?}", detection.severity))
         .bind(serde_json::to_value(&detection.categories).unwrap_or_default())
         .bind(detection_meta)

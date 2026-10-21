@@ -97,9 +97,11 @@ export default function Pricing() {
                 ))}
               </ul>
 
-              <Button variant="outline" className="w-full h-12">
-                Contact Sales
-              </Button>
+              <a href="mailto:enterprise@verdyx.io?subject=Verdyx%20Enterprise%20Inquiry">
+                <Button variant="outline" className="w-full h-12">
+                  Contact Sales
+                </Button>
+              </a>
             </div>
 
           </div>

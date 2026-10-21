@@ -17,6 +17,7 @@ pub mod reputation;
 pub mod submission;
 pub mod user;
 pub mod wallet;
+pub mod web_intel;
 pub mod webhook;
 pub mod websocket;
 

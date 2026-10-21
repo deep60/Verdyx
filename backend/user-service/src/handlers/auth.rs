@@ -28,6 +28,7 @@ pub struct ForgotPasswordRequest {
 #[derive(Debug, Deserialize)]
 pub struct ResetPasswordRequest {
     pub token: String,
+    #[serde(alias = "password")]
     pub new_password: String,
 }
 
@@ -150,37 +151,38 @@ pub async fn verify_email(
     }))
 }
 
-/// Forgot password - send reset email
+/// Forgot password - send reset email (and return resetUrl for local/self-hosted access)
 pub async fn forgot_password(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ForgotPasswordRequest>,
-) -> Result<Json<MessageResponse>, AppError> {
-    // Generate reset token and store it. Use the user service to create
-    // a time-limited reset token. Always return success to prevent
-    // email enumeration attacks.
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut reset_url: Option<String> = None;
+    let mut reset_token: Option<String> = None;
+
     match state
         .user_service
         .create_password_reset_token(&req.email)
         .await
     {
         Ok(token) => {
-            // In production, send this token via email/notification service.
-            // For now, log it so developers can use it during testing.
             tracing::info!(
                 email = %req.email,
                 "Password reset link: /reset-password?token={}",
                 token
             );
+            reset_url = Some(format!("/reset-password?token={token}"));
+            reset_token = Some(token);
         }
         Err(e) => {
-            // Don't leak whether the email exists — just log the error
             tracing::debug!("Password reset request for {}: {}", req.email, e);
         }
     }
 
-    Ok(Json(MessageResponse {
-        message: "If an account with that email exists, a reset link has been sent.".to_string(),
-    }))
+    Ok(Json(json!({
+        "message": "If an account with that email exists, a reset link has been sent.",
+        "resetUrl": reset_url,
+        "resetToken": reset_token,
+    })))
 }
 
 /// Reset password with token

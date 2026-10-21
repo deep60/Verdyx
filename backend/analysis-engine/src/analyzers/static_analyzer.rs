@@ -398,10 +398,13 @@ impl StaticAnalyzer {
             pe_analysis.as_ref(),
         );
 
-        let confidence = match confidence_level {
-            ConfidenceLevel::High => 0.9,
-            ConfidenceLevel::Medium => 0.6,
-            ConfidenceLevel::Low => 0.3,
+        let confidence = match verdict {
+            ThreatVerdict::Benign => (0.93 - (threat_score * 0.25) as f32).clamp(0.85, 0.95),
+            _ => match confidence_level {
+                ConfidenceLevel::High => 0.92,
+                ConfidenceLevel::Medium => 0.78,
+                ConfidenceLevel::Low => 0.65,
+            },
         };
 
         // Categorize threats

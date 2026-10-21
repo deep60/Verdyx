@@ -5,6 +5,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::types::Decimal;
 use uuid::Uuid;
 
 use crate::AppState;
@@ -80,19 +81,75 @@ pub struct ConnectWalletRequest {
 ///
 /// GET /api/v1/wallet/balance
 pub async fn get_balance(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
 ) -> Result<Json<WalletBalance>, StatusCode> {
-    // Get the user's wallet address from JWT claims
-    // For now, return a structured response; the frontend must provide the address
-    // In production, extract from authenticated session
+    let wallet_address: String = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT wallet_address FROM users WHERE id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(state.db.pool())
+    .await
+    .ok()
+    .flatten()
+    .flatten()
+    .unwrap_or_default();
+
+    let on_chain_balance = if let Ok(addr) = wallet_address.parse::<ethers::types::Address>() {
+        if !addr.is_zero() {
+            state
+                .blockchain
+                .get_token_balance(addr)
+                .await
+                .map(|b| b.to_string())
+                .unwrap_or_else(|_| "0".to_string())
+        } else {
+            "0".to_string()
+        }
+    } else {
+        "0".to_string()
+    };
+
+    let staked: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(stake_amount)::text, '0') FROM bounty_submissions WHERE analyst_id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or_else(|_| "0".to_string());
+
+    let total_earned: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount)::text, '0') FROM payouts WHERE recipient_id = $1 AND status = 'completed'",
+    )
+    .bind(claims.sub)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or_else(|_| "0".to_string());
+
+    let pending_rewards: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount)::text, '0') FROM payouts WHERE recipient_id = $1 AND status = 'pending'",
+    )
+    .bind(claims.sub)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or_else(|_| "0".to_string());
+
+    let total_spent: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(reward_amount)::text, '0') FROM bounties WHERE creator_id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or_else(|_| "0".to_string());
+
     Ok(Json(WalletBalance {
-        address: String::new(),
-        balance: "0".to_string(),
-        staked: "0".to_string(),
-        available: "0".to_string(),
-        pending_rewards: "0".to_string(),
-        total_earned: "0".to_string(),
-        total_spent: "0".to_string(),
+        address: wallet_address,
+        balance: on_chain_balance.clone(),
+        staked,
+        available: on_chain_balance,
+        pending_rewards,
+        total_earned,
+        total_spent,
     }))
 }
 
@@ -103,19 +160,25 @@ pub async fn get_balance_by_address(
     State(state): State<AppState>,
     Path(address): Path<String>,
 ) -> Result<Json<WalletBalance>, StatusCode> {
-    // Query on-chain balance via blockchain service health check as connectivity test
-    let is_connected = state.blockchain.health_check().await;
-
-    let balance_str = if is_connected {
-        "0".to_string() // Token balance requires dedicated TokenContract query
+    let balance_str = if let Ok(addr) = address.parse::<ethers::types::Address>() {
+        if !addr.is_zero() {
+            state
+                .blockchain
+                .get_token_balance(addr)
+                .await
+                .map(|b| b.to_string())
+                .unwrap_or_else(|_| "0".to_string())
+        } else {
+            "0".to_string()
+        }
     } else {
-        "unavailable".to_string()
+        "0".to_string()
     };
 
     Ok(Json(WalletBalance {
         address: address.clone(),
         balance: balance_str.clone(),
-        staked: "0".to_string(), // Would require indexing staked events
+        staked: "0".to_string(),
         available: balance_str,
         pending_rewards: "0".to_string(),
         total_earned: "0".to_string(),
@@ -127,16 +190,74 @@ pub async fn get_balance_by_address(
 ///
 /// GET /api/v1/wallet/transactions
 pub async fn get_transactions(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
     Query(params): Query<TransactionQuery>,
 ) -> Result<Json<TransactionListResponse>, StatusCode> {
     let page = params.page.unwrap_or(1);
     let limit = params.limit.unwrap_or(20).min(100);
+    let offset = (page.saturating_sub(1)) * limit;
 
-    // Transaction history comes from blockchain event sync
+    let wallet_address: Option<String> = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT wallet_address FROM users WHERE id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(state.db.pool())
+    .await
+    .ok()
+    .flatten()
+    .flatten();
+
+    #[derive(sqlx::FromRow)]
+    struct TxRow {
+        id: Uuid,
+        transaction_hash: Option<String>,
+        transaction_type: String,
+        amount: Decimal,
+        status: String,
+        created_at: DateTime<Utc>,
+    }
+
+    let rows = sqlx::query_as::<_, TxRow>(
+        r#"
+        SELECT id, tx_hash AS transaction_hash, 'payout' AS transaction_type, amount, status, created_at
+        FROM payouts
+        WHERE recipient_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
+        "#,
+    )
+    .bind(claims.sub)
+    .bind(limit as i64)
+    .bind(offset as i64)
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap_or_default();
+
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM payouts WHERE recipient_id = $1")
+        .bind(claims.sub)
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap_or(0);
+
+    let transactions = rows
+        .into_iter()
+        .map(|r| Transaction {
+            id: r.id,
+            transaction_hash: r.transaction_hash,
+            transaction_type: r.transaction_type,
+            amount: r.amount.to_string(),
+            from_address: None,
+            to_address: wallet_address.clone(),
+            status: r.status,
+            timestamp: r.created_at,
+            metadata: serde_json::json!({}),
+        })
+        .collect();
+
     Ok(Json(TransactionListResponse {
-        transactions: vec![],
-        total: 0,
+        transactions,
+        total: total as u64,
         page,
         limit,
     }))
@@ -214,12 +335,42 @@ pub async fn disconnect_wallet(
 ///
 /// POST /api/v1/wallet/withdraw
 pub async fn withdraw(
-    State(_state): State<AppState>,
-    Json(_payload): Json<WithdrawRequest>,
+    State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
+    Json(payload): Json<WithdrawRequest>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Withdrawals are processed by the payment-service
-    // This handler records the intent and queues for processing
+    let amount_dec = payload
+        .amount
+        .parse::<Decimal>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    if amount_dec <= Decimal::ZERO {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let _addr = payload
+        .to_address
+        .parse::<ethers::types::Address>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let payout_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO payouts (id, recipient_id, amount, status, created_at) VALUES ($1, $2, $3, 'pending', NOW())",
+    )
+    .bind(payout_id)
+    .bind(claims.sub)
+    .bind(amount_dec)
+    .execute(state.db.pool())
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to record withdrawal request: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
     Ok(Json(serde_json::json!({
+        "id": payout_id,
+        "amount": payload.amount,
+        "to_address": payload.to_address,
         "message": "Withdrawal request queued for processing",
         "status": "pending"
     })))

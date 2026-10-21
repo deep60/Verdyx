@@ -6,20 +6,14 @@ use axum::{
 
 use crate::{
     handlers::{
-        analysis, auth, bounty, engines, health, reputation, submission, user, wallet, webhook,
+        analysis, auth, bounty, engines, health, reputation, submission, user, wallet, web_intel,
+        webhook,
     },
     middleware::auth as auth_mw,
     AppState,
 };
 
 /// Create all routes for API v1
-///
-/// Auth strategy:
-///   - Public groups (health, auth): no auth layer
-///   - Mixed groups (bounties, analysis, reputation): optional_auth — GETs work
-///     anonymously, POSTs that extract `Claims` still return 401 if no token
-///   - Protected groups (users, wallet, submissions, webhooks): strict auth —
-///     all requests without a valid JWT are rejected with 401
 pub fn create_routes(state: AppState) -> Router {
     // ── Public routes (no auth) ──────────────────────────
     let public_routes = Router::new()
@@ -32,6 +26,7 @@ pub fn create_routes(state: AppState) -> Router {
         .nest("/analysis", analysis_routes())
         .nest("/engines", engine_routes())
         .nest("/reputation", reputation_routes())
+        .nest("/submissions", submission_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_mw::optional_auth_middleware,
@@ -41,7 +36,6 @@ pub fn create_routes(state: AppState) -> Router {
     let protected_routes = Router::new()
         .nest("/users", user_routes())
         .nest("/wallet", wallet_routes())
-        .nest("/submissions", submission_routes())
         .nest("/webhooks", webhook_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -86,13 +80,11 @@ fn auth_routes() -> Router<AppState> {
 
 fn bounty_routes() -> Router<AppState> {
     Router::new()
-        // Public reads
         .route("/", get(bounty::list_bounties))
         .route("/{bounty_id}", get(bounty::get_bounty))
         .route("/{bounty_id}/stats", get(bounty::get_bounty_stats))
         .route("/active", get(bounty::list_active_bounties))
         .route("/completed", get(bounty::list_completed_bounties))
-        // Writes — Claims extractor returns 401 if missing from extensions
         .route("/", post(bounty::create_bounty))
         .route("/{bounty_id}", put(bounty::update_bounty))
         .route("/{bounty_id}/cancel", post(bounty::cancel_bounty))
@@ -105,9 +97,10 @@ fn bounty_routes() -> Router<AppState> {
 fn analysis_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(analysis::list_analyses))
+        .route("/stats", get(analysis::get_analysis_stats))
+        .route("/web-intel", get(web_intel::inspect_url_web_intel))
         .route("/{analysis_id}", get(analysis::get_analysis))
         .route("/{analysis_id}/details", get(analysis::get_analysis_details))
-        .route("/stats", get(analysis::get_analysis_stats))
         .route(
             "/by-bounty/{bounty_id}",
             get(analysis::get_analyses_by_bounty),
@@ -147,6 +140,7 @@ fn wallet_routes() -> Router<AppState> {
         .route("/disconnect", post(wallet::disconnect_wallet))
         .route("/balance", get(wallet::get_balance))
         .route("/balance/{address}", get(wallet::get_balance_by_address))
+        .route("/withdraw", post(wallet::withdraw))
         .route("/stake", post(wallet::stake_tokens))
         .route("/unstake/{bounty_id}", post(wallet::unstake_tokens))
         .route("/transactions", get(wallet::get_transactions))
@@ -176,12 +170,17 @@ fn submission_routes() -> Router<AppState> {
             "/{submission_id}/consensus",
             get(submission::get_submission_consensus),
         )
+        .route(
+            "/{submission_id}/web-intel",
+            get(web_intel::get_submission_web_intel),
+        )
         .route("/my-submissions", get(submission::get_my_submissions))
 }
 
 fn engine_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(engines::list_engines))
+        .route("/", post(engines::register_engine))
         .route("/{engine_id}", get(engines::get_engine))
 }
 

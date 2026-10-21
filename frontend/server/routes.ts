@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server, request as httpRequest } from "http";
+import type { Socket } from "net";
 import { URL } from "url";
 import { config } from "./config";
 
@@ -8,11 +9,8 @@ import { config } from "./config";
  *
  * The Node server is a thin "Backend-for-Frontend" (BFF):
  *   - All /api/* requests are proxied to the Rust api-gateway
+ *   - All /ws WebSocket upgrade requests are tunneled to the Rust api-gateway
  *   - Static files are served by Express (configured in index.ts)
- *
- * We implement the proxy manually (piping the raw request stream) rather than
- * using http-proxy-middleware. The library's v3 release stalls proxied POST/PUT
- * bodies in this setup; a direct stream pipe is simpler and reliable.
  */
 export async function registerRoutes(app: Express): Promise<Server> {
   const API_GATEWAY_URL =
@@ -53,8 +51,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     );
 
     proxyReq.on("error", (err) => {
-      // Pass the user-controlled URL as a separate argument (not interpolated
-      // into the format string) to avoid tainted-format-string / log injection.
       console.error("[proxy] Error proxying request:", req.originalUrl, err.message);
       if (!res.headersSent) {
         res.writeHead(502, { "Content-Type": "application/json" });
@@ -73,5 +69,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
+
+  // Tunnel WebSocket upgrade requests (/ws) directly to the Rust API Gateway
+  httpServer.on("upgrade", (req, socket: Socket, head) => {
+    if (!req.url || !req.url.startsWith("/ws")) {
+      return;
+    }
+
+    const proxyReq = httpRequest({
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || 80,
+      method: "GET",
+      path: req.url,
+      headers: {
+        ...req.headers,
+        host: target.host,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+      },
+    });
+
+    proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
+      let responseHeaders = `HTTP/1.1 ${proxyRes.statusCode || 101} ${proxyRes.statusMessage || "Switching Protocols"}\r\n`;
+      for (const [key, value] of Object.entries(proxyRes.headers)) {
+        if (value !== undefined) {
+          if (Array.isArray(value)) {
+            for (const v of value) {
+              responseHeaders += `${key}: ${v}\r\n`;
+            }
+          } else {
+            responseHeaders += `${key}: ${value}\r\n`;
+          }
+        }
+      }
+      responseHeaders += "\r\n";
+      socket.write(responseHeaders);
+      if (proxyHead && proxyHead.length > 0) {
+        socket.write(proxyHead);
+      }
+      if (head && head.length > 0) {
+        proxySocket.write(head);
+      }
+      proxySocket.pipe(socket);
+      socket.pipe(proxySocket);
+
+      proxySocket.on("error", () => socket.destroy());
+      socket.on("error", () => proxySocket.destroy());
+    });
+
+    proxyReq.on("error", (err) => {
+      console.error("[ws-proxy] WebSocket proxy error:", err.message);
+      socket.destroy();
+    });
+
+    proxyReq.end();
+  });
+
   return httpServer;
 }

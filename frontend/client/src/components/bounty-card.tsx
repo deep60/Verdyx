@@ -1,8 +1,9 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileCode, Link as LinkIcon, Search } from "lucide-react";
+import { FileCode, Link as LinkIcon, Search, ExternalLink } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { ApiSubmission } from "@/lib/api-types";
@@ -53,23 +54,32 @@ export function BountyCard({ submission, bounty }: BountyCardProps) {
 
   const bountyAmount = parseFloat(String(bounty.amount ?? "0"));
   const bountyInfo = getBountyLevel(bountyAmount);
+  const currentStatus = submission.status || submission.analysisStatus || "pending";
+  const displayName =
+    submission.originalFilename ||
+    submission.filename ||
+    submission.fileName ||
+    submission.url ||
+    submission.id;
 
   return (
-    <Card className={`glassmorphism ${bountyInfo.color} ${bountyAmount >= 2 ? 'glow-effect' : ''}`}>
+    <Card className={`glassmorphism ${bountyInfo.color} ${bountyAmount >= 2 ? "glow-effect" : ""}`}>
       <CardContent className="p-6">
         <div className="flex justify-between items-start mb-4">
           <div className="flex items-center space-x-3">
-            <div className={`w-14 h-14 ${
-              submission.submissionType === "url" ? "bg-accent/20" : "bg-destructive/20"
-            } rounded-lg flex items-center justify-center`}>
+            <div
+              className={`w-14 h-14 ${
+                submission.submissionType === "url" ? "bg-accent/20" : "bg-destructive/20"
+              } rounded-lg flex items-center justify-center`}
+            >
               {getFileIcon(submission.submissionType ?? "")}
             </div>
             <div>
               <div className="font-semibold text-lg" data-testid={`bounty-filename-${submission.id}`}>
-                {submission.filename}
+                {displayName}
               </div>
               <div className="text-sm text-muted-foreground capitalize">
-                {submission.analysisType} Analysis Required
+                {submission.analysisType || "full"} Analysis Required
               </div>
             </div>
           </div>
@@ -80,12 +90,12 @@ export function BountyCard({ submission, bounty }: BountyCardProps) {
             <div className="text-sm text-muted-foreground">Bounty</div>
           </div>
         </div>
-        
+
         <div className="space-y-3 mb-6">
           <div className="flex justify-between text-sm">
             <span>File Size</span>
             <span className="font-mono">
-              {submission.fileSize ? `${(submission.fileSize / 1024 / 1024).toFixed(1)} MB` : "N/A"}
+              {submission.fileSize ? `${(submission.fileSize / 1024 / 1024).toFixed(2)} MB` : "N/A"}
             </span>
           </div>
           <div className="flex justify-between text-sm">
@@ -115,21 +125,30 @@ export function BountyCard({ submission, bounty }: BountyCardProps) {
           </div>
         )}
 
-        <Button
-          onClick={handleAnalyze}
-          disabled={startAnalysisMutation.isPending || submission.status !== "pending"}
-          className="w-full"
-          variant={submission.status !== "pending" ? "secondary" : "default"}
-          data-testid={`button-analyze-${submission.id}`}
-        >
-          <Search className="w-4 h-4 mr-2" />
-          {submission.status === "pending" 
-            ? (startAnalysisMutation.isPending ? "Starting..." : "Analyze & Stake")
-            : submission.status === "analyzing" 
-            ? "Analysis in Progress"
-            : "Analysis Complete"
-          }
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            onClick={handleAnalyze}
+            disabled={startAnalysisMutation.isPending || currentStatus !== "pending"}
+            className="flex-1"
+            variant={currentStatus !== "pending" ? "secondary" : "default"}
+            data-testid={`button-analyze-${submission.id}`}
+          >
+            <Search className="w-4 h-4 mr-2" />
+            {currentStatus === "pending"
+              ? startAnalysisMutation.isPending
+                ? "Starting..."
+                : "Analyze & Stake"
+              : currentStatus === "analyzing"
+              ? "Analysis in Progress"
+              : "Analysis Complete"}
+          </Button>
+          <Link href={`/analysis/${submission.id}`}>
+            <Button variant="outline" data-testid={`button-view-report-${submission.id}`}>
+              <ExternalLink className="w-4 h-4 mr-1" />
+              Report
+            </Button>
+          </Link>
+        </div>
       </CardContent>
     </Card>
   );

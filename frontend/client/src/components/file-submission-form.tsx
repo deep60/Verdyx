@@ -4,12 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CloudUpload, Rocket } from "lucide-react";
+import { CloudUpload, Globe, Rocket } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 
 export function FileSubmissionForm() {
+  const [submissionMode, setSubmissionMode] = useState<"file" | "url">("file");
   const [file, setFile] = useState<File | null>(null);
+  const [targetUrl, setTargetUrl] = useState("");
   const [analysisType, setAnalysisType] = useState("full");
   const [bountyAmount, setBountyAmount] = useState("0.1");
   const [description, setDescription] = useState("");
@@ -38,20 +40,22 @@ export function FileSubmissionForm() {
     },
     onSuccess: (data) => {
       toast({
-        title: "File submitted for analysis",
+        title: submissionMode === "url" ? "URL submitted for analysis" : "File submitted for analysis",
         description: `Analysis ID: ${data.id}`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/submissions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/analysis/stats"] });
       // Reset form
       setFile(null);
+      setTargetUrl("");
       setDescription("");
       setBountyAmount("0.1");
       setPriority(false);
     },
-    onError: () => {
+    onError: (err) => {
       toast({
         title: "Submission failed",
-        description: "Please try again",
+        description: err instanceof Error ? err.message : "Please try again",
         variant: "destructive",
       });
     },
@@ -73,10 +77,19 @@ export function FileSubmissionForm() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) {
+    if (submissionMode === "file" && !file) {
       toast({
         title: "No file selected",
         description: "Please select a file to analyze",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (submissionMode === "url" && !targetUrl.trim()) {
+      toast({
+        title: "No URL entered",
+        description: "Please enter a valid URL to analyze",
         variant: "destructive",
       });
       return;
@@ -93,7 +106,11 @@ export function FileSubmissionForm() {
     }
 
     const body = new FormData();
-    body.append("file", file);
+    if (submissionMode === "file" && file) {
+      body.append("file", file);
+    } else if (submissionMode === "url") {
+      body.append("url", targetUrl.trim());
+    }
     body.append("analysisType", analysisType);
     body.append("bountyAmount", priority ? (parsedBounty + 0.05).toString() : parsedBounty.toString());
     body.append("priority", String(priority));
@@ -103,35 +120,84 @@ export function FileSubmissionForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="text-center">
-        <label
-          htmlFor="file-upload"
-          className="cursor-pointer block rounded-xl border border-dashed border-border p-6 transition-colors hover:border-primary/50"
-          data-testid="label-file-upload"
-          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
+      <div className="grid grid-cols-2 gap-2 p-1 bg-muted/30 rounded-lg border border-border">
+        <Button
+          type="button"
+          variant={submissionMode === "file" ? "default" : "ghost"}
+          size="sm"
+          onClick={() => setSubmissionMode("file")}
+          data-testid="tab-submit-file"
         >
-          <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4 transition-colors ${isDragging ? "bg-primary/30 ring-2 ring-primary" : "bg-primary/10"}`}>
-            <CloudUpload className="w-7 h-7 text-primary" />
-          </div>
-          <p className="font-semibold">Drop files here or click to browse</p>
-          <p className="text-xs text-muted-foreground mt-1">EXE, DLL, APK, URL, ZIP · Max 100MB</p>
-        </label>
-        <input
-          id="file-upload"
-          type="file"
-          className="hidden"
-          onChange={handleFileChange}
-          accept=".exe,.dll,.apk,.zip,.pdf,.doc,.docx"
-          data-testid="input-file"
-        />
-        {file && (
-          <p className="text-sm text-primary mt-2 truncate" data-testid="text-filename">
-            Selected: {file.name} ({file.size} bytes)
-          </p>
-        )}
+          <CloudUpload className="w-4 h-4 mr-2" />
+          File Upload
+        </Button>
+        <Button
+          type="button"
+          variant={submissionMode === "url" ? "default" : "ghost"}
+          size="sm"
+          onClick={() => setSubmissionMode("url")}
+          data-testid="tab-submit-url"
+        >
+          <Globe className="w-4 h-4 mr-2" />
+          URL Scan
+        </Button>
       </div>
+
+      {submissionMode === "file" ? (
+        <div className="text-center">
+          <label
+            htmlFor="file-upload"
+            className="cursor-pointer block rounded-xl border border-dashed border-border p-6 transition-colors hover:border-primary/50"
+            data-testid="label-file-upload"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+          >
+            <div
+              className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4 transition-colors ${
+                isDragging ? "bg-primary/30 ring-2 ring-primary" : "bg-primary/10"
+              }`}
+            >
+              <CloudUpload className="w-7 h-7 text-primary" />
+            </div>
+            <p className="font-semibold">Drop files here or click to browse</p>
+            <p className="text-xs text-muted-foreground mt-1">EXE, DLL, APK, PDF, DOC, ZIP · Max 100MB</p>
+          </label>
+          <input
+            id="file-upload"
+            type="file"
+            className="hidden"
+            onChange={handleFileChange}
+            accept=".exe,.dll,.apk,.zip,.pdf,.doc,.docx,.bin,.elf,.py,.js,.sh"
+            data-testid="input-file"
+          />
+          {file && (
+            <p className="text-sm text-primary mt-2 truncate" data-testid="text-filename">
+              Selected: {file.name} ({file.size} bytes)
+            </p>
+          )}
+        </div>
+      ) : (
+        <div>
+          <label className="block text-sm font-medium mb-2" htmlFor="url-input">
+            Suspicious URL
+          </label>
+          <Input
+            id="url-input"
+            type="url"
+            placeholder="https://example-phishing-domain.com/login"
+            value={targetUrl}
+            onChange={(e) => setTargetUrl(e.target.value)}
+            data-testid="input-url"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Enter a full HTTP or HTTPS URL to scan for phishing, malware payloads, or C2 indicators.
+          </p>
+        </div>
+      )}
 
       <div className="space-y-4">
         <div>
@@ -165,7 +231,7 @@ export function FileSubmissionForm() {
         <label className="block text-sm font-medium mb-2">Description (Optional)</label>
         <Textarea
           rows={3}
-          placeholder="Describe where you found this file or why it's suspicious..."
+          placeholder="Describe where you found this artifact or why it's suspicious..."
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           className="resize-none"

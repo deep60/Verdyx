@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Activity, CheckCircle, AlertTriangle, RotateCw, FileText, Link as LinkIcon, ShieldCheck, Inbox } from "lucide-react";
@@ -16,7 +17,7 @@ const statusMeta: Record<string, { label: string; icon: typeof Activity; classNa
 };
 
 function getMeta(status: string) {
-  return statusMeta[status] ?? statusMeta.failed;
+  return statusMeta[status] ?? statusMeta.pending;
 }
 
 /** KPI row — four uniform cards for a balanced, symmetrical header. */
@@ -131,43 +132,51 @@ export function RecentAnalyses() {
             </div>
           ) : (
             submissions.slice(0, 6).map((submission) => {
-              const meta = getMeta(submission.status ?? "");
+              const currentStatus = submission.status || submission.analysisStatus || "pending";
+              const meta = getMeta(currentStatus);
               const StatusIcon = meta.icon;
+              const displayName =
+                submission.originalFilename ||
+                submission.filename ||
+                submission.fileName ||
+                submission.url ||
+                "Untitled";
               return (
-                <div
-                  key={submission.id}
-                  className="flex items-center gap-4 rounded-lg border border-border/50 bg-card/40 p-4 transition-colors hover:border-border"
-                  data-testid={`analysis-result-${submission.id}`}
-                >
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    {submission.submissionType === "url" ? (
-                      <LinkIcon className="h-5 w-5" />
-                    ) : (
-                      <FileText className="h-5 w-5" />
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium" data-testid={`filename-${submission.id}`}>
-                      {submission.filename || submission.fileName || "Untitled"}
+                <Link key={submission.id} href={`/analysis/${submission.id}`}>
+                  <div
+                    className="cursor-pointer flex items-center gap-4 rounded-lg border border-border/50 bg-card/40 p-4 transition-colors hover:border-primary/40"
+                    data-testid={`analysis-result-${submission.id}`}
+                  >
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      {submission.submissionType === "url" ? (
+                        <LinkIcon className="h-5 w-5" />
+                      ) : (
+                        <FileText className="h-5 w-5" />
+                      )}
                     </div>
-                    <div className="truncate font-mono text-xs text-muted-foreground">
-                      SHA256: {(submission.fileHash ?? "—").substring(0, 16)}
-                      {submission.fileHash ? "…" : ""}
+
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium" data-testid={`filename-${submission.id}`}>
+                        {displayName}
+                      </div>
+                      <div className="truncate font-mono text-xs text-muted-foreground">
+                        SHA256: {(submission.fileHash ?? "—").substring(0, 16)}
+                        {submission.fileHash ? "…" : ""}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="hidden items-center gap-1.5 sm:flex">
-                    <StatusIcon
-                      className={`h-4 w-4 ${meta.className} ${submission.status === "analyzing" ? "animate-spin" : ""}`}
-                    />
-                    <span className={`text-sm font-medium ${meta.className}`}>{meta.label}</span>
-                  </div>
+                    <div className="hidden items-center gap-1.5 sm:flex">
+                      <StatusIcon
+                        className={`h-4 w-4 ${meta.className} ${currentStatus === "analyzing" ? "animate-spin" : ""}`}
+                      />
+                      <span className={`text-sm font-medium ${meta.className}`}>{meta.label}</span>
+                    </div>
 
-                  <Badge variant="outline" className="shrink-0 border-primary/30 bg-primary/10 font-mono text-primary">
-                    {submission.bountyAmount ?? 0} ETH
-                  </Badge>
-                </div>
+                    <Badge variant="outline" className="shrink-0 border-primary/30 bg-primary/10 font-mono text-primary">
+                      {submission.bountyAmount ?? 0} ETH
+                    </Badge>
+                  </div>
+                </Link>
               );
             })
           )}

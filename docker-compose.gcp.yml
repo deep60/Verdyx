@@ -111,6 +111,9 @@ services:
       - REPUTATION_SYSTEM_ADDRESS=${REPUTATION_SYSTEM_ADDRESS}
       - BOUNTY_MANAGER_ADDRESS=${BOUNTY_MANAGER_ADDRESS}
       - CHAIN_ID=${CHAIN_ID:-11155111}
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      - uploads_data:/app/uploads
     mem_limit: 192m
     depends_on:
       redis:
@@ -166,9 +169,11 @@ services:
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
       - DATABASE_URL=${PG_BASE_URL}/verdyx_analysis?sslmode=require
+      - GATEWAY_DATABASE_URL=${PG_BASE_URL}/verdyx_gateway?sslmode=require
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
+      - UPLOAD_DIR=/app/uploads
       - S3_ENDPOINT=${S3_ENDPOINT}
       - S3_REGION=${S3_REGION:-auto}
       - S3_BUCKET=${S3_BUCKET:-verdyx-submissions}
@@ -178,6 +183,8 @@ services:
       # No clamd on this box — the analyzer skips itself when disabled rather
       # than failing submissions.
       - ENABLE_CLAMAV=false
+    volumes:
+      - uploads_data:/app/uploads
     mem_limit: 224m
     depends_on:
       redis:
@@ -410,3 +417,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  uploads_data:

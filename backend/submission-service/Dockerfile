@@ -1,6 +1,11 @@
+# syntax=docker/dockerfile:1
 FROM rust:1.94-slim-bookworm AS builder
 RUN apt-get update && apt-get install -y pkg-config libssl-dev libpq-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+
+ENV CARGO_BUILD_JOBS=2 \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+    CARGO_PROFILE_RELEASE_LTO=false
 
 # Copy entire workspace (required for Cargo workspace)
 COPY Cargo.toml Cargo.lock ./
@@ -14,14 +19,18 @@ COPY payment-service ./payment-service
 COPY reputation-service ./reputation-service
 COPY submission-service ./submission-service
 COPY user-service ./user-service
+COPY proptest ./proptest
 
-# Build only this service
-RUN cargo build --release --bin submission-service
+# Build with locked BuildKit cache mounts so services share compiled crates and do not OOM
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --release --bin submission-service && \
+    cp /app/target/release/submission-service /app/app-bin
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates libssl3 libpq5 curl && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -u 1000 app
-COPY --from=builder /app/target/release/submission-service /usr/local/bin/app
+COPY --from=builder /app/app-bin /usr/local/bin/app
 RUN chown -R app:app /usr/local/bin/app
 USER app
 EXPOSE 8080

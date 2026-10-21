@@ -61,25 +61,50 @@ pub async fn get_current_user(
     let u = fetch_identity(&state, hm)
         .await
         .map_err(|c| StatusCode::from_u16(c).unwrap_or(StatusCode::BAD_GATEWAY))?;
-    Ok(Json(identity_to_profile(u)))
+    let rep = crate::handlers::auth::sync_user_to_gateway_db(&state, &u).await;
+    Ok(Json(identity_to_profile_with_stats(&state, u, rep).await))
 }
 
-/// Map a user-service identity into the gateway's `UserProfile`. Reputation and
-/// submission stats are owned by other services; use `/users/me/stats` for those.
-fn identity_to_profile(u: UserIdentity) -> UserProfile {
+/// Map a user-service identity into the gateway's `UserProfile` with live stats.
+async fn identity_to_profile_with_stats(
+    state: &AppState,
+    u: UserIdentity,
+    reputation_score: i32,
+) -> UserProfile {
+    let total_subs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM submissions WHERE submitter_id = $1")
+            .bind(u.id)
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap_or(0);
+
+    let completed_subs: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM submissions WHERE submitter_id = $1 AND analysis_status = 'completed'",
+    )
+    .bind(u.id)
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or(0);
+
+    let accuracy_rate = if total_subs > 0 {
+        (completed_subs as f64 / total_subs as f64) * 100.0
+    } else {
+        0.0
+    };
+
     UserProfile {
         id: u.id,
         username: u.username,
         email: u.email,
         ethereum_address: u.ethereum_address,
-        reputation_score: 0.0,
-        total_submissions: 0,
-        successful_submissions: 0,
-        accuracy_rate: 0.0,
+        reputation_score: reputation_score as f64,
+        total_submissions: total_subs as u32,
+        successful_submissions: completed_subs as u32,
+        accuracy_rate,
         total_earnings: "0".to_string(),
         rank: None,
         joined_at: u.created_at,
-        last_active_at: None,
+        last_active_at: Some(Utc::now()),
     }
 }
 
@@ -129,8 +154,7 @@ fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::V
 /// Update current user profile.
 ///
 /// PUT /api/v1/users/me — identity and profile writes are owned by user-service.
-/// This handler validates the obvious shape, then forwards the change. It does
-/// not update the gateway's copy of `users`.
+/// This handler validates the obvious shape, then forwards the change.
 pub async fn update_profile(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -193,12 +217,10 @@ pub async fn update_profile(
             "updated, but the new profile could not be read",
         )
     })?;
-    Ok(Json(identity_to_profile(u)))
+    let rep = crate::handlers::auth::sync_user_to_gateway_db(&state, &u).await;
+    Ok(Json(identity_to_profile_with_stats(&state, u, rep).await))
 }
 
-/// Get user statistics
-///
-/// GET /api/v1/users/me/stats
 /// Get user statistics
 ///
 /// GET /api/v1/users/me/stats
@@ -221,6 +243,13 @@ pub async fn get_user_stats(
             benign_detections: Some(0),
         });
 
+    let user_subs: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM submissions WHERE submitter_id = $1")
+            .bind(claims.sub)
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap_or((0,));
+
     // Query bounty and reward stats
     let bounties_created: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM bounties WHERE creator_id = $1")
@@ -237,28 +266,29 @@ pub async fn get_user_stats(
     .await
     .unwrap_or((0,));
 
-    let rewards_earned: (Option<i64>,) = sqlx::query_as(
-        "SELECT COALESCE(SUM(amount), 0) FROM payouts WHERE recipient = $1 AND status = 'Processed'"
+    let rewards_earned: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount)::text, '0') FROM payouts WHERE (recipient_id = $1 OR recipient = $2) AND status IN ('completed', 'Processed')",
     )
+    .bind(claims.sub)
     .bind(claims.sub.to_string())
     .fetch_one(state.db.pool())
     .await
-    .unwrap_or((Some(0),));
+    .unwrap_or_else(|_| "0".to_string());
 
-    let rewards_paid: (Option<i64>,) = sqlx::query_as(
-        "SELECT COALESCE(SUM(CAST(reward_amount AS BIGINT)), 0) FROM bounties WHERE creator_id = $1 AND bounty_status = 'completed'"
+    let rewards_paid: String = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(reward_amount)::text, '0') FROM bounties WHERE creator_id = $1 AND bounty_status = 'completed'",
     )
     .bind(claims.sub)
     .fetch_one(state.db.pool())
     .await
-    .unwrap_or((Some(0),));
+    .unwrap_or_else(|_| "0".to_string());
 
-    // Streak: count consecutive days with at least one analysis
+    // Streak: count consecutive days with at least one analysis or submission
     let streak_days: (i64,) = sqlx::query_as(
         r#"
         WITH daily AS (
-            SELECT DATE(created_at) as d FROM analysis_results
-            WHERE engine_id = $1::text
+            SELECT DATE(created_at) as d FROM submissions
+            WHERE submitter_id = $1
             GROUP BY DATE(created_at)
             ORDER BY d DESC
         ),
@@ -270,17 +300,17 @@ pub async fn get_user_stats(
         WHERE grp = (SELECT grp FROM ranked LIMIT 1)
         "#,
     )
-    .bind(claims.sub.to_string())
+    .bind(claims.sub)
     .fetch_one(state.db.pool())
     .await
     .unwrap_or((0,));
 
     Ok(Json(UserStats {
-        total_analyses: stats.total_analyses.unwrap_or(0) as u64,
+        total_analyses: (stats.total_analyses.unwrap_or(0) + user_subs.0) as u64,
         total_bounties_created: bounties_created.0 as u64,
         total_bounties_participated: bounties_participated.0 as u64,
-        total_rewards_earned: rewards_earned.0.unwrap_or(0).to_string(),
-        total_rewards_paid: rewards_paid.0.unwrap_or(0).to_string(),
+        total_rewards_earned: rewards_earned,
+        total_rewards_paid: rewards_paid,
         average_accuracy: stats.avg_confidence.unwrap_or(0.0),
         streak_days: streak_days.0 as u32,
     }))
@@ -421,9 +451,54 @@ pub async fn get_user_stats_by_id(
 
 /// List current user's API keys
 pub async fn list_api_keys(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
 ) -> Result<Json<Vec<serde_json::Value>>, StatusCode> {
-    Ok(Json(vec![]))
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(
+        Uuid,
+        String,
+        Vec<String>,
+        Option<i32>,
+        Option<bool>,
+        Option<DateTime<Utc>>,
+        DateTime<Utc>,
+        Option<DateTime<Utc>>,
+    )> = sqlx::query_as(
+        r#"
+        SELECT id, name, COALESCE(permissions, ARRAY['read']), rate_limit, is_active, last_used_at, created_at, expires_at
+        FROM api_keys
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        "#,
+    )
+    .bind(claims.sub)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to list API keys: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let keys = rows
+        .into_iter()
+        .map(
+            |(id, name, permissions, rate_limit, is_active, last_used_at, created_at, expires_at)| {
+                serde_json::json!({
+                    "id": id,
+                    "name": name,
+                    "permissions": permissions,
+                    "rateLimit": rate_limit.unwrap_or(1000),
+                    "isActive": is_active.unwrap_or(true),
+                    "lastUsedAt": last_used_at,
+                    "createdAt": created_at,
+                    "expiresAt": expires_at,
+                })
+            },
+        )
+        .collect();
+
+    Ok(Json(keys))
 }
 
 /// Revoke an API key

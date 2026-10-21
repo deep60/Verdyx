@@ -190,7 +190,7 @@ services:
   # calls ensure_bucket_exists() at startup and will not boot without a
   # reachable S3 endpoint.
   minio:
-    image: minio/minio:latest
+    image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     container_name: verdyx-minio-prod
     command: server /data --console-address ":9001"
     environment:

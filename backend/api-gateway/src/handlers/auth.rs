@@ -377,17 +377,32 @@ fn verify_wallet_signature(address: &str, signature: &str, message: &str) -> boo
     recovered_hex.eq_ignore_ascii_case(address)
 }
 
-/// Verify email address
+/// Verify email address — proxy to user-service
 pub async fn verify_email(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    if let Some(hm) = bearer_map(&headers) {
+        if let Ok(resp) = state
+            .proxy
+            .post("user-service", "/api/v1/auth/verify-email", payload.clone(), Some(hm))
+            .await
+        {
+            if resp.status().is_success() {
+                return Ok(Json(serde_json::json!({
+                    "success": true,
+                    "message": "Email verified successfully"
+                })));
+            }
+        }
+    }
+
     let token = payload
         .get("token")
         .and_then(|t| t.as_str())
         .ok_or(StatusCode::BAD_REQUEST)?;
 
-    // Look up verification token in Redis
     let user_id_str = state
         .redis
         .get_raw(format!("email_verify:{token}"))
@@ -397,14 +412,12 @@ pub async fn verify_email(
 
     let user_id = Uuid::parse_str(&user_id_str).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    // Mark user as verified
     sqlx::query("UPDATE users SET is_verified = true WHERE id = $1")
         .bind(user_id)
         .execute(state.db.pool())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Clean up token
     let _ = state
         .redis
         .delete_raw(format!("email_verify:{token}"))
@@ -416,7 +429,7 @@ pub async fn verify_email(
     })))
 }
 
-/// Forgot password — send reset link
+/// Forgot password — delegate to user-service
 pub async fn forgot_password(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
@@ -426,15 +439,37 @@ pub async fn forgot_password(
         .and_then(|e| e.as_str())
         .ok_or(StatusCode::BAD_REQUEST)?;
 
-    // Find user by email (always return success to prevent user enumeration)
+    // Forward to user-service (source of truth for user accounts)
+    if let Ok(resp) = state
+        .proxy
+        .post(
+            "user-service",
+            "/api/v1/auth/forgot-password",
+            serde_json::json!({ "email": email }),
+            None,
+        )
+        .await
+    {
+        if resp.status().is_success() {
+            let body: serde_json::Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
+            return Ok(Json(serde_json::json!({
+                "success": true,
+                "message": "If an account with that email exists, a password reset link has been sent",
+                "resetUrl": body.get("resetUrl").cloned().unwrap_or(serde_json::Value::Null),
+                "resetToken": body.get("resetToken").cloned().unwrap_or(serde_json::Value::Null),
+            })));
+        }
+    }
+
+    // Fallback to local gateway DB if user-service is unreachable
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
         .bind(email)
         .fetch_optional(state.db.pool())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let mut reset_url: Option<String> = None;
     if let Some(user) = user {
-        // Generate reset token and store in Redis with 1-hour expiry
         let reset_token = Uuid::new_v4().to_string();
         let _ = state
             .redis
@@ -445,17 +480,22 @@ pub async fn forgot_password(
             )
             .await;
 
-        // Email delivery not yet connected. Log the reset link for development use.\n        // In production, integrate with an email provider (SendGrid, SES, etc.).\n        tracing::info!(\n            user_id = %user.id,\n            \"Password reset link: /reset-password?token={}\",\n            reset_token\n        );
+        tracing::info!(
+            user_id = %user.id,
+            "Password reset link: /reset-password?token={}",
+            reset_token
+        );
+        reset_url = Some(format!("/reset-password?token={reset_token}"));
     }
 
-    // Always return success to prevent email enumeration
     Ok(Json(serde_json::json!({
         "success": true,
-        "message": "If an account with that email exists, a password reset link has been sent"
+        "message": "If an account with that email exists, a password reset link has been sent",
+        "resetUrl": reset_url,
     })))
 }
 
-/// Reset password
+/// Reset password — delegate to user-service
 pub async fn reset_password(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
@@ -466,6 +506,7 @@ pub async fn reset_password(
         .ok_or(StatusCode::BAD_REQUEST)?;
     let new_password = payload
         .get("password")
+        .or_else(|| payload.get("new_password"))
         .and_then(|p| p.as_str())
         .ok_or(StatusCode::BAD_REQUEST)?;
 
@@ -473,7 +514,29 @@ pub async fn reset_password(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Validate reset token
+    // Forward to user-service first
+    if let Ok(resp) = state
+        .proxy
+        .post(
+            "user-service",
+            "/api/v1/auth/reset-password",
+            serde_json::json!({
+                "token": token,
+                "new_password": new_password,
+            }),
+            None,
+        )
+        .await
+    {
+        if resp.status().is_success() {
+            return Ok(Json(serde_json::json!({
+                "success": true,
+                "message": "Password reset successfully"
+            })));
+        }
+    }
+
+    // Fallback to gateway Redis/DB
     let user_id_str = state
         .redis
         .get_raw(format!("password_reset:{token}"))
@@ -481,20 +544,18 @@ pub async fn reset_password(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::BAD_REQUEST)?;
 
-    let _user_id = Uuid::parse_str(&user_id_str).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let user_id = Uuid::parse_str(&user_id_str).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    // Hash the new password
     let password_hash =
         hash_password(new_password).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Update password
-    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
         .bind(&password_hash)
+        .bind(user_id)
         .execute(state.db.pool())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Invalidate the reset token
     let _ = state
         .redis
         .delete_raw(format!("password_reset:{token}"))
@@ -506,38 +567,59 @@ pub async fn reset_password(
     })))
 }
 
-/// Generate API key
+/// Generate API key (validates JWT via claims or user-service identity)
 pub async fn generate_api_key(
     headers: HeaderMap,
     State(state): State<AppState>,
+    payload: Option<Json<serde_json::Value>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let user = authenticate_user(&headers, &state)
-        .await
-        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let token = extract_token_from_header(&headers).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let user_id = match crate::utils::crypto::validate_jwt(&token, &state.config.security.jwt_secret) {
+        Ok(claims) => Uuid::parse_str(&claims.sub).map_err(|_| StatusCode::UNAUTHORIZED)?,
+        Err(_) => {
+            let hm = bearer_map(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+            let identity = fetch_identity(&state, hm)
+                .await
+                .map_err(|_| StatusCode::UNAUTHORIZED)?;
+            sync_user_to_gateway_db(&state, &identity).await;
+            identity.id
+        }
+    };
+
+    let key_name = payload
+        .as_ref()
+        .and_then(|p| p.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Default API Key");
 
     // Generate a random API key
-    let raw_key = format!("nxs_{}", Uuid::new_v4().to_string().replace("-", ""));
+    let raw_key = format!("vdx_{}", Uuid::new_v4().to_string().replace("-", ""));
     let key_hash = hash_password(&raw_key).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let key_id = Uuid::new_v4();
+    let now = Utc::now();
 
     // Store hashed key in database
     sqlx::query(
-        "INSERT INTO api_keys (id, user_id, key_hash, name, created_at) VALUES ($1, $2, $3, $4, $5)"
+        "INSERT INTO api_keys (id, user_id, key_hash, name, created_at) VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(key_id)
-    .bind(user.id)
+    .bind(user_id)
     .bind(&key_hash)
-    .bind("Default API Key")
-    .bind(Utc::now())
+    .bind(key_name)
+    .bind(now)
     .execute(state.db.pool())
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        tracing::error!("Failed to store API key: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    // Return the raw key (only shown once)
     Ok(Json(serde_json::json!({
         "success": true,
         "api_key": raw_key,
         "key_id": key_id,
+        "name": key_name,
+        "created_at": now,
         "message": "Store this key securely — it will not be shown again"
     })))
 }
@@ -548,19 +630,53 @@ pub async fn generate_api_key(
 // the gateway's ProxyService and translate user-service's snake_case contract
 // into the gateway's public camelCase contract, so the frontend is unaffected.
 
+/// Sync user-service identity into the gateway's local `users` table so foreign
+/// keys (`bounties`, `webhooks`, `reputation_history`, `api_keys`) and the
+/// leaderboard always have the user row. Returns the user's reputation_score.
+pub async fn sync_user_to_gateway_db(state: &AppState, u: &UserIdentity) -> i32 {
+    let score: Option<i32> = sqlx::query_scalar(
+        r#"
+        INSERT INTO users (id, username, email, password_hash, wallet_address, reputation_score, is_verified, is_active, created_at, updated_at)
+        VALUES ($1, $2, $3, 'managed_by_user_service', $4, 100, $5, true, $6, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+            username = EXCLUDED.username,
+            email = EXCLUDED.email,
+            wallet_address = COALESCE(EXCLUDED.wallet_address, users.wallet_address),
+            is_verified = EXCLUDED.is_verified,
+            updated_at = NOW()
+        RETURNING reputation_score
+        "#,
+    )
+    .bind(u.id)
+    .bind(&u.username)
+    .bind(&u.email)
+    .bind(&u.ethereum_address)
+    .bind(u.email_verified)
+    .bind(u.created_at)
+    .fetch_optional(state.db.pool())
+    .await
+    .ok()
+    .flatten();
+
+    score.unwrap_or(100)
+}
+
 /// Adapt a user-service identity into the gateway's public `UserResponse`.
-fn to_user_response(u: UserIdentity) -> UserResponse {
+fn to_user_response_with_rep(u: UserIdentity, reputation_score: i32) -> UserResponse {
     UserResponse {
         id: u.id,
         username: u.username,
         email: u.email,
         wallet_address: u.ethereum_address,
-        // Reputation/earnings are owned by reputation-service; default here.
-        reputation_score: 0,
+        reputation_score,
         total_earnings: "0".to_string(),
         created_at: u.created_at,
         is_verified: u.email_verified,
     }
+}
+
+fn to_user_response(u: UserIdentity) -> UserResponse {
+    to_user_response_with_rep(u, 100)
 }
 
 /// user-service's auth response shape (snake_case).
@@ -571,17 +687,6 @@ struct UsAuthResponse {
     user: UserIdentity,
     #[serde(default)]
     expires_in: i64,
-}
-
-impl From<UsAuthResponse> for AuthResponse {
-    fn from(a: UsAuthResponse) -> Self {
-        Self {
-            user: to_user_response(a.user),
-            access_token: a.access_token,
-            refresh_token: a.refresh_token,
-            expires_in: if a.expires_in > 0 { a.expires_in } else { 3600 },
-        }
-    }
 }
 
 /// Map a downstream auth error status code to the gateway's ApiError.
@@ -614,7 +719,14 @@ async fn forward_auth(
             .json()
             .await
             .map_err(|e| ApiError::Internal(format!("invalid user-service response: {e}")))?;
-        Ok(Json(ApiResponse::success(ua.into())))
+        let rep = sync_user_to_gateway_db(state, &ua.user).await;
+        let auth_resp = AuthResponse {
+            user: to_user_response_with_rep(ua.user, rep),
+            access_token: ua.access_token,
+            refresh_token: ua.refresh_token,
+            expires_in: if ua.expires_in > 0 { ua.expires_in } else { 3600 },
+        };
+        Ok(Json(ApiResponse::success(auth_resp)))
     } else {
         // Prefer the downstream error message when present.
         let msg = resp
@@ -638,7 +750,10 @@ async fn identity_as_user_response(
 ) -> ApiResult<Json<ApiResponse<UserResponse>>> {
     let hm = bearer_map(headers).ok_or(ApiError::Unauthorized)?;
     match fetch_identity(state, hm).await {
-        Ok(u) => Ok(Json(ApiResponse::success(to_user_response(u)))),
+        Ok(u) => {
+            let rep = sync_user_to_gateway_db(state, &u).await;
+            Ok(Json(ApiResponse::success(to_user_response_with_rep(u, rep))))
+        }
         Err(code) => Err(map_auth_status(code)),
     }
 }

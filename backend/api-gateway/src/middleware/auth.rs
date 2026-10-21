@@ -284,6 +284,20 @@ where
     }
 }
 
+impl<S> axum::extract::OptionalFromRequestParts<S> for Claims
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        Ok(parts.extensions.get::<Claims>().cloned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

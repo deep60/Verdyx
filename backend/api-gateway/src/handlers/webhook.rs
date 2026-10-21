@@ -110,6 +110,33 @@ pub struct WebhookEvent {
     pub category: String,
 }
 
+fn is_safe_webhook_url(raw_url: &str) -> bool {
+    let parsed = match reqwest::Url::parse(raw_url) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    if parsed.scheme() != "https" && parsed.scheme() != "http" {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let lower = host.to_lowercase();
+    if lower == "localhost"
+        || lower == "0.0.0.0"
+        || lower == "::1"
+        || lower.starts_with("127.")
+        || lower.starts_with("10.")
+        || lower.starts_with("192.168.")
+        || lower.starts_with("169.254.")
+        || lower.ends_with(".internal")
+        || lower.ends_with(".local")
+    {
+        return false;
+    }
+    true
+}
+
 // ─── Handlers ───
 
 /// Create a webhook
@@ -118,6 +145,10 @@ pub async fn create_webhook(
     claims: crate::middleware::auth::Claims,
     Json(payload): Json<RegisterWebhookRequest>,
 ) -> Result<Json<Webhook>, StatusCode> {
+    if !is_safe_webhook_url(&payload.url) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
     // Generate a random secret for HMAC signing
     let secret = format!(
         "whsec_{}",
@@ -213,6 +244,12 @@ pub async fn update_webhook(
     Path(webhook_id): Path<Uuid>,
     Json(payload): Json<UpdateWebhookRequest>,
 ) -> Result<Json<Webhook>, StatusCode> {
+    if let Some(ref u) = payload.url {
+        if !is_safe_webhook_url(u) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+
     // Build dynamic UPDATE query
     let webhook = sqlx::query_as::<_, Webhook>(
         "UPDATE webhooks SET
@@ -269,16 +306,24 @@ pub async fn delete_webhook(
 /// Test webhook by sending a sample event
 pub async fn test_webhook(
     State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
     Path(webhook_id): Path<Uuid>,
     Json(payload): Json<TestWebhookRequest>,
 ) -> Result<Json<WebhookDelivery>, StatusCode> {
-    // First fetch the webhook
-    let webhook = sqlx::query_as::<_, Webhook>("SELECT * FROM webhooks WHERE id = $1")
-        .bind(webhook_id)
-        .fetch_optional(state.db.pool())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+    // Verify ownership of the webhook
+    let webhook = sqlx::query_as::<_, Webhook>(
+        "SELECT * FROM webhooks WHERE id = $1 AND user_id = $2",
+    )
+    .bind(webhook_id)
+    .bind(claims.sub)
+    .fetch_optional(state.db.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if !is_safe_webhook_url(&webhook.url) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let test_payload = payload.sample_payload.unwrap_or(serde_json::json!({
         "event": payload.event_type,
@@ -342,9 +387,23 @@ pub async fn test_webhook(
 /// Get webhook deliveries
 pub async fn get_webhook_deliveries(
     State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
     Path(webhook_id): Path<Uuid>,
     Query(params): Query<DeliveryQuery>,
 ) -> Result<Json<DeliveryListResponse>, StatusCode> {
+    // Verify ownership of the webhook first
+    let owns: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM webhooks WHERE id = $1 AND user_id = $2")
+            .bind(webhook_id)
+            .bind(claims.sub)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if owns.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
     let page = params.page.unwrap_or(1);
     let limit = params.limit.unwrap_or(20).min(100);
     let offset = (page.saturating_sub(1)) * limit;

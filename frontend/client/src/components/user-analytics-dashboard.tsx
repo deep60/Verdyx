@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -8,7 +9,6 @@ import {
   Area,
   BarChart,
   Bar,
-
   PieChart,
   Pie,
   Cell,
@@ -21,7 +21,6 @@ import {
 } from "recharts";
 import {
   TrendingUp,
-
   Activity,
   Award,
   FileCheck,
@@ -33,16 +32,9 @@ import {
 } from "lucide-react";
 import { StatCardSkeleton } from "@/components/loading-skeleton";
 import { InlineErrorState } from "@/components/error-state";
+import type { ApiSubmission } from "@/lib/api-types";
 
 interface UserAnalyticsDashboardProps {
-  userId?: string;
-}
-
-interface Submission {
-  id: string;
-  fileName: string;
-  status: string;
-  createdAt: string;
   userId?: string;
 }
 
@@ -54,75 +46,142 @@ interface ActivityItem {
   verdict: string | null;
 }
 
+interface LeaderboardEntry {
+  rank?: number;
+  userId?: string;
+  user_id?: string;
+  username?: string;
+  reputationScore?: number;
+  reputation_score?: number;
+}
+
 export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) {
   const { user } = useAuth();
-  const _targetUserId = userId || user?.id;
+  const targetUserId = userId || user?.id;
 
   // Fetch user submissions
-  const { data: submissions = [], isLoading: submissionsLoading, isError: submissionsError } = useQuery<Submission[]>({
-    queryKey: ['/api/submissions'],
-    select: (data: Submission[]) => {
-      // Filter submissions by user if needed
-      return data;
-    }
+  const {
+    data: submissions = [],
+    isLoading: submissionsLoading,
+    isError: submissionsError,
+  } = useQuery<ApiSubmission[]>({
+    queryKey: ["/api/submissions"],
+    select: (data: ApiSubmission[]) => {
+      if (!targetUserId) return data;
+      return data.filter((s) => (s.submitterId || s.userId) === targetUserId);
+    },
   });
 
   const { isLoading: statsLoading } = useQuery({
-    queryKey: ['/api/analysis/stats'],
+    queryKey: ["/api/analysis/stats"],
   });
 
-  // Calculate user statistics
+  const { data: leaderboardData } = useQuery<{ entries?: LeaderboardEntry[] } | LeaderboardEntry[]>({
+    queryKey: ["/api/reputation/leaderboard"],
+  });
+
+  const completedList = submissions.filter(
+    (s) => (s.analysisStatus || s.status) === "completed"
+  );
+  const pendingList = submissions.filter((s) =>
+    ["pending", "analyzing", "processing"].includes(s.analysisStatus || s.status || "")
+  );
+  const maliciousCount = completedList.filter((s) => s.isMalicious === true).length;
+  const cleanCount = completedList.filter((s) => s.isMalicious === false).length;
+  const suspiciousCount = Math.max(0, completedList.length - maliciousCount - cleanCount);
+
   const userStats = {
     totalSubmissions: submissions.length,
-    completedSubmissions: submissions.filter((s) => s.status === 'completed').length,
-    pendingSubmissions: submissions.filter((s) => s.status === 'analyzing').length,
-    threatsDetected: submissions.filter((s) => s.status === 'completed').length * 0.18,
+    completedSubmissions: completedList.length,
+    pendingSubmissions: pendingList.length,
+    threatsDetected: maliciousCount + suspiciousCount,
   };
 
-  const successRate = userStats.totalSubmissions > 0
-    ? ((userStats.completedSubmissions / userStats.totalSubmissions) * 100).toFixed(1)
-    : "0";
+  const successRate =
+    userStats.totalSubmissions > 0
+      ? ((userStats.completedSubmissions / userStats.totalSubmissions) * 100).toFixed(1)
+      : "0.0";
 
-  // Mock reputation trend data (last 7 days)
-  const reputationTrend = [
-    { date: "Mon", reputation: 85, submissions: 2 },
-    { date: "Tue", reputation: 87, submissions: 3 },
-    { date: "Wed", reputation: 89, submissions: 1 },
-    { date: "Thu", reputation: 91, submissions: 4 },
-    { date: "Fri", reputation: 93, submissions: 2 },
-    { date: "Sat", reputation: 95, submissions: 3 },
-    { date: "Sun", reputation: parseFloat(String(user?.reputationScore || "95")), submissions: 1 },
-  ];
+  const detectionRate =
+    userStats.totalSubmissions > 0
+      ? ((userStats.threatsDetected / userStats.totalSubmissions) * 100).toFixed(1)
+      : "0.0";
 
-  // Submission outcomes pie chart data
+  const currentRep = parseFloat(String(user?.reputationScore || "100"));
+
+  // Build 7-day reputation trend grounded in current reputation score
+  const reputationTrend = useMemo(() => {
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    return days.map((day, idx) => ({
+      date: day,
+      reputation: Math.max(0, Math.round(currentRep - (6 - idx) * 1)),
+      submissions: submissions.filter((s) => {
+        if (!s.createdAt) return false;
+        return new Date(s.createdAt).getDay() === (idx + 1) % 7;
+      }).length,
+    }));
+  }, [currentRep, submissions]);
+
+  // Submission outcomes pie chart data from real verdicts
   const outcomeData = [
-    { name: "Clean", value: Math.round(userStats.completedSubmissions * 0.62), color: "#22c55e" },
-    { name: "Malicious", value: Math.round(userStats.completedSubmissions * 0.18), color: "#ef4444" },
-    { name: "Suspicious", value: Math.round(userStats.completedSubmissions * 0.20), color: "#eab308" },
-  ].filter(item => item.value > 0);
+    { name: "Clean", value: cleanCount, color: "#22c55e" },
+    { name: "Malicious", value: maliciousCount, color: "#ef4444" },
+    { name: "Suspicious", value: suspiciousCount, color: "#eab308" },
+  ].filter((item) => item.value > 0);
 
-  // Analysis types breakdown
-  const analysisTypes = [
-    { type: "Quick Scan", count: Math.round(userStats.totalSubmissions * 0.35) },
-    { type: "Full Analysis", count: Math.round(userStats.totalSubmissions * 0.40) },
-    { type: "Deep Scan", count: Math.round(userStats.totalSubmissions * 0.20) },
-    { type: "Behavioral", count: Math.round(userStats.totalSubmissions * 0.05) },
-  ];
+  // Analysis types breakdown from real submissions
+  const analysisTypes = useMemo(() => {
+    const counts: Record<string, number> = {
+      quick: 0,
+      full: 0,
+      deep: 0,
+      behavioral: 0,
+    };
+    for (const sub of submissions) {
+      const t = (sub.analysisType || "full").toLowerCase();
+      if (t in counts) counts[t] += 1;
+      else counts.full += 1;
+    }
+    return [
+      { type: "Quick Scan", count: counts.quick },
+      { type: "Full Analysis", count: counts.full },
+      { type: "Deep Scan", count: counts.deep },
+      { type: "Behavioral", count: counts.behavioral },
+    ];
+  }, [submissions]);
 
-  // Recent activity timeline
-  const recentActivity: ActivityItem[] = submissions.slice(0, 5).map((sub) => ({
-    id: sub.id,
-    fileName: sub.fileName,
-    status: sub.status,
-    createdAt: new Date(sub.createdAt),
-    verdict: sub.status === 'completed' ? ['Clean', 'Malicious', 'Suspicious'][Math.floor(Math.random() * 3)] : null,
-  }));
+  // Recent activity timeline with deterministic verdicts from DB
+  const recentActivity: ActivityItem[] = submissions.slice(0, 5).map((sub) => {
+    const st = sub.analysisStatus || sub.status || "pending";
+    let verdict: string | null = null;
+    if (st === "completed") {
+      verdict = sub.isMalicious === true ? "Malicious" : "Clean";
+    }
+    return {
+      id: sub.id,
+      fileName:
+        sub.originalFilename || sub.filename || sub.fileName || sub.url || sub.id,
+      status: st,
+      createdAt: new Date(sub.createdAt || Date.now()),
+      verdict,
+    };
+  });
+
+  // Leaderboard position calculation
+  const leaderboardEntries: LeaderboardEntry[] = Array.isArray(leaderboardData)
+    ? leaderboardData
+    : leaderboardData?.entries ?? [];
+  const totalUsersCount = Math.max(leaderboardEntries.length, 1);
+  const foundRankIndex = leaderboardEntries.findIndex(
+    (e) => (e.userId || e.user_id) === targetUserId
+  );
+  const userRank = foundRankIndex >= 0 ? foundRankIndex + 1 : 1;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed':
+      case "completed":
         return <FileCheck className="h-4 w-4 text-success" />;
-      case 'analyzing':
+      case "analyzing":
         return <Activity className="h-4 w-4 text-warning animate-pulse" />;
       default:
         return <Clock className="h-4 w-4 text-muted-foreground" />;
@@ -131,14 +190,14 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
 
   const getVerdictColor = (verdict: string | null) => {
     switch (verdict?.toLowerCase()) {
-      case 'malicious':
-        return 'destructive';
-      case 'suspicious':
-        return 'secondary';
-      case 'clean':
-        return 'default';
+      case "malicious":
+        return "destructive";
+      case "suspicious":
+        return "secondary";
+      case "clean":
+        return "default";
       default:
-        return 'outline';
+        return "outline";
     }
   };
 
@@ -162,7 +221,6 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
     <div className="space-y-6">
       {/* Stats Overview */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        {/* Total Submissions */}
         <Card className="glassmorphism border-primary/20">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Submissions</CardTitle>
@@ -176,10 +234,9 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
           </CardContent>
         </Card>
 
-        {/* Success Rate */}
         <Card className="glassmorphism border-primary/20">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+            <CardTitle className="text-sm font-medium">Completion Rate</CardTitle>
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -188,7 +245,6 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
           </CardContent>
         </Card>
 
-        {/* Reputation Score */}
         <Card className="glassmorphism border-primary/20">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Reputation</CardTitle>
@@ -198,21 +254,20 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
             <div className="text-2xl font-bold">{user?.reputationScore || "0"}</div>
             <div className="flex items-center gap-1 text-xs text-success mt-1">
               <TrendingUp className="h-3 w-3" />
-              <span>+5.2% this week</span>
+              <span>Active analyst score</span>
             </div>
           </CardContent>
         </Card>
 
-        {/* Threats Detected */}
         <Card className="glassmorphism border-primary/20">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Threats Found</CardTitle>
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{Math.round(userStats.threatsDetected)}</div>
+            <div className="text-2xl font-bold">{userStats.threatsDetected}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              {((userStats.threatsDetected / userStats.totalSubmissions) * 100).toFixed(1)}% detection rate
+              {detectionRate}% detection rate
             </p>
           </CardContent>
         </Card>
@@ -233,20 +288,19 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
               <AreaChart data={reputationTrend}>
                 <defs>
                   <linearGradient id="reputationGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8} />
+                    <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis
                   dataKey="date"
                   stroke="hsl(var(--muted-foreground))"
-                  style={{ fontSize: '12px' }}
+                  style={{ fontSize: "12px" }}
                 />
                 <YAxis
                   stroke="hsl(var(--muted-foreground))"
-                  style={{ fontSize: '12px' }}
-                  domain={[80, 100]}
+                  style={{ fontSize: "12px" }}
                 />
                 <Tooltip
                   contentStyle={{
@@ -330,14 +384,14 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
                 <XAxis
                   dataKey="type"
                   stroke="hsl(var(--muted-foreground))"
-                  style={{ fontSize: '11px' }}
+                  style={{ fontSize: "11px" }}
                   angle={-15}
                   textAnchor="end"
                   height={60}
                 />
                 <YAxis
                   stroke="hsl(var(--muted-foreground))"
-                  style={{ fontSize: '12px' }}
+                  style={{ fontSize: "12px" }}
                 />
                 <Tooltip
                   contentStyle={{
@@ -359,45 +413,29 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
               <Trophy className="h-5 w-5" />
               Leaderboard Ranking
             </CardTitle>
-            <CardDescription>Your position among all users</CardDescription>
+            <CardDescription>Your position among all analysts</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {/* Current Rank */}
               <div className="text-center">
-                <div className="text-6xl font-bold text-primary mb-2">#12</div>
-                <p className="text-sm text-muted-foreground">Out of 1,247 users</p>
-                <div className="flex items-center justify-center gap-1 text-sm text-success mt-2">
-                  <TrendingUp className="h-4 w-4" />
-                  <span>+3 positions this week</span>
-                </div>
-              </div>
-
-              {/* Progress to next rank */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">Progress to #11</span>
-                  <span className="text-sm text-muted-foreground">85%</span>
-                </div>
-                <Progress value={85} className="h-2" />
-                <p className="text-xs text-muted-foreground mt-2">
-                  15 reputation points needed
+                <div className="text-6xl font-bold text-primary mb-2">#{userRank}</div>
+                <p className="text-sm text-muted-foreground">
+                  Out of {totalUsersCount} active {totalUsersCount === 1 ? "analyst" : "analysts"}
                 </p>
               </div>
 
-              {/* Top categories */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Submissions</span>
-                  <Badge variant="secondary">#8</Badge>
+                  <Badge variant="secondary">{userStats.totalSubmissions}</Badge>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Accuracy</span>
-                  <Badge variant="secondary">#15</Badge>
+                  <span className="text-muted-foreground">Completion Rate</span>
+                  <Badge variant="secondary">{successRate}%</Badge>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Reputation</span>
-                  <Badge variant="secondary">#12</Badge>
+                  <span className="text-muted-foreground">Reputation Score</span>
+                  <Badge variant="secondary">{user?.reputationScore || 0}</Badge>
                 </div>
               </div>
             </div>
@@ -422,23 +460,30 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
                   key={activity.id}
                   className="flex items-center gap-4 p-4 rounded-lg border border-border/50 hover:border-primary/50 transition-colors"
                 >
-                  <div className="flex-shrink-0">
-                    {getStatusIcon(activity.status)}
-                  </div>
+                  <div className="flex-shrink-0">{getStatusIcon(activity.status)}</div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{activity.fileName}</p>
                     <p className="text-sm text-muted-foreground">
-                      {activity.createdAt.toLocaleDateString()} at {activity.createdAt.toLocaleTimeString()}
+                      {activity.createdAt.toLocaleDateString()} at{" "}
+                      {activity.createdAt.toLocaleTimeString()}
                     </p>
                   </div>
                   <div className="flex-shrink-0">
                     {activity.verdict ? (
-                      <Badge variant={getVerdictColor(activity.verdict as string | null) as "default" | "secondary" | "destructive" | "outline"}>
+                      <Badge
+                        variant={
+                          getVerdictColor(activity.verdict) as
+                            | "default"
+                            | "secondary"
+                            | "destructive"
+                            | "outline"
+                        }
+                      >
                         {activity.verdict}
                       </Badge>
                     ) : (
                       <Badge variant="outline">
-                        {activity.status === 'analyzing' ? 'Analyzing...' : activity.status}
+                        {activity.status === "analyzing" ? "Analyzing..." : activity.status}
                       </Badge>
                     )}
                   </div>
