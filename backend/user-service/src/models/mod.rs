@@ -123,7 +123,10 @@ pub struct RegisterRequest {
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct LoginRequest {
-    #[validate(email)]
+    /// Email address or username. Kept as `email` on the wire for existing
+    /// clients; values without an `@` are looked up as a username.
+    #[serde(alias = "identifier")]
+    #[validate(length(min = 1, max = 255))]
     pub email: String,
 
     pub password: String,

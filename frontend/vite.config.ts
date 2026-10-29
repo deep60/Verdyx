@@ -1,21 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 export default defineConfig({
-  plugins: [
-    react(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-      process.env.REPL_ID !== undefined
-      ? [
-        await import("@replit/vite-plugin-cartographer").then((m) =>
-          m.cartographer(),
-        ),
-      ]
-      : []),
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
@@ -30,13 +18,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': {
-        target: process.env.API_GATEWAY_URL || 'http://localhost:8080',
+      "/api": {
+        target: process.env.API_GATEWAY_URL || "http://localhost:8080",
         changeOrigin: true,
-        rewrite: (path: string) => path.startsWith('/api/v1') ? path : path.replace(/^\/api/, '/api/v1'),
+        rewrite: (reqPath: string) =>
+          reqPath.startsWith("/api/v1") ? reqPath : reqPath.replace(/^\/api/, "/api/v1"),
       },
-      '/ws': {
-        target: process.env.WS_GATEWAY_URL || 'ws://localhost:8080',
+      "/ws": {
+        target: process.env.WS_GATEWAY_URL || "ws://localhost:8080",
         ws: true,
       },
     },

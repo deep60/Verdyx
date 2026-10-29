@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRoute } from "wouter";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Navigation } from "@/components/navigation";
-import { ParticleBackground } from "@/components/particle-background";
 import { SEO } from "@/components/seo";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,7 +10,12 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExportReport } from "@/components/export-report";
+import { CommitRevealPanel } from "@/components/commit-reveal-panel";
 import { WebsiteIntelligencePanel } from "@/components/website-intelligence-panel";
+import { EmailForensicsPanel } from "@/components/email-forensics-panel";
+import { AttackMatrix } from "@/components/attack-matrix";
+import { IocGraph } from "@/components/ioc-graph";
+import { mapAttackTechniques } from "@/lib/attack-mapping";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -20,6 +24,7 @@ import {
   Clock,
   CheckCircle2,
   Shield,
+  Share2,
   TrendingUp,
   Bot,
   User,
@@ -28,9 +33,9 @@ import {
   Info,
   AlertCircle,
   Play,
-  ThumbsUp,
   Globe,
   Cpu,
+  Mail,
 } from "lucide-react";
 import { StatCardSkeleton, SubmissionSkeleton } from "@/components/loading-skeleton";
 import { ErrorState } from "@/components/error-state";
@@ -40,8 +45,7 @@ export default function AnalysisDetails() {
   const [, params] = useRoute("/analysis/:id");
   const submissionId = params?.id;
   const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [selectedVote, setSelectedVote] = useState<string | null>(null);
+  const [hideAnalystTally, setHideAnalystTally] = useState(false);
 
   // Fetch submission details (auto-poll while pending/analyzing)
   const {
@@ -100,32 +104,6 @@ export default function AnalysisDetails() {
     },
   });
 
-  const voteMutation = useMutation({
-    mutationFn: async (verdict: string) => {
-      const res = await apiRequest("POST", `/api/submissions/${submissionId}/vote`, {
-        verdict,
-        confidence: 0.9,
-      });
-      return res.json();
-    },
-    onSuccess: (_data, verdict) => {
-      setSelectedVote(verdict);
-      toast({
-        title: "Vote recorded",
-        description: `Your ${verdict} verdict has been recorded for consensus.`,
-      });
-      refetchConsensus();
-      queryClient.invalidateQueries({ queryKey: [`/api/submissions/${submissionId}/consensus`] });
-    },
-    onError: (err) => {
-      toast({
-        title: "Could not submit vote",
-        description: err instanceof Error ? err.message : "You may have already voted on this submission.",
-        variant: "destructive",
-      });
-    },
-  });
-
   // Real-time updates via WebSocket
   const { lastMessage } = useWebSocket();
 
@@ -147,11 +125,43 @@ export default function AnalysisDetails() {
     }
   }, [lastMessage, submissionId, refetchSubmission, refetchAnalyses, refetchConsensus]);
 
+  const targetLabel =
+    submission?.originalFilename ||
+    submission?.filename ||
+    submission?.fileName ||
+    submission?.url ||
+    "";
+  const isUrlTarget = Boolean(
+    submission &&
+      (submission.submissionType === "url" ||
+        submission.url ||
+        targetLabel.startsWith("http://") ||
+        targetLabel.startsWith("https://")),
+  );
+  const isEmailTarget = Boolean(
+    submission &&
+      (submission.submissionType === "email" ||
+        targetLabel.toLowerCase().endsWith(".eml") ||
+        targetLabel.toLowerCase().endsWith(".mime") ||
+        analyses.some((a) => (a.engine?.name || "").toLowerCase().includes("email"))),
+  );
+
+  const { data: recentSubmissions = [] } = useQuery<ApiSubmission[]>({
+    queryKey: ["/api/submissions"],
+    enabled: Boolean(submission),
+  });
+
+  const { data: pageIntel } = useQuery<Record<string, unknown>>({
+    queryKey: [`/api/submissions/${submissionId}/web-intel`],
+    enabled: Boolean(submissionId) && isUrlTarget,
+  });
+
+  const attackTechniques = useMemo(() => mapAttackTechniques(analyses), [analyses]);
+
   if (submissionError || analysesError) {
     return (
       <div className="min-h-screen bg-background text-foreground">
         <SEO title="Error Loading Analysis" description="Failed to load analysis details." />
-        <ParticleBackground />
         <Navigation />
         <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <ErrorState
@@ -171,7 +181,6 @@ export default function AnalysisDetails() {
     return (
       <div className="min-h-screen bg-background text-foreground">
         <SEO title="Loading Analysis" description="Loading analysis details." />
-        <ParticleBackground />
         <Navigation />
         <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="grid md:grid-cols-3 gap-6 mb-8">
@@ -195,12 +204,6 @@ export default function AnalysisDetails() {
     submission.fileName ||
     submission.url ||
     submission.id;
-
-  const isUrlTarget =
-    submission.submissionType === "url" ||
-    Boolean(submission.url) ||
-    displayName.startsWith("http://") ||
-    displayName.startsWith("https://");
 
   const completedAnalyses = analyses.filter((a) => (a.status || a.analysisStatus) === "completed");
   const progress = analyses.length > 0 ? (completedAnalyses.length / analyses.length) * 100 : 0;
@@ -251,7 +254,6 @@ export default function AnalysisDetails() {
         title={displayName ? `Analysis: ${displayName}` : "Analysis Details"}
         description={submission.description || "Detailed malware analysis results and consensus score."}
       />
-      <ParticleBackground />
       <Navigation />
 
       <div id="main-content" tabIndex={-1} className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -279,6 +281,9 @@ export default function AnalysisDetails() {
               fileName={displayName}
               consensus={consensus as Record<string, unknown> | undefined}
               analyses={analyses as unknown as import("@/components/export-report").AnalysisRecord[]}
+              attackTechniques={attackTechniques}
+              sha256={submission.fileHash}
+              targetUrl={isUrlTarget ? submission.url || displayName : undefined}
             />
           </div>
         </div>
@@ -354,26 +359,32 @@ export default function AnalysisDetails() {
 
               <Separator className="my-6" />
 
-              <div className="grid grid-cols-3 gap-6">
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-display tracking-tight text-destructive">
-                    {consensus.maliciousVotes ?? 0}
+              {hideAnalystTally ? (
+                <p className="text-sm text-muted-foreground text-center" data-testid="text-tally-hidden">
+                  Analyst tallies stay hidden while votes are sealed. You can see how many people committed, not which verdict is ahead.
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 gap-6">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold font-display tracking-tight text-destructive">
+                      {consensus.maliciousVotes ?? 0}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Malicious Votes</div>
                   </div>
-                  <div className="text-sm text-muted-foreground">Malicious Votes</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-display tracking-tight text-secondary">
-                    {consensus.suspiciousVotes ?? 0}
+                  <div className="text-center">
+                    <div className="text-3xl font-bold font-display tracking-tight text-secondary">
+                      {consensus.suspiciousVotes ?? 0}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Suspicious Votes</div>
                   </div>
-                  <div className="text-sm text-muted-foreground">Suspicious Votes</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-display tracking-tight text-success">
-                    {consensus.cleanVotes ?? consensus.benignVotes ?? 0}
+                  <div className="text-center">
+                    <div className="text-3xl font-bold font-display tracking-tight text-success">
+                      {consensus.cleanVotes ?? consensus.benignVotes ?? 0}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Clean Votes</div>
                   </div>
-                  <div className="text-sm text-muted-foreground">Clean Votes</div>
                 </div>
-              </div>
+              )}
 
               {consensus.explanation && (
                 <div className="mt-6 p-4 rounded-lg bg-card/60 border border-primary/20 text-sm">
@@ -404,33 +415,12 @@ export default function AnalysisDetails() {
 
               <Separator className="my-6" />
 
-              {/* Analyst Community Verification Vote */}
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-semibold flex items-center gap-2">
-                    <ThumbsUp className="h-4 w-4 text-primary" />
-                    Submit Analyst Verdict Vote
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Contribute your independent verification to the consensus tally.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  {(["benign", "suspicious", "malicious"] as const).map((v) => (
-                    <Button
-                      key={v}
-                      size="sm"
-                      variant={selectedVote === v ? "default" : "outline"}
-                      disabled={voteMutation.isPending || !!selectedVote}
-                      onClick={() => voteMutation.mutate(v)}
-                      className="capitalize"
-                      data-testid={`button-vote-${v}`}
-                    >
-                      {v === "benign" ? "Clean / Benign" : v}
-                    </Button>
-                  ))}
-                </div>
-              </div>
+              <CommitRevealPanel
+                bountyId={submission.bountyId}
+                submissionId={submission.id}
+                currentVerdict={consensus.finalVerdict}
+                onCommitPhase={setHideAnalystTally}
+              />
 
               <p className="mt-4 text-xs text-muted-foreground italic text-center">
                 {consensus.confidenceNote ||
@@ -441,7 +431,10 @@ export default function AnalysisDetails() {
         )}
 
         {/* Analysis Details & Website Intelligence Tabs */}
-        <Tabs defaultValue={isUrlTarget ? "web-intel" : "engines"} className="space-y-6">
+        <Tabs
+          defaultValue={isUrlTarget ? "web-intel" : isEmailTarget ? "email-forensics" : "engines"}
+          className="space-y-6"
+        >
           <TabsList className="flex flex-wrap h-auto">
             {isUrlTarget && (
               <TabsTrigger value="web-intel" className="flex items-center gap-1.5">
@@ -449,9 +442,27 @@ export default function AnalysisDetails() {
                 Website Intelligence (36 Modules)
               </TabsTrigger>
             )}
+            {isEmailTarget && (
+              <TabsTrigger
+                value="email-forensics"
+                className="flex items-center gap-1.5"
+                data-testid="tab-email-forensics"
+              >
+                <Mail className="h-4 w-4" />
+                Email Forensics
+              </TabsTrigger>
+            )}
             <TabsTrigger value="engines" className="flex items-center gap-1.5">
               <Cpu className="h-4 w-4" />
               Engine Analysis ({analyses.length})
+            </TabsTrigger>
+            <TabsTrigger value="attack" className="flex items-center gap-1.5">
+              <Shield className="h-4 w-4" />
+              ATT&amp;CK ({attackTechniques.length})
+            </TabsTrigger>
+            <TabsTrigger value="infrastructure" className="flex items-center gap-1.5">
+              <Share2 className="h-4 w-4" />
+              Infrastructure
             </TabsTrigger>
             <TabsTrigger value="details">Artifact Details</TabsTrigger>
             <TabsTrigger value="timeline">Execution Timeline</TabsTrigger>
@@ -465,6 +476,25 @@ export default function AnalysisDetails() {
               />
             </TabsContent>
           )}
+
+          {isEmailTarget && (
+            <TabsContent value="email-forensics">
+              <EmailForensicsPanel analyses={analyses} />
+            </TabsContent>
+          )}
+
+          <TabsContent value="attack">
+            <AttackMatrix techniques={attackTechniques} />
+          </TabsContent>
+
+          <TabsContent value="infrastructure">
+            <IocGraph
+              submission={submission}
+              analyses={analyses}
+              webIntel={pageIntel}
+              submissions={recentSubmissions}
+            />
+          </TabsContent>
 
           <TabsContent value="engines" className="space-y-4">
             {analysesLoading ? (
@@ -621,7 +651,7 @@ export default function AnalysisDetails() {
                   <div className="flex items-center gap-4">
                     <div className="w-2.5 h-2.5 bg-primary rounded-full" />
                     <div>
-                      <div className="font-semibold">1. Gateway Ingestion & SHA-256 Hashing</div>
+                      <div className="font-semibold">1. Gateway Ingestion &amp; SHA-256 Hashing</div>
                       <div className="text-sm text-muted-foreground">
                         {new Date(submission.createdAt ?? "").toLocaleString()} · Queued to Redis `analysis_queue`
                       </div>
@@ -635,7 +665,7 @@ export default function AnalysisDetails() {
                           2. Parallel Multi-Engine Sandbox Execution ({analyses.length} Engines)
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          ClamAV, YARA, Goblin Static, Byte-Entropy GBDT ML, Heuristic, Signature & Hash Threat Intel
+                          ClamAV, YARA, Goblin Static, Byte-Entropy GBDT ML, Heuristic, Signature &amp; Hash Threat Intel
                         </div>
                       </div>
                     </div>
@@ -644,7 +674,7 @@ export default function AnalysisDetails() {
                     <div className="flex items-center gap-4">
                       <div className="w-2.5 h-2.5 bg-success rounded-full" />
                       <div>
-                        <div className="font-semibold">3. Consensus & OSINT Finalization</div>
+                        <div className="font-semibold">3. Consensus &amp; OSINT Finalization</div>
                         <div className="text-sm text-muted-foreground">
                           {submission.completedAt || submission.updatedAt
                             ? new Date(submission.completedAt || submission.updatedAt || "").toLocaleString()

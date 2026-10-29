@@ -1,3 +1,4 @@
+import { VerdyxLogo } from "@/components/verdyx-logo";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
@@ -5,8 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { ParticleBackground } from "@/components/particle-background";
-import { Wallet, Mail, Lock, User, AlertCircle, Shield } from "lucide-react";
+import { Wallet, Mail, Lock, User, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SEO } from "@/components/seo";
@@ -74,15 +74,11 @@ export default function Register() {
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4 aurora-bg">
       <SEO title="Create Account" description="Join the decentralized threat intelligence network." />
-      <ParticleBackground />
 
       <Card className="w-full max-w-md glassmorphism border-primary/20 relative z-10 animate-fade-up">
         <CardHeader className="space-y-1">
           <Link href="/" className="flex justify-center items-center gap-2.5 mb-4">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-brand text-white shadow-[0_6px_18px_-6px_hsl(var(--brand-from)/0.7)]">
-              <Shield className="h-5 w-5" />
-            </span>
-            <span className="text-2xl font-bold font-display tracking-tight text-foreground">Verdyx</span>
+            <VerdyxLogo size={42} textClassName="text-xl text-foreground" showSubtitle />
           </Link>
           <CardTitle className="text-2xl text-center font-display tracking-tight">Create an account</CardTitle>
           <CardDescription className="text-center">

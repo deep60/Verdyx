@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
-FROM rust:1.94-slim-bookworm AS builder
+FROM rust:1.94-slim-trixie AS builder
 
-# Install build dependencies. YARA is installed from Debian bookworm-backports
-# (libyara 4.5.x) instead of compiling from source, which avoids the autoconf
-# "PKG_CHECK_MODULES / PROTOBUF_C" bootstrap failure.
-RUN echo "deb http://deb.debian.org/debian bookworm-backports main" \
-        > /etc/apt/sources.list.d/backports.list && \
-    apt-get update && \
+# Install build dependencies. Debian trixie ships YARA 4.5.x (libyara-dev) in
+# main, so no backports are needed. It also provides a GCC 14 toolchain, whose
+# newer libstdc++ is REQUIRED to statically link the prebuilt ONNX Runtime
+# pulled in by `ort` (ml-engine): those objects reference libstdc++ symbols
+# (__cxa_call_terminate, _M_replace_cold) that Debian bookworm's GCC 12 lacks.
+RUN apt-get update && \
     apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -15,7 +15,7 @@ RUN echo "deb http://deb.debian.org/debian bookworm-backports main" \
     gcc \
     clang \
     libclang-dev \
-    && apt-get install -y -t bookworm-backports libyara-dev \
+    libyara-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -41,22 +41,23 @@ COPY proptest ./proptest
 # Build analysis-engine with locked BuildKit cache mounts to prevent OOM
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    cargo build --release --bin analysis-engine --features clamav,yara-engine && \
+    cargo build --release --bin analysis-engine --features clamav,yara-engine,ml-engine && \
     cp /app/target/release/analysis-engine /app/app-bin
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
-# Install runtime dependencies including the YARA shared library from
-# bookworm-backports (matches the build stage).
-RUN echo "deb http://deb.debian.org/debian bookworm-backports main" \
-        > /etc/apt/sources.list.d/backports.list && \
-    apt-get update && \
+# Runtime dependencies. trixie provides the YARA 4.5.x shared library (libyara10)
+# in main, matching the build stage, plus the GCC 14 libstdc++ / libgomp that the
+# statically-linked ONNX Runtime needs at load time.
+RUN apt-get update && \
     apt-get install -y \
     ca-certificates \
     libssl3 \
     libpq5 \
     curl \
-    && apt-get install -y -t bookworm-backports libyara10 \
+    libstdc++6 \
+    libgomp1 \
+    libyara10 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1000 app
@@ -65,9 +66,10 @@ WORKDIR /app
 
 COPY --from=builder /app/app-bin /usr/local/bin/app
 
-# Ship the signature/YARA rules and pre-create the writable working dirs
+# Ship the signature/YARA rules, trained ONNX ML models, and writable working dirs
 COPY analysis-engine/rules ./rules
-RUN mkdir -p ./rules/signatures ./rules/yara ./temp/verdyx-uploads ./models ./logs && \
+COPY analysis-engine/ml_models ./ml_models
+RUN mkdir -p ./rules/signatures ./rules/yara ./ml_models ./temp/verdyx-uploads ./models ./logs && \
     chown -R app:app /usr/local/bin/app /app
 
 USER app

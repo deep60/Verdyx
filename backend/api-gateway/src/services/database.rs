@@ -523,6 +523,7 @@ impl DatabaseService {
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
                 (metadata ->> 'priority')::boolean AS priority,
+                (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id,
                 file_path
             FROM submissions
             WHERE id = $1
@@ -556,6 +557,7 @@ impl DatabaseService {
                 analysis_type: r.get("analysis_type"),
                 bounty_amount: r.get("bounty_amount"),
                 priority: r.get("priority"),
+                bounty_id: r.get("bounty_id"),
                 created_at: r.get("created_at"),
             }
         }))
@@ -577,7 +579,8 @@ impl DatabaseService {
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
-                (metadata ->> 'priority')::boolean AS priority
+                (metadata ->> 'priority')::boolean AS priority,
+                (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id
             FROM submissions
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
@@ -614,6 +617,7 @@ impl DatabaseService {
                     analysis_type: r.get("analysis_type"),
                     bounty_amount: r.get("bounty_amount"),
                     priority: r.get("priority"),
+                    bounty_id: r.get("bounty_id"),
                     created_at: r.get("created_at"),
                 }
             })
@@ -638,6 +642,7 @@ impl DatabaseService {
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
                 (metadata ->> 'priority')::boolean AS priority,
+                (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id,
                 file_path
             FROM submissions
             WHERE id = $1 AND submitter_id = $2
@@ -672,6 +677,7 @@ impl DatabaseService {
                 analysis_type: r.get("analysis_type"),
                 bounty_amount: r.get("bounty_amount"),
                 priority: r.get("priority"),
+                bounty_id: r.get("bounty_id"),
                 created_at: r.get("created_at"),
             }
         }))
@@ -723,7 +729,8 @@ impl DatabaseService {
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
-                (metadata ->> 'priority')::boolean AS priority
+                (metadata ->> 'priority')::boolean AS priority,
+                (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id
             FROM submissions
             WHERE submitter_id = $1
             ORDER BY created_at DESC
@@ -762,6 +769,7 @@ impl DatabaseService {
                     analysis_type: r.get("analysis_type"),
                     bounty_amount: r.get("bounty_amount"),
                     priority: r.get("priority"),
+                    bounty_id: r.get("bounty_id"),
                     created_at: r.get("created_at"),
                 }
             })
@@ -775,7 +783,7 @@ impl DatabaseService {
         page: u32,
         limit: u32,
     ) -> Result<(Vec<crate::models::bounty::BountySubmission>, u32)> {
-        let offset = (page.saturating_sub(1)) * limit;
+        let offset = page.saturating_sub(1).saturating_mul(limit);
 
         // Build dynamic WHERE clause
         let mut conditions: Vec<String> = Vec::new();

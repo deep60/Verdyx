@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use goblin::elf::Elf;
 use goblin::pe::PE;
 use goblin::Object;
 use lazy_static::lazy_static;
@@ -43,6 +44,21 @@ pub struct PEAnalysis {
     pub entropy: f64,
     pub suspicious_imports: Vec<String>,
     pub packer_signatures: Vec<String>,
+}
+
+/// ELF dynamic imports and packing signals. Goblin already detects ELF;
+/// this records the symbols a technique mapping can cite.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElfAnalysis {
+    pub class: String,
+    pub entry_point: u64,
+    pub is_lib: bool,
+    pub libraries: Vec<String>,
+    pub imports: Vec<String>,
+    pub suspicious_imports: Vec<String>,
+    pub entropy: f64,
+    pub is_packed: bool,
+    pub interpreter: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +223,21 @@ lazy_static! {
         ("LoadLibrary", 5),
     ];
 
+    static ref ELF_SUSPICIOUS_IMPORTS: Vec<(&'static str, u8)> = vec![
+        ("process_vm_writev", 10),
+        ("process_vm_readv", 8),
+        ("ptrace", 9),
+        ("memfd_create", 9),
+        ("mprotect", 7),
+        ("execve", 7),
+        ("posix_spawn", 7),
+        ("system", 6),
+        ("popen", 6),
+        ("dlopen", 6),
+        ("setuid", 6),
+        ("prctl", 6),
+    ];
+
     // Known packer signatures
     static ref PACKER_SIGNATURES: Vec<&'static str> = vec![
         "UPX", "ASPack", "PECompact", "Themida", "VMProtect",
@@ -250,6 +281,10 @@ impl StaticAnalyzer {
         debug!("Detected file type: {:?}", file_type);
 
         let mut metadata = HashMap::new();
+        metadata.insert(
+            "file_type".to_string(),
+            serde_json::to_value(&file_type)?,
+        );
         let mut threat_score = 0.0;
         let mut threat_details = Vec::new();
 
@@ -388,6 +423,39 @@ impl StaticAnalyzer {
         } else {
             None
         };
+
+        if matches!(file_type, FileType::ELF) {
+            match self.analyze_elf(file_data) {
+                Ok(analysis) => {
+                    debug!(
+                        "ELF analysis: {} imports, {} libraries, packed: {}",
+                        analysis.imports.len(),
+                        analysis.libraries.len(),
+                        analysis.is_packed
+                    );
+                    if analysis.is_packed {
+                        threat_score += 0.25;
+                        threat_details
+                            .push("ELF entropy suggests packing or encryption".to_string());
+                    }
+                    if !analysis.suspicious_imports.is_empty() {
+                        threat_score +=
+                            (analysis.suspicious_imports.len() as f64 * 0.05).min(0.30);
+                        threat_details.push(format!(
+                            "{} suspicious ELF imports",
+                            analysis.suspicious_imports.len()
+                        ));
+                    }
+                    metadata.insert(
+                        "elf_analysis".to_string(),
+                        serde_json::to_value(&analysis)?,
+                    );
+                }
+                Err(e) => {
+                    warn!("ELF analysis failed: {}", e);
+                }
+            }
+        }
 
         // Calculate final threat assessment
         threat_score = threat_score.min(1.0);
@@ -631,8 +699,9 @@ impl StaticAnalyzer {
             let (entropy, is_suspicious) = if offset + size <= data.len() {
                 let section_data = &data[offset..offset + size];
                 let ent = self.calculate_entropy(section_data);
+                // A leading dot is normal (.text, .rdata). Only high entropy
+                // or a non-standard section name is evidence of packing.
                 let suspicious = ent > self.config.entropy_threshold
-                    || section_name.starts_with('.')
                     || section_name.len() < 2
                     || !section_name
                         .chars()
@@ -717,6 +786,55 @@ impl StaticAnalyzer {
             entropy: overall_entropy,
             suspicious_imports,
             packer_signatures,
+        })
+    }
+
+    fn analyze_elf(&self, data: &[u8]) -> Result<ElfAnalysis> {
+        let elf = Elf::parse(data).map_err(|e| anyhow!("ELF parse error: {e}"))?;
+        let entropy = self.calculate_entropy(data);
+
+        let mut imports = Vec::new();
+        for sym in elf.dynsyms.iter() {
+            if !sym.is_import() {
+                continue;
+            }
+            let Some(name) = elf.dynstrtab.get_at(sym.st_name) else {
+                continue;
+            };
+            if name.is_empty() {
+                continue;
+            }
+            imports.push(name.to_string());
+        }
+
+        let mut suspicious_imports = Vec::new();
+        for import in &imports {
+            let base = import.split('@').next().unwrap_or(import);
+            for (symbol, _severity) in ELF_SUSPICIOUS_IMPORTS.iter() {
+                if base == *symbol {
+                    suspicious_imports.push(import.clone());
+                    break;
+                }
+            }
+        }
+
+        imports.truncate(400);
+        let libraries: Vec<String> = elf.libraries.iter().map(|s| (*s).to_string()).collect();
+
+        Ok(ElfAnalysis {
+            class: if elf.is_64 {
+                "ELF64".to_string()
+            } else {
+                "ELF32".to_string()
+            },
+            entry_point: elf.entry,
+            is_lib: elf.is_lib,
+            libraries,
+            imports,
+            suspicious_imports,
+            entropy,
+            is_packed: entropy > self.config.entropy_threshold,
+            interpreter: elf.interpreter.map(|s| s.to_string()),
         })
     }
 
@@ -892,6 +1010,9 @@ mod tests {
         // Note: goblin might need more valid ELF structure
         let detected = analyzer.detect_file_type(&elf_data);
         assert!(matches!(detected, FileType::ELF | FileType::Unknown));
+
+        let err = analyzer.analyze_elf(&[0x7F, 0x45, 0x4C, 0x46, 0, 0, 0, 0]);
+        assert!(err.is_err());
 
         // PDF file
         let pdf_data = b"%PDF-1.4\n%\xE2\xE3\xCF\xD3";

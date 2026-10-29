@@ -34,18 +34,26 @@ impl UserService {
     // ============= Authentication Methods =============
 
     /// Register a new user
-    pub async fn register(&self, req: RegisterRequest) -> UserResult<AuthResponse> {
+    pub async fn register(&self, mut req: RegisterRequest) -> UserResult<AuthResponse> {
         req.validate()
             .map_err(|e| UserError::ValidationError(format!("{e}")))?;
 
+        // Normalise the same way update_profile does, so registration can't
+        // create usernames/emails that profile edits or login would reject.
+        req.username = req.username.trim().to_string();
+        req.email = req.email.trim().to_ascii_lowercase();
+        validate_username(&req.username)?;
+        validate_email(&req.email)?;
+
         // Check if user already exists
-        let existing =
-            sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1 OR username = $2")
-                .bind(&req.email)
-                .bind(&req.username)
-                .fetch_optional(&self.db_pool)
-                .await
-                .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+        let existing = sqlx::query_as::<_, User>(
+            "SELECT * FROM users WHERE lower(email) = $1 OR username = $2",
+        )
+        .bind(&req.email)
+        .bind(&req.username)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
         if existing.is_some() {
             return Err(UserError::AlreadyExists);
@@ -155,9 +163,17 @@ impl UserService {
         req.validate()
             .map_err(|e| UserError::ValidationError(format!("{e}")))?;
 
-        // Find user by email
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-            .bind(&req.email)
+        // Find user by email or username. Usernames can't contain '@'
+        // (validate_username), so the two lookups never overlap. Emails are
+        // matched case-insensitively so legacy mixed-case rows still log in.
+        let identifier = req.email.trim();
+        let lookup = if identifier.contains('@') {
+            "SELECT * FROM users WHERE lower(email) = lower($1)"
+        } else {
+            "SELECT * FROM users WHERE username = $1"
+        };
+        let user = sqlx::query_as::<_, User>(lookup)
+            .bind(identifier)
             .fetch_optional(&self.db_pool)
             .await
             .map_err(|e| UserError::DatabaseError(e.to_string()))?

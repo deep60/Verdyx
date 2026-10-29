@@ -28,6 +28,7 @@ export interface ApiSubmission {
   analysisStatus?: string;
   description?: string;
   bountyAmount?: string | number;
+  bountyId?: string | null;
   priority?: boolean;
   metadata?: Record<string, unknown>;
   createdAt?: string;

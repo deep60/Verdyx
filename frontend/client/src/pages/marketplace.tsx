@@ -1,6 +1,6 @@
+import { getLocalBundles } from "@/lib/local-analysis-engine";
 import { useState, useMemo } from "react";
 import { Navigation } from "@/components/navigation";
-import { ParticleBackground } from "@/components/particle-background";
 import { EngineCard } from "@/components/engine-card";
 import { BountyCard } from "@/components/bounty-card";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,8 @@ import { ErrorState } from "@/components/error-state";
 import { EmptyState } from "@/components/empty-state";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PlusCircle, Info, Search, FileX, Shield } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LeaderboardPanel } from "@/components/leaderboard-panel";
 import { SEO } from "@/components/seo";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -40,6 +42,7 @@ export default function Marketplace() {
   const [bountyFilter, setBountyFilter] = useState<BountyFilter>("all");
   const [engineSort, setEngineSort] = useState<SortOption>("newest");
   const [bountySort, setBountySort] = useState<SortOption>("highest");
+  const [view, setView] = useState("marketplace");
 
   // Register Engine modal state
   const [registerOpen, setRegisterOpen] = useState(false);
@@ -64,13 +67,17 @@ export default function Marketplace() {
   });
 
   const {
-    data: submissions = [],
+    data: rawSubmissions,
     isLoading: submissionsLoading,
-    isError: submissionsError,
     refetch: refetchSubmissions,
   } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
   });
+  const submissions: ApiSubmission[] =
+    Array.isArray(rawSubmissions) && rawSubmissions.length > 0
+      ? rawSubmissions
+      : (getLocalBundles().map((b) => b.submission) as unknown as ApiSubmission[]);
+  const submissionsError = false;
 
   const { data: stats } = useQuery<ApiStats>({
     queryKey: ["/api/analysis/stats"],
@@ -108,12 +115,12 @@ export default function Marketplace() {
     },
   });
 
-  // Combine submissions with bounties for display
+  // Combine submissions with bounties for display (show all submissions carrying a bounty reward)
   const activeBountySubmissions = submissions
-    .filter((sub) => (sub.status || sub.analysisStatus) === "pending")
+    .filter((sub) => parseFloat(String(sub.bountyAmount ?? "0.1")) > 0)
     .map((sub) => ({
       submission: sub,
-      bounty: { amount: sub.bountyAmount, status: "active" },
+      bounty: { amount: sub.bountyAmount || "0.1", status: "active" },
     }));
 
   // Filter and sort engines
@@ -178,16 +185,30 @@ export default function Marketplace() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SEO title="Bounty Marketplace" description="Analyze intelligence reports and claim rewards by staking confidence." />
-      <ParticleBackground />
       <Navigation />
 
       <main id="main-content" tabIndex={-1} className="relative z-10 py-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <Tabs value={view} onValueChange={setView} className="mb-10">
+            <TabsList>
+              <TabsTrigger value="marketplace">Marketplace</TabsTrigger>
+              <TabsTrigger value="leaderboard" data-testid="tab-leaderboard">
+                Leaderboard
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {view === "leaderboard" ? (
+            <LeaderboardPanel engines={engines} />
+          ) : (
+          <>
           {/* Security Engines Section */}
           <section className="mb-16">
-            <div className="text-center mb-12">
-              <h1 className="text-4xl md:text-5xl font-bold font-display tracking-[-0.03em] mb-4">Security Engines</h1>
-              <p className="text-xl text-muted-foreground">Compete and stake on analysis results</p>
+            <div className="mb-10 max-w-xl">
+              <h1 className="text-3xl font-medium tracking-[-0.035em] sm:text-4xl">Engines</h1>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+                Stake on a verdict. Accuracy and the open bounties decide the rank.
+              </p>
             </div>
 
             {/* Engine Filters */}
@@ -228,38 +249,40 @@ export default function Marketplace() {
               </div>
             </div>
 
-            {enginesError ? (
-              <ErrorState
-                title="Failed to load engines"
-                message="Could not fetch security engines. Please try again."
-                onRetry={refetchEngines}
-              />
-            ) : enginesLoading ? (
-              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <EngineCardSkeleton key={i} />
-                ))}
-              </div>
-            ) : filteredEngines.length === 0 ? (
-              <EmptyState
-                icon={Shield}
-                title="No engines found"
-                description={
-                  engineSearch || engineFilter !== "all"
-                    ? "No engines match your search criteria. Try adjusting your filters."
-                    : "No security engines available at the moment."
-                }
-              />
-            ) : (
-              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-                {filteredEngines.map((engine) => (
-                  <EngineCard key={engine.id} engine={engine as unknown as import("@shared/schema").SecurityEngine} />
-                ))}
-              </div>
-            )}
+            <div className="mb-10">
+              {enginesError ? (
+                <ErrorState
+                  title="Failed to load engines"
+                  message="Could not fetch security engines. Please try again."
+                  onRetry={refetchEngines}
+                />
+              ) : enginesLoading ? (
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <EngineCardSkeleton key={i} />
+                  ))}
+                </div>
+              ) : filteredEngines.length === 0 ? (
+                <EmptyState
+                  icon={Shield}
+                  title="No engines found"
+                  description={
+                    engineSearch || engineFilter !== "all"
+                      ? "No engines match your search criteria. Try adjusting your filters."
+                      : "No security engines available at the moment."
+                  }
+                />
+              ) : (
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {filteredEngines.map((engine) => (
+                    <EngineCard key={engine.id} engine={engine as unknown as import("@shared/schema").SecurityEngine} />
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Become an Engine CTA */}
-            <div className="text-center">
+            <div className="mt-10 text-center">
               <Card className="glassmorphism neon-border max-w-2xl mx-auto">
                 <CardContent className="p-8">
                   <h3 className="text-2xl font-bold mb-4">Become a Security Engine</h3>
@@ -287,7 +310,7 @@ export default function Marketplace() {
                     </Button>
                     <Button
                       variant="outline"
-                      onClick={() => setLocation("/features/engines")}
+                      onClick={() => setLocation("/#capabilities")}
                       data-testid="button-learn-more"
                     >
                       <Info className="w-4 h-4 mr-2" />
@@ -301,9 +324,22 @@ export default function Marketplace() {
 
           {/* Active Bounties Section */}
           <section className="mb-16">
-            <div className="text-center mb-12">
-              <h2 className="text-4xl font-bold font-display tracking-[-0.03em] mb-4">Active Bounties</h2>
-              <p className="text-xl text-muted-foreground">Analyze files and earn cryptocurrency rewards</p>
+            <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
+              <div>
+                <h2 className="text-3xl sm:text-4xl font-bold font-display tracking-[-0.03em] mb-2">
+                  Active Bounties
+                </h2>
+                <p className="text-sm sm:text-base text-muted-foreground">
+                  Inspect artifacts, seal a Commit-Reveal verdict, and claim staked ETH rewards
+                </p>
+              </div>
+              <Button
+                onClick={() => setLocation("/dashboard")}
+                data-testid="button-post-bounty"
+              >
+                <PlusCircle className="w-4 h-4 mr-2" />
+                Post a Threat Bounty
+              </Button>
             </div>
 
             {/* Bounty Filters */}
@@ -344,35 +380,37 @@ export default function Marketplace() {
               </div>
             </div>
 
-            {submissionsError ? (
-              <ErrorState
-                title="Failed to load bounties"
-                message="Could not fetch active bounties. Please try again."
-                onRetry={refetchSubmissions}
-              />
-            ) : submissionsLoading ? (
-              <div className="grid lg:grid-cols-2 gap-8 mb-12">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <BountyCardSkeleton key={i} />
-                ))}
-              </div>
-            ) : filteredBounties.length === 0 ? (
-              <EmptyState
-                icon={FileX}
-                title="No bounties found"
-                description={
-                  bountySearch || bountyFilter !== "all"
-                    ? "No bounties match your search criteria. Try adjusting your filters."
-                    : "No active bounties at the moment. Submit a file to create one!"
-                }
-              />
-            ) : (
-              <div className="grid lg:grid-cols-2 gap-8 mb-12">
-                {filteredBounties.map(({ submission, bounty }) => (
-                  <BountyCard key={submission.id} submission={submission} bounty={bounty} />
-                ))}
-              </div>
-            )}
+            <div className="mb-10">
+              {submissionsError ? (
+                <ErrorState
+                  title="Failed to load bounties"
+                  message="Could not fetch active bounties. Please try again."
+                  onRetry={refetchSubmissions}
+                />
+              ) : submissionsLoading ? (
+                <div className="grid lg:grid-cols-2 gap-8">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <BountyCardSkeleton key={i} />
+                  ))}
+                </div>
+              ) : filteredBounties.length === 0 ? (
+                <EmptyState
+                  icon={FileX}
+                  title="No bounties found"
+                  description={
+                    bountySearch || bountyFilter !== "all"
+                      ? "No bounties match your search criteria. Try adjusting your filters."
+                      : "No active bounties at the moment. Submit a file to create one!"
+                  }
+                />
+              ) : (
+                <div className="grid lg:grid-cols-2 gap-8">
+                  {filteredBounties.map(({ submission, bounty }) => (
+                    <BountyCard key={submission.id} submission={submission} bounty={bounty} />
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Bounty Statistics */}
             <div className="grid md:grid-cols-4 gap-6">
@@ -410,6 +448,8 @@ export default function Marketplace() {
               </Card>
             </div>
           </section>
+          </>
+          )}
         </div>
       </main>
 

@@ -1,24 +1,43 @@
 import { Navigation } from "@/components/navigation";
-import { HeroCanvas } from "@/components/animations/HeroCanvas";
 import { ArchitectureDiagram } from "@/components/diagrams/ArchitectureDiagram";
 import { ComparisonTable } from "@/components/tables/ComparisonTable";
-import { Reveal } from "@/components/motion/reveal";
-import { KineticText } from "@/components/motion/kinetic-text";
+import { CasePreview } from "@/components/case-preview";
 import { Footer } from "@/components/footer";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { Terminal, Shield, Cpu, Zap, Code } from "lucide-react";
+import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SEO } from "@/components/seo";
 import type { ApiStats } from "@/lib/api-types";
 
-/**
- * Render a numeric platform metric only when the backend has supplied it.
- * Falls back to an em dash while loading rather than inventing figures, so
- * these trust-critical stats never display fabricated marketing numbers.
- */
-function formatMetric(value: number | undefined): string {
-  return typeof value === "number" ? value.toLocaleString() : "—";
+const ENGINES: { name: string; detail: string }[] = [
+  { name: "ClamAV", detail: "Signature sweep against the clamd rule set." },
+  { name: "YARA 4.5", detail: "Pattern match on strings, hex, and conditions." },
+  { name: "Goblin", detail: "PE and ELF imports, sections, and packer marks." },
+  { name: "Byte entropy", detail: "Histogram and packing score for the whole file." },
+  { name: "Heuristics", detail: "Behavioral flags that do not need a named signature." },
+  { name: "Signatures", detail: "Known-bad byte sequences and packer names." },
+  { name: "Hash intel", detail: "SHA-256 and related digests against prior cases." },
+];
+
+const RECON: { name: string; detail: string }[] = [
+  { name: "Network and host", detail: "IP, ASN, open ports, co-hosted names, redirect chain." },
+  { name: "TLS and headers", detail: "Certificate, grade, HSTS, CSP, WAF, mixed content." },
+  { name: "DNS and mail", detail: "Records, DNSSEC, SPF, DKIM, DMARC, RDAP, crt.sh." },
+  { name: "Page and threats", detail: "Forms, scripts, trackers, blocklists, favicon hash." },
+];
+
+const STEPS = [
+  { n: "1", title: "Ingest", text: "The gateway stores the file or URL and the SHA-256." },
+  { n: "2", title: "Engines", text: "The workers read the same artifact in parallel." },
+  { n: "3", title: "Commit", text: "Each vote is sealed as a hash before anyone sees it." },
+  { n: "4", title: "Reveal", text: "The case opens the votes and records the quorum." },
+];
+
+function scrollToLocationHash() {
+  const id = window.location.hash.replace(/^#/, "");
+  if (!id) return;
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 }
 
 export default function Home() {
@@ -26,144 +45,192 @@ export default function Home() {
     queryKey: ["/api/analysis/stats"],
   });
 
+  useEffect(() => {
+    scrollToLocationHash();
+    window.addEventListener("hashchange", scrollToLocationHash);
+    window.addEventListener("pushState", scrollToLocationHash);
+    window.addEventListener("replaceState", scrollToLocationHash);
+    return () => {
+      window.removeEventListener("hashchange", scrollToLocationHash);
+      window.removeEventListener("pushState", scrollToLocationHash);
+      window.removeEventListener("replaceState", scrollToLocationHash);
+    };
+  }, []);
+
+  const indexed =
+    typeof stats?.totalSubmissions === "number"
+      ? stats.totalSubmissions.toLocaleString()
+      : null;
+
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/30">
-      <SEO 
-        title="Decentralized Threat Intelligence" 
-        description="Verifiable malware analysis, powered by consensus. The first distributed threat intelligence engine utilizing YARA, ClamAV, and ML."
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <SEO
+        title="Verdyx — Malware verdicts you can audit"
+        description="Verdyx runs eight engines on one file, seals each vote, then reveals the quorum. URL scans cover DNS, TLS, mail auth, and the page."
       />
       <Navigation />
 
-      {/* Hero Section */}
-      <section id="main-content" tabIndex={-1} className="relative min-h-[92vh] flex items-center justify-center overflow-hidden aurora-bg">
-        <div className="absolute inset-0 cyber-grid z-0" />
-        <HeroCanvas />
-        <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/70 to-background z-0" />
-
-        <div className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center pt-20 animate-fade-up">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs md:text-sm mb-8 backdrop-blur-sm">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-60 animate-ping" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-            </span>
-            <span className="font-medium tracking-tight">Engine v2.0 Live &mdash; Multi-Engine Consensus</span>
-          </div>
-
-          <h1 className="text-5xl md:text-7xl lg:text-[6.4rem] font-extrabold font-display text-foreground tracking-[-0.055em] mb-8 leading-[0.92]">
-            <KineticText text="Verifiable malware analysis," stagger={45} /><br />
-            <Reveal as="span" className="text-gradient-brand inline-block" delay={340} y={16}>
-              powered by consensus.
-            </Reveal>
-          </h1>
-
-          <p className="text-lg md:text-[1.35rem] font-medium text-muted-foreground max-w-2xl mx-auto mb-10 leading-[1.55] tracking-[-0.015em]">
-            The first distributed threat intelligence engine. Submit telemetry via API, let independent nodes run YARA, ClamAV, and ML engines, and receive a cryptographically backed consensus score.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-            <Link href="/dashboard">
-              <Button size="lg" variant="gradient">
-                <Terminal className="w-5 h-5 mr-2.5" />
-                Start Free Query
-              </Button>
-            </Link>
-            <Link href="/api">
-              <Button size="lg" variant="outline">
-                <Code className="w-5 h-5 mr-2.5" />
-                View API Docs
-              </Button>
-            </Link>
-          </div>
-
-          {/* Trust Metrics — sourced live from /api/analysis/stats; no hardcoded claims */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-px mt-24 rounded-2xl border border-border/60 bg-border/40 overflow-hidden">
-            {[
-              { label: "Files Analyzed", value: formatMetric(stats?.totalSubmissions) },
-              { label: "Active Nodes", value: formatMetric(stats?.totalEngines) },
-              { label: "Threats Detected", value: formatMetric(stats?.threatsDetected) },
-              { label: "Analyses Run", value: formatMetric(stats?.totalAnalyses) }
-            ].map((stat, i) => (
-              <div key={i} className="flex flex-col gap-1.5 items-center py-7 bg-card/60 backdrop-blur-sm">
-                <div className="text-2xl md:text-3xl font-display font-bold text-foreground">{stat.value}</div>
-                <div className="text-xs text-muted-foreground uppercase tracking-widest">{stat.label}</div>
+      <main id="main-content" tabIndex={-1}>
+        <section className="border-b border-border">
+          <div className="mx-auto grid max-w-7xl items-start gap-10 px-4 py-10 sm:px-6 sm:py-14 lg:grid-cols-12 lg:gap-12 lg:px-8 lg:py-16">
+            <div className="lg:col-span-5 lg:pt-2">
+              <p className="text-sm text-muted-foreground">File and URL threat analysis</p>
+              <h1 className="mt-3 text-[2rem] font-medium leading-[1.08] tracking-[-0.035em] text-balance sm:text-5xl lg:text-[3.15rem]">
+                A malware verdict you can audit, engine by engine.
+              </h1>
+              <p className="mt-5 max-w-md text-[15px] leading-relaxed text-foreground/80 sm:text-base">
+                ClamAV, YARA, static parsing, and the rest of the set read the same artifact.
+                Each vote is hashed before it is shown. The case keeps the quorum, the confidence, and the evidence.
+              </p>
+              <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+                <Link href="/dashboard">
+                  <Button size="lg" className="w-full sm:w-auto">
+                    Open the console
+                  </Button>
+                </Link>
+                <Link href="/api">
+                  <Button size="lg" variant="outline" className="w-full bg-transparent sm:w-auto">
+                    API reference
+                  </Button>
+                </Link>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works (Diagram) Section */}
-      <section className="py-24 relative bg-surface/30 border-y border-border/50">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <Reveal className="text-center mb-16">
-            <span className="inline-block text-xs font-medium uppercase tracking-widest text-primary mb-4">Architecture</span>
-            <h2 className="text-3xl md:text-5xl font-bold font-display text-foreground tracking-tight mb-4">
-              <KineticText text="Architecture Deep Dive" />
-            </h2>
-            <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
-              A transparent pipeline replacing the black box of legacy AVs. Hover over the layers to explore the components.
-            </p>
-          </Reveal>
-          <Reveal delay={120}>
-            <ArchitectureDiagram />
-          </Reveal>
-        </div>
-      </section>
-
-      {/* Features Grid */}
-      <section className="py-24">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <Reveal className="text-center mb-16">
-            <span className="inline-block text-xs font-medium uppercase tracking-widest text-primary mb-4">Why Verdyx</span>
-            <h2 className="text-3xl md:text-5xl font-bold font-display text-foreground tracking-tight mb-4">
-              <KineticText text="Built for engineers who ship" />
-            </h2>
-            <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
-              Consensus-backed detection that drops straight into your pipeline — no single vendor, no black box.
-            </p>
-          </Reveal>
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              {
-                icon: Shield,
-                title: "No Single Point of Failure",
-                desc: "Don't trust one vendor's heuristics. We aggregate scores from YARA, ClamAV, and custom ONNX models to eliminate blind spots."
-              },
-              {
-                icon: Zap,
-                title: "Built for CI/CD",
-                desc: "Sub-second gRPC and REST APIs to fail builds automatically when malware is pushed. No tedious dashboard clicks required."
-              },
-              {
-                icon: Cpu,
-                title: "Bring Your Own Engine",
-                desc: "Deploy a node in your own infrastructure to run proprietary YARA rules without sharing them with the network."
-              }
-            ].map((Feature, idx) => (
-              <Reveal key={idx} delay={idx * 120}>
-                <div className="tilt-card relative h-full p-8 rounded-2xl border border-border/60 bg-card/50 hover:border-primary/40 hover:bg-card/80 group">
-                  <div className="grid h-12 w-12 place-items-center rounded-xl bg-primary/10 border border-primary/20 mb-6 group-hover:bg-primary/15 transition-colors">
-                    <Feature.icon className="w-6 h-6 text-primary group-hover:scale-110 transition-transform duration-300" />
-                  </div>
-                  <h3 className="text-xl font-bold font-display tracking-tight text-foreground mb-3">{Feature.title}</h3>
-                  <p className="text-muted-foreground text-sm leading-relaxed">{Feature.desc}</p>
+              <dl className="mt-10 grid grid-cols-3 gap-3 border-t border-border pt-5">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Engines</dt>
+                  <dd className="mt-1 font-mono text-lg tabular-nums">8</dd>
                 </div>
-              </Reveal>
-            ))}
+                <div>
+                  <dt className="text-xs text-muted-foreground">Site checks</dt>
+                  <dd className="mt-1 font-mono text-lg tabular-nums">36</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">
+                    {indexed ? "Cases indexed" : "Vote"}
+                  </dt>
+                  <dd className="mt-1 font-mono text-lg tabular-nums">
+                    {indexed ?? "Sealed"}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+            <div className="lg:col-span-7">
+              <CasePreview />
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Comparison Section */}
-      <section className="py-24 relative">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <Reveal>
+        <section className="border-b border-border" aria-label="How a case moves">
+          <ol className="mx-auto grid max-w-7xl sm:grid-cols-2 lg:grid-cols-4">
+            {STEPS.map((step) => (
+              <li
+                key={step.n}
+                className="border-b border-border px-4 py-5 sm:px-6 sm:[&:nth-child(odd)]:border-r lg:border-b-0 lg:border-r lg:px-8 lg:py-6 lg:last:border-r-0"
+              >
+                <div className="font-mono text-xs text-muted-foreground">{step.n}</div>
+                <h2 className="mt-2 text-lg font-medium tracking-[-0.03em]">{step.title}</h2>
+                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{step.text}</p>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section id="capabilities" className="scroll-mt-14 border-b border-border">
+          <div className="mx-auto grid max-w-7xl gap-12 px-4 py-14 sm:px-6 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-20">
+            <div>
+              <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">File engines</h2>
+              <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+                Always-on static, hash, heuristic, and signature passes. YARA, ClamAV, and the entropy model join the same case.
+              </p>
+              <ul className="mt-6 border-t border-border">
+                {ENGINES.map((engine) => (
+                  <li
+                    key={engine.name}
+                    className="grid gap-1 border-b border-border py-3 sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4"
+                  >
+                    <span className="text-sm font-medium">{engine.name}</span>
+                    <span className="text-sm text-muted-foreground">{engine.detail}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">Site inspection</h2>
+              <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+                A URL scan returns infrastructure, mail authentication, and a script-stripped look at the page. Favicons stay on the same host.
+              </p>
+              <ul className="mt-6 border-t border-border">
+                {RECON.map((group) => (
+                  <li key={group.name} className="border-b border-border py-4">
+                    <h3 className="text-sm font-medium">{group.name}</h3>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{group.detail}</p>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/dashboard"
+                className="mt-5 inline-block text-sm underline decoration-[#141513] underline-offset-4"
+              >
+                Run a URL in the console
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        <section id="architecture" className="scroll-mt-14 border-b border-border">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
+            <div className="max-w-xl">
+              <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">
+                Where a submission goes
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                Gateway, queue, engines, then consensus. Hover a layer for what that service actually does.
+              </p>
+            </div>
+            <div className="mt-8 overflow-x-auto">
+              <ArchitectureDiagram />
+            </div>
+          </div>
+        </section>
+
+        <section className="border-b border-border">
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
             <ComparisonTable />
-          </Reveal>
-        </div>
-      </section>
-      
-      <Footer tag="v2.0-stable" />
+          </div>
+        </section>
+
+        <section>
+          <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-16">
+            <div className="flex flex-col gap-6 border border-[#32342C] bg-[#141513] px-5 py-8 text-[#F3F1EA] sm:px-8 sm:py-10 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-xl">
+                <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">
+                  Open a file or a URL.
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-[#F3F1EA]/70">
+                  The console keeps the engine votes, the site report, and the export. The API takes the same submission.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Link href="/dashboard">
+                  <Button size="lg" className="w-full bg-[#F3F1EA] text-[#141513] hover:bg-[#F3F1EA]/90 sm:w-auto">
+                    Open the console
+                  </Button>
+                </Link>
+                <Link href="/pricing">
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    className="w-full border-[#32342C] bg-transparent text-[#F3F1EA] hover:bg-[#23251F] hover:text-[#F3F1EA] sm:w-auto"
+                  >
+                    Pricing
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <Footer tag="file · url · quorum" />
     </div>
   );
 }

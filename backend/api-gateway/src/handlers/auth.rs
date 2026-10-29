@@ -181,8 +181,8 @@ pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
 ) -> ApiResult<Json<ApiResponse<AuthResponse>>> {
-    // user-service authenticates by email; map the gateway's `identifier`
-    // field onto it. (Username login can be re-added in user-service later.)
+    // user-service accepts an email or a username in its `email` field
+    // (no '@' => username lookup), so pass the identifier straight through.
     let body = serde_json::json!({
         "email": payload.identifier,
         "password": payload.password,

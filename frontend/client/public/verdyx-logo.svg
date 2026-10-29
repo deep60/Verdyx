@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <rect width="512" height="512" rx="16" fill="#141513"/>
+  
+  <!-- Outer Calibration Crosshairs (+) -->
+  <g stroke="#7A7858" stroke-width="1.5" opacity="0.75">
+    <!-- Top-Left + -->
+    <path d="M116 92H136M126 82V102"/>
+    <!-- Top-Right + -->
+    <path d="M376 92H396M386 82V102"/>
+    <!-- Bottom-Left + -->
+    <path d="M116 332H136M126 322V342"/>
+    <!-- Bottom-Right + -->
+    <path d="M376 332H396M386 322V342"/>
+    <!-- Outer frame rules -->
+    <path d="M164 92H348"/>
+    <path d="M126 128V296"/>
+    <path d="M386 128V296"/>
+    <!-- Bottom L-brackets -->
+    <path d="M144 304V316H156"/>
+    <path d="M368 304V316H356"/>
+  </g>
+
+  <!-- Dotted Reticle Box & Diagonal Sight Lines -->
+  <rect x="136" y="102" width="240" height="222" stroke="#7A7858" stroke-width="1.2" stroke-dasharray="2 4" opacity="0.6"/>
+  <path d="M162 298L210 250M350 298L302 250" stroke="#F0D83A" stroke-width="1.2" stroke-dasharray="2 4" opacity="0.55"/>
+
+  <!-- Axis & Ruler Ticks -->
+  <g stroke="#ABA658" stroke-width="1.4" opacity="0.8">
+    <!-- Top center axis + 3 horizontal ticks -->
+    <path d="M256 82V108"/>
+    <path d="M256 118V152"/>
+    <path d="M248 126H264M248 135H264M248 144H264"/>
+    <!-- Left axis + 3 vertical ticks -->
+    <path d="M120 212H142"/>
+    <path d="M152 212H184"/>
+    <path d="M158 204V220M167 204V220M176 204V220"/>
+    <!-- Right axis + 3 vertical ticks -->
+    <path d="M370 212H392"/>
+    <path d="M328 212H360"/>
+    <path d="M336 204V220M345 204V220M354 204V220"/>
+    <!-- Bottom center tick -->
+    <path d="M256 314V334"/>
+  </g>
+
+  <!-- 8-Engine Convergence V — Upper Off-White Arms (#F3F1EA) -->
+  <g stroke="#F3F1EA" stroke-width="3.2" stroke-linecap="butt" stroke-linejoin="miter">
+    <!-- Outermost Pair (1 & 8) upper segment -->
+    <path d="M152 118L216 226"/>
+    <path d="M360 118L296 226"/>
+    <!-- Second Pair (2 & 7) upper segment -->
+    <path d="M167 118L225 216"/>
+    <path d="M345 118L287 216"/>
+    <!-- Third Pair (3 & 6) upper segment -->
+    <path d="M182 118L234 205"/>
+    <path d="M330 118L278 205"/>
+    <!-- Innermost Pair (4 & 5) full upper V + spine -->
+    <path d="M197 118L256 220L315 118"/>
+    <path d="M256 220V250"/>
+  </g>
+
+  <!-- 8-Engine Convergence V — Lower Survey-Yellow Zone (#F0D83A) -->
+  <g stroke="#F0D83A" stroke-width="3.2" stroke-linecap="butt" stroke-linejoin="miter">
+    <!-- Outermost Pair (1 & 8) lower segment to vertex -->
+    <path d="M216 226L256 294L296 226"/>
+    <!-- Second Pair (2 & 7) lower segment -->
+    <path d="M225 216L256 270L287 216"/>
+    <!-- Third Pair (3 & 6) lower segment -->
+    <path d="M234 205L256 244L278 205"/>
+    <!-- Center vertical spine into node -->
+    <path d="M256 250V294"/>
+    <!-- Perpendicular bridge bars across outer 3 channels -->
+    <path d="M216 226L234 205"/>
+    <path d="M296 226L278 205"/>
+  </g>
+
+  <!-- Survey-Yellow Consensus Verdict Node (#F0D83A) -->
+  <circle cx="256" cy="294" r="9.5" fill="#F0D83A"/>
+
+  <!-- Wordmark: VERDYX -->
+  <text x="256" y="396" text-anchor="middle" fill="#F3F1EA" font-family="'Host Grotesk', -apple-system, BlinkMacSystemFont, sans-serif" font-size="56" font-weight="600" letter-spacing="8">VERDYX</text>
+  <text x="256" y="424" text-anchor="middle" fill="#F3F1EA" opacity="0.82" font-family="'Commit Mono', ui-monospace, monospace" font-size="13.5" font-weight="500" letter-spacing="3.2">DECENTRALIZED THREAT INTELLIGENCE</text>
+</svg>

@@ -31,12 +31,14 @@ function getStoredTheme(): Theme {
 
 function applyTheme(resolved: "light" | "dark") {
   const root = document.documentElement;
+  // PlateRoom owns light/dark from the route. A stored preference must not
+  // paint the bench black or the console greige.
+  if (root.dataset.plate === "bench" || root.dataset.plate === "housing") return;
   root.classList.toggle("dark", resolved === "dark");
   root.style.colorScheme = resolved;
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) {
-    // Match the --background token for each theme.
-    meta.setAttribute("content", resolved === "dark" ? "#0a0f1e" : "#f7f9fc");
+    meta.setAttribute("content", resolved === "dark" ? "#141513" : "#C8C5BC");
   }
 }
 

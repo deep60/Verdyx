@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::channels::{ApnsConfig, EmailConfig, FcmConfig, WebhookConfig};
 
+fn env_non_empty(key: &str, default: &str) -> String {
+    std::env::var(key)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default.to_string())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
@@ -40,68 +48,64 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
             server: ServerConfig {
-                host: std::env::var("SERVER_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
-                port: std::env::var("SERVER_PORT")
-                    .unwrap_or_else(|_| "8084".to_string())
-                    .parse()?,
+                host: env_non_empty("SERVER_HOST", "0.0.0.0"),
+                port: env_non_empty("SERVER_PORT", "8080").parse().unwrap_or(8080),
             },
             database: DatabaseConfig {
                 url: std::env::var("DATABASE_URL")?,
-                max_connections: std::env::var("DATABASE_MAX_CONNECTIONS")
-                    .unwrap_or_else(|_| "10".to_string())
-                    .parse()?,
+                max_connections: env_non_empty("DATABASE_MAX_CONNECTIONS", "10")
+                    .parse()
+                    .unwrap_or(10),
             },
             redis: RedisConfig {
-                url: std::env::var("REDIS_URL")
-                    .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
+                url: env_non_empty("REDIS_URL", "redis://localhost:6379"),
             },
             email: EmailConfig {
-                smtp_host: std::env::var("SMTP_HOST")
-                    .unwrap_or_else(|_| "smtp.gmail.com".to_string()),
-                smtp_port: std::env::var("SMTP_PORT")
-                    .unwrap_or_else(|_| "587".to_string())
-                    .parse()?,
+                smtp_host: env_non_empty("SMTP_HOST", "smtp.gmail.com"),
+                smtp_port: env_non_empty("SMTP_PORT", "587").parse().unwrap_or(587),
                 smtp_username: std::env::var("SMTP_USERNAME")
                     .or_else(|_| std::env::var("SMTP_USER"))
                     .unwrap_or_default(),
                 smtp_password: std::env::var("SMTP_PASSWORD").unwrap_or_default(),
                 from_address: std::env::var("EMAIL_FROM_ADDRESS")
                     .or_else(|_| std::env::var("EMAIL_FROM"))
-                    .unwrap_or_else(|_| "noreply@verdyx.io".to_string()),
-                from_name: std::env::var("EMAIL_FROM_NAME")
-                    .unwrap_or_else(|_| "Verdyx".to_string()),
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "noreply@verdyx.io".to_string()),
+                from_name: env_non_empty("EMAIL_FROM_NAME", "Verdyx"),
             },
             push: PushConfig {
-                fcm: if std::env::var("FCM_SERVER_KEY").is_ok() {
-                    Some(FcmConfig {
-                        endpoint: std::env::var("FCM_ENDPOINT")
-                            .unwrap_or_else(|_| "https://fcm.googleapis.com/fcm/send".to_string()),
-                        server_key: std::env::var("FCM_SERVER_KEY").unwrap(),
-                    })
-                } else {
-                    None
-                },
-                apns: if std::env::var("APNS_AUTH_TOKEN").is_ok() {
-                    Some(ApnsConfig {
-                        endpoint: std::env::var("APNS_ENDPOINT")
-                            .unwrap_or_else(|_| "https://api.push.apple.com".to_string()),
-                        auth_token: std::env::var("APNS_AUTH_TOKEN").unwrap(),
-                        bundle_id: std::env::var("APNS_BUNDLE_ID")
-                            .unwrap_or_else(|_| "io.verdyx.app".to_string()),
-                    })
-                } else {
-                    None
-                },
+                fcm: std::env::var("FCM_SERVER_KEY")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|server_key| FcmConfig {
+                        endpoint: env_non_empty(
+                            "FCM_ENDPOINT",
+                            "https://fcm.googleapis.com/fcm/send",
+                        ),
+                        server_key,
+                    }),
+                apns: std::env::var("APNS_AUTH_TOKEN")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|auth_token| ApnsConfig {
+                        endpoint: env_non_empty("APNS_ENDPOINT", "https://api.push.apple.com"),
+                        auth_token,
+                        bundle_id: env_non_empty("APNS_BUNDLE_ID", "io.verdyx.app"),
+                    }),
             },
             webhook: WebhookConfig {
-                signing_secret: std::env::var("WEBHOOK_SIGNING_SECRET").ok(),
+                signing_secret: std::env::var("WEBHOOK_SIGNING_SECRET")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty()),
                 max_retries: std::env::var("WEBHOOK_MAX_RETRIES")
                     .or_else(|_| std::env::var("MAX_RETRY_ATTEMPTS"))
-                    .unwrap_or_else(|_| "3".to_string())
-                    .parse()?,
-                timeout_seconds: std::env::var("WEBHOOK_TIMEOUT")
-                    .unwrap_or_else(|_| "30".to_string())
-                    .parse()?,
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(3),
+                timeout_seconds: env_non_empty("WEBHOOK_TIMEOUT", "30")
+                    .parse()
+                    .unwrap_or(30),
             },
         })
     }

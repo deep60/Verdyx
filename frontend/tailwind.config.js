@@ -5,9 +5,12 @@ module.exports = {
   theme: {
   	extend: {
   		borderRadius: {
-  			lg: 'var(--radius)',
-  			md: 'calc(var(--radius) - 2px)',
-  			sm: 'calc(var(--radius) - 4px)'
+  			lg: '2px',
+  			md: '2px',
+  			sm: '2px',
+  			xl: '2px',
+  			'2xl': '2px',
+  			'3xl': '2px'
   		},
   		colors: {
   			background: 'hsl(var(--background))',
@@ -55,6 +58,7 @@ module.exports = {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
+  			mark: 'hsl(var(--mark))',
   			chart: {
   				'1': 'var(--chart-1)',
   				'2': 'var(--chart-2)',
@@ -74,29 +78,10 @@ module.exports = {
   			}
   		},
   		fontFamily: {
-  			sans: [
-  				'Manrope',
-  				'system-ui',
-  				'-apple-system',
-  				'Segoe UI',
-  				'sans-serif'
-  			],
-  			display: [
-  				'Syne',
-  				'Manrope',
-  				'system-ui',
-  				'sans-serif'
-  			],
-  			serif: [
-  				'Syne',
-  				'serif'
-  			],
-  			mono: [
-  				'IBM Plex Mono',
-  				'ui-monospace',
-  				'SFMono-Regular',
-  				'monospace'
-  			]
+  			sans: ['Host Grotesk', 'system-ui', 'sans-serif'],
+  			display: ['Host Grotesk', 'system-ui', 'sans-serif'],
+  			serif: ['Newsreader', 'Georgia', 'serif'],
+  			mono: ['Commit Mono', 'ui-monospace', 'monospace']
   		},
   		keyframes: {
   			'accordion-down': {
@@ -201,6 +186,7 @@ module.exports = {
   			'650': '650ms'
   		},
   		transitionTimingFunction: {
+  			plate: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
   			'expo-out': 'cubic-bezier(0.22, 1, 0.36, 1)'
   		}
   	}

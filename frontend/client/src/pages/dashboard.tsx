@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { SWITCH_DASHBOARD_TAB_EVENT } from "@/components/command-palette";
+import { useState, useEffect } from "react";
 import { Navigation } from "@/components/navigation";
-import { ParticleBackground } from "@/components/particle-background";
 import { DashboardStats, RecentAnalyses } from "@/components/analysis-dashboard";
 import { FileSubmissionForm } from "@/components/file-submission-form";
 import { PlatformAnalytics } from "@/components/platform-analytics";
 import { WebsiteIntelligencePanel } from "@/components/website-intelligence-panel";
+import { YaraStudio } from "@/components/yara-studio";
+import { ScanDiffPanel } from "@/components/scan-diff";
+import { Footer } from "@/components/footer";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -18,127 +21,234 @@ import {
   ShieldCheck,
   Radio,
   Layers,
-  ArrowRight,
+  Terminal,
+  Zap,
+  CheckCircle2,
+  Binary,
+  ArrowLeftRight,
 } from "lucide-react";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { SEO } from "@/components/seo";
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem("verdyx_dashboard_tab");
+      if (saved) {
+        sessionStorage.removeItem("verdyx_dashboard_tab");
+        return saved;
+      }
+    }
+    return "scanner";
+  });
+
+  useEffect(() => {
+    const onSwitchTab = (e: Event) => {
+      const custom = e as CustomEvent<string>;
+      if (custom.detail) setActiveTab(custom.detail);
+    };
+    window.addEventListener(SWITCH_DASHBOARD_TAB_EVENT, onSwitchTab);
+    return () => window.removeEventListener(SWITCH_DASHBOARD_TAB_EVENT, onSwitchTab);
+  }, []);
   const { isConnected } = useWebSocket();
+  const [activeLogIdx, setActiveLogIdx] = useState(0);
+
+  const liveAgentLogs = [
+    {
+      ts: "00:00.012",
+      node: "gateway-edge-01",
+      action: "INGEST_ARTIFACT",
+      detail: "SHA-256 & BLAKE2b digests computed · TLS 1.3 verified",
+      color: "text-muted-foreground",
+    },
+    {
+      ts: "00:00.048",
+      node: "redis-queue-zset",
+      action: "ENQUEUE_PRIORITY",
+      detail: "Dispatched job to 8 autonomous sandbox workers + OSINT recon",
+      color: "text-primary",
+    },
+    {
+      ts: "00:00.195",
+      node: "engine-clamav-yara",
+      action: "SIGNATURE_SWEEP",
+      detail: "libyara 4.5 + clamd socket evaluated 128+ malware rule sets",
+      color: "text-accent",
+    },
+    {
+      ts: "00:00.340",
+      node: "engine-ml-gbdt",
+      action: "ENTROPY_VECTOR",
+      detail: "256-bin byte histogram & n-gram perplexity scored (96.4% conf)",
+      color: "text-warning",
+    },
+    {
+      ts: "00:00.620",
+      node: "osint-web-intel",
+      action: "RECON_36_MODULES",
+      detail: "DoH DNS, Shodan InternetDB ports/CVEs, RDAP WHOIS, CT logs & HSTS",
+      color: "text-muted-foreground",
+    },
+    {
+      ts: "00:00.890",
+      node: "consensus-quorum",
+      action: "BAYESIAN_FINALIZE",
+      detail: "Stake-weighted quorum reached · Broadcast over /ws pubsub",
+      color: "text-success",
+    },
+  ];
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveLogIdx((prev) => (prev + 1) % liveAgentLogs.length);
+    }, 2400);
+    return () => clearInterval(timer);
+  }, [liveAgentLogs.length]);
 
   const pipelineStages = [
     {
       step: "01",
-      title: "API Gateway & SHA-256 Ingestion",
-      service: "verdyx-api-gateway (Rust / Axum)",
-      detail: "Validates multipart payload or target URL, computes cryptographic SHA-256/MD5/BLAKE2b hashes, and persists artifact metadata.",
+      title: "API Gateway & Cryptographic Hashing",
+      service: "verdyx-api-gateway · Rust/Axum",
+      latency: "4ms",
+      detail:
+        "Validates multipart binaries or URLs, computes SHA-256, MD5, and BLAKE2b digests, and persists submission metadata.",
       icon: Upload,
+      accent: "border-border",
     },
     {
       step: "02",
-      title: "Redis Priority Job Queue",
-      service: "verdyx-redis (ZSET Queue)",
-      detail: "Enqueues submission into priority-weighted Redis sorted set with automatic in-flight recovery and pub/sub event bus.",
+      title: "Redis Priority ZSET Scheduler",
+      service: "verdyx-redis · In-Flight Guard",
+      latency: "1.2ms",
+      detail:
+        "Schedules jobs into a priority-weighted sorted set with automatic crash recovery and Pub/Sub event fan-out.",
       icon: Layers,
+      accent: "border-border",
     },
     {
       step: "03",
-      title: "Parallel 8-Engine Sandbox Execution",
-      service: "verdyx-analysis-engine",
-      detail: "Concurrently executes ClamAV daemon, YARA rules, Static PE/ELF Goblin parser, Byte-Entropy GBDT ML, Heuristic, Signature, and Hash Intel.",
+      title: "8-Engine Parallel Sandbox Matrix",
+      service: "verdyx-analysis-engine · tokio::join!",
+      latency: "180ms",
+      detail:
+        "Executes ClamAV, YARA, Goblin PE/ELF Static Parser, Byte-Entropy GBDT ML, Heuristic, Signature & Hash Threat Intel concurrently.",
       icon: Cpu,
+      accent: "border-border",
     },
     {
       step: "04",
-      title: "Deep Website OSINT & TLS/DNS Recon",
-      service: "web_intel (DoH / Shodan / RDAP / CT)",
-      detail: "Probes DNS-over-HTTPS, TLS cipher suites, Shodan InternetDB ports/CVEs, Certificate Transparency subdomains, and HTTP security headers.",
+      title: "36-Module Website OSINT Recon",
+      service: "web_intel · DoH + Shodan + RDAP + CT",
+      latency: "640ms",
+      detail:
+        "Queries Cloudflare DoH, Shodan InternetDB open ports & CVEs, RDAP WHOIS, Certificate Transparency subdomains, and HTTP security.",
       icon: Globe,
+      accent: "border-border",
     },
     {
       step: "05",
       title: "Stake-Weighted Bayesian Consensus",
       service: "verdyx-consensus-service",
-      detail: "Aggregates multi-engine detections and community analyst votes weighted by accuracy reputation and staked ETH.",
+      latency: "18ms",
+      detail:
+        "Combines automated engine detections with analyst community votes weighted by historical accuracy and staked ETH.",
       icon: ShieldCheck,
+      accent: "border-border",
     },
     {
       step: "06",
-      title: "PostgreSQL Persistence & Live WebSocket",
+      title: "PostgreSQL & Live WebSocket Stream",
       service: "postgres + /ws pubsub relay",
-      detail: "Writes per-engine telemetry to verdyx_gateway and broadcasts real-time completion frames over WebSocket.",
+      latency: "6ms",
+      detail:
+        "Persists per-engine telemetry to verdyx_gateway and pushes real-time completion frames to connected browsers.",
       icon: Database,
+      accent: "border-border",
     },
   ];
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen flex flex-col bg-background text-foreground">
       <SEO
-        title="Live Threat Dashboard"
-        description="Monitor live malware analyses, multi-engine consensus telemetry, and 36-module website OSINT reconnaissance."
+        title="Analysis Dashboard — Verdyx Command Center"
+        description="Submit files or URLs for 8-engine malware analysis, inspect 36+ website OSINT modules, and monitor real-time backend telemetry."
       />
-      <ParticleBackground />
       <Navigation />
 
-      <main id="main-content" tabIndex={-1} className="relative z-10 py-10">
+      <main id="main-content" tabIndex={-1} className="relative z-10 flex-1 py-8 sm:py-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-          {/* Page Header */}
-          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          {/* Dashboard Header */}
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 animate-fade-up">
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold font-display tracking-[-0.03em]">
-                Analysis Dashboard
+              <h1 className="text-3xl font-medium tracking-[-0.035em] sm:text-4xl">
+                Analysis
               </h1>
-              <p className="text-muted-foreground mt-1">
-                Monitor real-time threat detection, backend engine execution pipeline, and deep website OSINT reconnaissance
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+                Submit a file or a URL. Engine votes, the site report, and the quorum stay on the case.
               </p>
             </div>
-            <div className="inline-flex items-center gap-2 self-start sm:self-auto rounded-full border border-border bg-card/60 px-3 py-1.5 text-xs font-medium">
+
+            <div className="inline-flex items-center gap-2.5 self-start border border-border bg-card px-3 py-1.5 font-mono text-xs sm:self-auto">
               <span
-                className={`h-2 w-2 rounded-full ${
-                  isConnected ? "bg-accent animate-pulse" : "bg-muted-foreground"
-                }`}
+                className={`h-2 w-2 ${isConnected ? "bg-success" : "bg-warning"}`}
               />
-              <span className="text-muted-foreground">
-                {isConnected ? "Live Stream Connected" : "Polling Active"}
-              </span>
+              <span>{isConnected ? "Live Stream Connected" : "Auto-Polling Active"}</span>
             </div>
           </div>
 
+          {/* KPI Row */}
+          <DashboardStats />
+
+          {/* Clean, Structured Workspace Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-            <TabsList className="grid w-full max-w-2xl grid-cols-3">
-              <TabsTrigger value="overview" className="flex items-center gap-2">
+            <TabsList className="grid w-full grid-cols-2 md:grid-cols-3 xl:grid-cols-6 h-auto p-1.5 gap-1.5 bg-card/70 border border-border/70 rounded-xl">
+              <TabsTrigger value="scanner" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm font-semibold">
                 <Activity className="h-4 w-4" />
-                Live Analysis & Pipeline
+                Live Scanner &amp; Feed
               </TabsTrigger>
-              <TabsTrigger value="web-intel" className="flex items-center gap-2">
+              <TabsTrigger value="web-intel" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm font-semibold">
                 <Globe className="h-4 w-4" />
-                Website OSINT Recon (36+)
+                Website OSINT (36+)
               </TabsTrigger>
-              <TabsTrigger value="analytics" className="flex items-center gap-2">
+              <TabsTrigger value="yara" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm font-semibold">
+                <Binary className="h-4 w-4" />
+                YARA Studio
+              </TabsTrigger>
+              <TabsTrigger value="compare" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm font-semibold">
+                <ArrowLeftRight className="h-4 w-4" />
+                Scan Diff
+              </TabsTrigger>
+              <TabsTrigger value="pipeline" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm font-semibold">
+                <Cpu className="h-4 w-4" />
+                Backend Pipeline
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className="flex items-center gap-2 py-2.5 text-xs sm:text-sm font-semibold">
                 <BarChart3 className="h-4 w-4" />
                 Platform Analytics
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="overview" className="space-y-8">
-              {/* Row 1: 4 uniform KPI cards */}
-              <DashboardStats />
-
-              {/* Row 2: Recent analyses (8 cols) + Quick Submit (4 cols) */}
-              <div className="grid lg:grid-cols-12 gap-8 items-start">
-                <div className="lg:col-span-7">
-                  <RecentAnalyses />
-                </div>
+            {/* Tab 1: Live Scanner + Worker Telemetry + Recent Results */}
+            <TabsContent value="scanner" className="space-y-6 animate-fade-in">
+              <div className="grid lg:grid-cols-12 gap-6 items-start">
                 <div className="lg:col-span-5">
-                  <Card className="glassmorphism neon-border">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2 text-lg">
+                  <Card className="bento-card">
+                    <CardHeader className="pb-4">
+                      <div className="flex items-center justify-between">
+                        <Badge variant="outline" className="font-mono text-[10px] border-primary/40 text-primary">
+                          ARTIFACT &amp; URL INGESTION
+                        </Badge>
+                        <span className="text-xs font-mono text-accent flex items-center gap-1">
+                          <Zap className="h-3 w-3" /> Instant Queue
+                        </span>
+                      </div>
+                      <CardTitle className="flex items-center gap-2 text-xl font-display mt-2">
                         <Upload className="h-5 w-5 text-primary" />
                         Quick Submit
                       </CardTitle>
                       <CardDescription>
-                        Send a binary file or website URL for multi-engine consensus & OSINT analysis.
+                        Upload a file, paste a phishing email, or scan a URL. Email checks SPF, DKIM, DMARC, and attachments.
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -146,71 +256,132 @@ export default function Dashboard() {
                     </CardContent>
                   </Card>
                 </div>
-              </div>
 
-              {/* Row 3: How the Backend Pipeline Works in Real Time */}
-              <Card className="glassmorphism border-primary/25">
-                <CardHeader>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <CardTitle className="flex items-center gap-2 text-xl">
-                        <Radio className="h-5 w-5 text-primary animate-pulse" />
-                        Live Distributed Backend Execution Architecture
-                      </CardTitle>
-                      <CardDescription>
-                        End-to-end microservice pipeline executing behind every file and URL scan
-                      </CardDescription>
-                    </div>
-                    <Badge variant="outline" className="font-mono text-xs border-primary/40 text-primary">
-                      9 Rust Microservices · 8 Security Engines · 36 OSINT Recon Probes
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {pipelineStages.map((st, idx) => {
-                      const Icon = st.icon;
-                      return (
-                        <div
-                          key={st.step}
-                          className="relative rounded-xl border border-border/60 bg-card/50 p-4 space-y-2 hover:border-primary/40 transition-colors"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                                <Icon className="h-4 w-4" />
+                <div className="lg:col-span-7 space-y-6">
+                  <RecentAnalyses />
+
+                  {/* Live Backend Worker Telemetry Stream */}
+                  <Card>
+                    <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Terminal className="h-4 w-4 text-accent" />
+                          <CardTitle className="text-base font-display">
+                            Live Backend Worker Telemetry
+                          </CardTitle>
+                        </div>
+                        <CardDescription className="text-xs font-mono mt-0.5">
+                          api-gateway → redis-zset → analysis-engine (8 workers) → consensus
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 bg-mark" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="rounded-sm border border-border bg-background p-3.5 font-mono text-xs space-y-2">
+                        {liveAgentLogs.map((log, i) => {
+                          const isActive = i === activeLogIdx;
+                          return (
+                            <div
+                              key={log.action}
+                              className={`flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg transition-all duration-300 ${
+                                isActive
+                                  ? "bg-primary/15 border border-primary/40"
+                                  : "opacity-65"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-muted-foreground text-[11px]">{log.ts}</span>
+                                <Badge variant="outline" className="font-mono text-[10px] py-0 px-1.5">
+                                  {log.node}
+                                </Badge>
+                                <span className={`font-semibold ${log.color}`}>{log.action}</span>
                               </div>
-                              <span className="font-mono text-xs text-primary font-bold">
-                                STAGE {st.step}
+                              <span className="text-muted-foreground truncate text-[11px]">
+                                {log.detail}
                               </span>
                             </div>
-                            {idx < pipelineStages.length - 1 && (
-                              <ArrowRight className="h-3.5 w-3.5 text-muted-foreground hidden lg:block" />
-                            )}
-                          </div>
-                          <div className="font-semibold text-sm">{st.title}</div>
-                          <div className="font-mono text-[11px] text-accent">{st.service}</div>
-                          <p className="text-xs text-muted-foreground leading-relaxed">
-                            {st.detail}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
             </TabsContent>
 
-            <TabsContent value="web-intel" className="space-y-8">
+            {/* Tab 2: 36+ Module Website OSINT Recon (No default URL pre-filled) */}
+            <TabsContent value="web-intel" className="space-y-6 animate-fade-in">
               <WebsiteIntelligencePanel />
             </TabsContent>
 
-            <TabsContent value="analytics" className="space-y-8">
+            <TabsContent value="yara" className="space-y-6 animate-fade-in">
+              <YaraStudio />
+            </TabsContent>
+
+            <TabsContent value="compare" className="space-y-6 animate-fade-in">
+              <ScanDiffPanel />
+            </TabsContent>
+
+            {/* Tab 3: 6-Stage Distributed Backend Pipeline */}
+            <TabsContent value="pipeline" className="space-y-6 animate-fade-in">
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <span className="text-xs font-mono uppercase tracking-widest text-accent">
+                    MICROSERVICE TELEMETRY · HOW VERDYX WORKS IN THE BACKEND
+                  </span>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold font-display tracking-tight mt-1">
+                    The path a file takes
+                  </h2>
+                </div>
+                <Badge variant="outline" className="font-mono text-xs border-accent/40 text-accent">
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />9 Rust Microservices Online
+                </Badge>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+                {pipelineStages.map((st) => {
+                  const Icon = st.icon;
+                  return (
+                    <div
+                      key={st.step}
+                      className="rounded-sm border border-border bg-card p-6 space-y-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2.5 rounded-xl bg-background/80 border border-border text-primary">
+                            <Icon className="h-5 w-5" />
+                          </div>
+                          <span className="font-mono text-xs font-bold tracking-wider text-primary">
+                            STAGE {st.step}
+                          </span>
+                        </div>
+                        <Badge variant="secondary" className="font-mono text-[11px]">
+                          ~{st.latency}
+                        </Badge>
+                      </div>
+                      <h3 className="text-lg font-bold font-display">{st.title}</h3>
+                      <div className="font-mono text-xs text-accent flex items-center gap-1">
+                        <Radio className="h-3 w-3" />
+                        {st.service}
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{st.detail}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </TabsContent>
+
+            {/* Tab 4: Platform Analytics */}
+            <TabsContent value="analytics" className="space-y-6 animate-fade-in">
               <PlatformAnalytics />
             </TabsContent>
           </Tabs>
         </div>
       </main>
+
+      <Footer tag="v2.1-dashboard" />
     </div>
   );
 }

@@ -46,13 +46,13 @@ const features = [
 
 export function ComparisonTable() {
   return (
-    <div className="w-full max-w-5xl mx-auto rounded-xl border border-border/50 bg-card/30 backdrop-blur-sm overflow-hidden mt-10">
-      <div className="p-6 md:p-8 bg-surface/50 border-b border-border/50">
-        <h2 className="text-2xl md:text-3xl font-display font-bold text-foreground mb-2">
-          Why Engineers Choose Verdyx
+    <div className="w-full max-w-5xl mx-auto overflow-hidden border border-border bg-card">
+      <div className="border-b border-border p-6 md:p-8">
+        <h2 className="mb-2 text-2xl font-medium tracking-[-0.03em] text-foreground sm:text-3xl">
+          Against a single scanner
         </h2>
-        <p className="text-muted-foreground">
-          We built the engine we wanted to use. No black boxes, no arbitrary rate limits, just verifiable results.
+        <p className="text-sm text-muted-foreground">
+          One engine hides its misses. Verdyx keeps every vote and the quorum next to them.
         </p>
       </div>
       

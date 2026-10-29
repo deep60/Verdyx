@@ -13,7 +13,8 @@ the API in step 4 once `api-gateway` has a home.
 
 | Page | Standalone |
 |---|---|
-| `/`, `/features`, `/pricing`, `/how-it-works`, `/use-cases`, `/api`, 404 | ✅ fully |
+| `/`, `/pricing`, `/api`, 404 | ✅ fully |
+| `/features`, `/how-it-works`, `/use-cases` | redirect to home sections |
 | `/dashboard`, `/marketplace`, `/profile`, `/analysis/:id` | renders, empty states |
 | `/login`, `/register`, password reset | renders, submit fails until step 4 |
 

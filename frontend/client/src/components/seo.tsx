@@ -13,14 +13,14 @@ export function SEO({ title, description, url = "https://verdyx.io" }: { title: 
       <meta property="og:url" content={url} />
       <meta property="og:title" content={`${title} | Verdyx`} />
       <meta property="og:description" content={description} />
-      <meta property="og:image" content={`${url}/og-image.png`} />
+      <meta property="og:image" content={`${url}/verdyx-logo.svg`} />
       
       {/* Twitter */}
       <meta name="twitter:card" content="summary_large_image" />
       <meta name="twitter:url" content={url} />
       <meta name="twitter:title" content={`${title} | Verdyx`} />
       <meta name="twitter:description" content={description} />
-      <meta name="twitter:image" content={`${url}/og-image.png`} />
+      <meta name="twitter:image" content={`${url}/verdyx-logo.svg`} />
     </>
   );
 }

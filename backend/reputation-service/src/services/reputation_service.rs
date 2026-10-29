@@ -212,6 +212,7 @@ impl ReputationService {
         let rows = sqlx::query_as::<_, LeaderboardRow>(
             r#"
             SELECT user_id, current_score, accuracy_rate, total_submissions,
+                   current_streak, total_earned,
                    ROW_NUMBER() OVER (ORDER BY current_score DESC)::int AS rank,
                    (SELECT COUNT(*) FROM user_badges b WHERE b.user_id = r.user_id)::int AS badges_count
             FROM user_reputation r
@@ -234,6 +235,8 @@ impl ReputationService {
                 accuracy_rate: r.accuracy_rate,
                 total_submissions: r.total_submissions,
                 badges_count: r.badges_count,
+                current_streak: r.current_streak,
+                total_earned: r.total_earned,
             })
             .collect())
     }
@@ -389,6 +392,8 @@ struct LeaderboardRow {
     current_score: i32,
     accuracy_rate: Decimal,
     total_submissions: i32,
+    current_streak: i32,
+    total_earned: Decimal,
     rank: i32,
     badges_count: i32,
 }

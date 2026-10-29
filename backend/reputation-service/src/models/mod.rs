@@ -124,6 +124,8 @@ pub struct LeaderboardEntry {
     pub accuracy_rate: Decimal,
     pub total_submissions: i32,
     pub badges_count: i32,
+    pub current_streak: i32,
+    pub total_earned: Decimal,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" fill="none">
+  <rect width="240" height="240" rx="20" fill="#141513"/>
+  <!-- Corner Crosshairs -->
+  <g stroke="#7A7858" stroke-width="2" opacity="0.8">
+    <path d="M18 24H32M25 17V31"/>
+    <path d="M208 24H222M215 17V31"/>
+    <path d="M18 216H32M25 209V223"/>
+    <path d="M208 216H222M215 209V223"/>
+  </g>
+  <rect x="30" y="30" width="180" height="180" stroke="#7A7858" stroke-width="1.2" stroke-dasharray="3 4" opacity="0.55"/>
+  <!-- Center Ticks -->
+  <g stroke="#ABA658" stroke-width="1.8" opacity="0.85">
+    <path d="M120 18V36M120 44V68"/>
+    <path d="M113 50H127M113 58H127"/>
+    <path d="M18 120H36M204 120H222"/>
+    <path d="M120 206V222"/>
+  </g>
+  <!-- Upper Off-White 8-Engine Arms -->
+  <g stroke="#F3F1EA" stroke-width="3.6" stroke-linejoin="miter">
+    <path d="M44 46L92 128"/>
+    <path d="M196 46L148 128"/>
+    <path d="M56 46L99 120"/>
+    <path d="M184 46L141 120"/>
+    <path d="M68 46L106 111"/>
+    <path d="M172 46L134 111"/>
+    <path d="M80 46L120 116L160 46"/>
+    <path d="M120 116V144"/>
+  </g>
+  <!-- Lower Survey-Yellow Convergence Zone -->
+  <g stroke="#F0D83A" stroke-width="3.6" stroke-linejoin="miter">
+    <path d="M92 128L120 186L148 128"/>
+    <path d="M99 120L120 166L141 120"/>
+    <path d="M106 111L120 144L134 111"/>
+    <path d="M120 144V186"/>
+    <path d="M92 128L106 111"/>
+    <path d="M148 128L134 111"/>
+  </g>
+  <!-- Verdict Circle Node -->
+  <circle cx="120" cy="186" r="9.5" fill="#F0D83A"/>
+</svg>

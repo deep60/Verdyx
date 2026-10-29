@@ -6,8 +6,8 @@ use axum::{
 
 use crate::{
     handlers::{
-        analysis, auth, bounty, engines, health, reputation, submission, user, wallet, web_intel,
-        webhook,
+        analysis, auth, bounty, consensus_proxy, engines, health, reputation, submission, user,
+        wallet, web_intel, webhook,
     },
     middleware::auth as auth_mw,
     AppState,
@@ -27,6 +27,24 @@ pub fn create_routes(state: AppState) -> Router {
         .nest("/engines", engine_routes())
         .nest("/reputation", reputation_routes())
         .nest("/submissions", submission_routes())
+        .route(
+            "/voting/bounty/{bounty_id}/phase",
+            get(consensus_proxy::get_phase),
+        )
+        .route(
+            "/voting/bounty/{bounty_id}/commit",
+            post(consensus_proxy::commit_vote),
+        )
+        .route(
+            "/voting/bounty/{bounty_id}/reveal",
+            post(consensus_proxy::reveal_vote),
+        )
+        .route("/disputes/create", post(consensus_proxy::create_dispute))
+        .route(
+            "/disputes/bounty/{bounty_id}",
+            get(consensus_proxy::get_bounty_disputes),
+        )
+        .route("/grades/{bounty_id}", get(consensus_proxy::get_grade))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_mw::optional_auth_middleware,
@@ -114,6 +132,7 @@ fn reputation_routes() -> Router<AppState> {
     Router::new()
         .route("/leaderboard", get(reputation::get_leaderboard))
         .route("/leaderboard/top", get(reputation::get_top_analysts))
+        .route("/standings", get(reputation::get_standings))
         .route("/user/{user_id}", get(reputation::get_user_reputation))
         .route("/badges", get(reputation::list_available_badges))
         .route("/history/{user_id}", get(reputation::get_reputation_history))

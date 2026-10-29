@@ -10,6 +10,7 @@ use thiserror::Error;
 pub mod analysis;
 pub mod auth;
 pub mod bounty;
+pub mod consensus_proxy;
 pub mod engines;
 pub mod health;
 pub mod identity;

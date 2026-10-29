@@ -2,6 +2,7 @@
 // features are wired up. This crate-level allow keeps `clippy -D warnings`
 // green without deleting code we are about to use. Remove before GA.
 #![allow(dead_code)]
+#![recursion_limit = "512"]
 
 use anyhow::{Context, Result};
 use axum::{

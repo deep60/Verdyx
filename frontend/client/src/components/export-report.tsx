@@ -7,8 +7,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Download, FileJson, FileText, Share2, Printer } from "lucide-react";
+import { Download, FileJson, FileText, Share2, Printer, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import type { AttackTechnique } from "@/lib/attack-mapping";
+import { buildStixBundle } from "@/lib/stix";
 
 export interface AnalysisRecord {
   engineId?: string;
@@ -25,9 +27,20 @@ interface ExportReportProps {
   fileName: string;
   consensus?: Record<string, unknown>;
   analyses?: AnalysisRecord[];
+  attackTechniques?: AttackTechnique[];
+  sha256?: string;
+  targetUrl?: string;
 }
 
-export function ExportReport({ submissionId, fileName, consensus, analyses = [] }: ExportReportProps) {
+export function ExportReport({
+  submissionId,
+  fileName,
+  consensus,
+  analyses = [],
+  attackTechniques = [],
+  sha256,
+  targetUrl,
+}: ExportReportProps) {
   const { toast } = useToast();
 
   const exportAsJSON = () => {
@@ -182,6 +195,41 @@ export function ExportReport({ submissionId, fileName, consensus, analyses = [] 
     }
   };
 
+  const exportStix = () => {
+    try {
+      const verdict = typeof consensus?.finalVerdict === "string" ? consensus.finalVerdict : undefined;
+      const bundle = buildStixBundle({
+        submissionId,
+        fileName,
+        sha256,
+        targetUrl,
+        verdict,
+        techniques: attackTechniques,
+      });
+      const dataBlob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `verdyx-stix-${submissionId}-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast({
+        title: "STIX 2.1 exported",
+        description: attackTechniques.length
+          ? `Bundle includes ${attackTechniques.length} ATT&CK techniques from this scan.`
+          : "Bundle includes the indicator. No ATT&CK technique was supported by this scan.",
+      });
+    } catch {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export STIX 2.1 JSON",
+        variant: "destructive",
+      });
+    }
+  };
+
   const copyShareLink = () => {
     const shareUrl = `${window.location.origin}/analysis/${submissionId}`;
     navigator.clipboard.writeText(shareUrl).then(() => {
@@ -231,6 +279,11 @@ export function ExportReport({ submissionId, fileName, consensus, analyses = [] 
         <DropdownMenuItem onClick={exportAsJSON} className="gap-2">
           <FileJson className="h-4 w-4" />
           <span>Export as JSON</span>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem onClick={exportStix} className="gap-2">
+          <Shield className="h-4 w-4" />
+          <span>Export STIX 2.1</span>
         </DropdownMenuItem>
 
         <DropdownMenuItem onClick={exportAsMarkdown} className="gap-2">

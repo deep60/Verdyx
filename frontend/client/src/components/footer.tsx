@@ -1,45 +1,106 @@
+import { VerdyxLogo } from "@/components/verdyx-logo";
 import { Link } from "wouter";
-import { Shield } from "lucide-react";
+import { ArrowUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface FooterProps {
-  /** Small mono label shown in the pill, e.g. "v2.0-stable", "docs", "pricing". */
   tag?: string;
 }
 
-const footerLinks = [
-  { href: "/how-it-works", label: "How It Works" },
-  { href: "/features", label: "Features" },
-  { href: "/use-cases", label: "Use Cases" },
-  { href: "/pricing", label: "Pricing" },
-  { href: "/api", label: "API Docs" },
+const footerSections = [
+  {
+    title: "Platform",
+    links: [
+      { href: "/dashboard", label: "Analysis Dashboard" },
+      { href: "/marketplace", label: "Bounty Marketplace" },
+      { href: "/#architecture", label: "Architecture & Pipeline" },
+      { href: "/pricing", label: "Pricing & Tiers" },
+    ],
+  },
+  {
+    title: "Capabilities",
+    links: [
+      { href: "/#capabilities", label: "8-Engine Malware Sandbox" },
+      { href: "/#architecture", label: "Bayesian Consensus" },
+      { href: "/marketplace", label: "Security Engines" },
+      { href: "/#capabilities", label: "Enterprise Use Cases" },
+    ],
+  },
+  {
+    title: "Developers",
+    links: [
+      { href: "/api", label: "REST & WebSocket API" },
+      { href: "/api-docs", label: "API Reference & Keys" },
+      { href: "/login", label: "Analyst Sign In" },
+      { href: "/register", label: "Register Node" },
+    ],
+  },
 ];
 
-export function Footer({ tag = "v2.0-stable" }: FooterProps) {
+export function Footer({ tag = "commit · reveal" }: FooterProps) {
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
-    <footer className="relative border-t border-border/70 py-14 bg-background overflow-hidden">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
-      <div className="max-w-6xl mx-auto px-4 flex flex-col items-center gap-6">
-        <Link href="/" className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-brand text-white shadow-[0_6px_18px_-6px_hsl(var(--brand-from)/0.7)]">
-            <Shield className="h-5 w-5" />
-          </span>
-          <span className="text-xl font-bold font-display tracking-tight text-foreground">Verdyx</span>
-        </Link>
-        <nav className="flex flex-wrap justify-center gap-x-7 gap-y-2">
-          {footerLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {link.label}
+    <footer className="relative mt-auto border-t border-border bg-background">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-14 pb-10">
+        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-12 pb-12 border-b border-border">
+          <div className="lg:col-span-5 space-y-4">
+            <Link href="/" className="inline-flex items-center gap-2.5">
+              <VerdyxLogo size={38} textClassName="text-xl" showSubtitle />
             </Link>
-          ))}
-        </nav>
-        <div className="text-muted-foreground/80 font-mono text-xs bg-surface px-4 py-1.5 rounded-full border border-border">
-          verdyx // {tag}
+
+            <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
+              Eight engines on one file. Each vote is sealed, then opened with the quorum.
+            </p>
+
+            <p className="font-mono text-xs text-muted-foreground">{tag}</p>
+          </div>
+
+          {/* Navigation Columns (6 cols) */}
+          <div className="sm:col-span-2 lg:col-span-6 grid grid-cols-2 sm:grid-cols-3 gap-8">
+            {footerSections.map((section) => (
+              <div key={section.title} className="space-y-3">
+                <div className="text-xs font-mono uppercase tracking-widest text-foreground font-bold">
+                  {section.title}
+                </div>
+                <ul className="space-y-2.5">
+                  {section.links.map((link) => (
+                    <li key={link.href}>
+                      <Link
+                        href={link.href}
+                        className="text-sm text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 group"
+                      >
+                        <span className="group-hover:translate-x-0.5 transition-transform">
+                          {link.label}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          {/* Back to Top Column (1 col) */}
+          <div className="lg:col-span-1 flex sm:justify-end items-start">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={scrollToTop}
+              className="border-border"
+              aria-label="Back to top"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-        <p className="text-muted-foreground/60 text-xs">© 2026 Verdyx. Developer First.</p>
+
+        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
+          <p className="font-mono">Eight engines · thirty-six checks · one verdict</p>
+          <p className="font-mono">© {new Date().getFullYear()} Verdyx Labs</p>
+        </div>
       </div>
     </footer>
   );

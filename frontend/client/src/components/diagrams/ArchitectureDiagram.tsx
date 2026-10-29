@@ -37,37 +37,30 @@ export function ArchitectureDiagram() {
       <div className="w-full md:w-1/2 relative min-h-[400px] flex items-center justify-center">
         <svg
           viewBox="0 0 400 500"
-          className="w-full max-w-sm h-auto drop-shadow-2xl"
+          className="w-full max-w-sm h-auto"
           xmlns="http://www.w3.org/2000/svg"
           role="img"
           aria-label="Verdyx Architecture Diagram"
         >
           <title>Verdyx Architecture Diagram</title>
           <defs>
-            <linearGradient id="cyberGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.05" />
+            <linearGradient id="cyberGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#23251F" />
+              <stop offset="100%" stopColor="#141513" />
             </linearGradient>
-            
-            <linearGradient id="emeraldGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="#059669" stopOpacity="0.05" />
+            <linearGradient id="emeraldGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#23251F" />
+              <stop offset="100%" stopColor="#141513" />
             </linearGradient>
-
-            <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#a855f7" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="#7e22ce" stopOpacity="0.05" />
+            <linearGradient id="purpleGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#23251F" />
+              <stop offset="100%" stopColor="#141513" />
             </linearGradient>
-            
-            <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="5" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
           </defs>
 
           {/* Lines connecting layers */}
-          <path d="M200 130 L200 180" stroke="#334155" strokeWidth="2" strokeDasharray="4 4" className="animate-pulse-slow" />
-          <path d="M200 300 L200 350" stroke="#334155" strokeWidth="2" strokeDasharray="4 4" className="animate-pulse-slow" />
+          <path d="M200 130 L200 180" stroke="#32342C" strokeWidth="1" />
+          <path d="M200 300 L200 350" stroke="#32342C" strokeWidth="1" />
 
           {/* Layer 1: API */}
           <g 
@@ -76,9 +69,9 @@ export function ArchitectureDiagram() {
             className="cursor-pointer transition-all duration-300 transform origin-center"
             style={{ transform: activeLayer === "api" ? "scale(1.02)" : "scale(1)" }}
           >
-            <rect x="50" y="50" width="300" height="80" rx="8" fill="url(#cyberGradient)" stroke={activeLayer === "api" ? "#3b82f6" : "#1e293b"} strokeWidth="2" filter={activeLayer === "api" ? "url(#glow)" : ""} />
-            <text x="200" y="90" textAnchor="middle" fill="#f8fafc" className="font-mono text-lg font-bold">1. Submission API</text>
-            <text x="200" y="110" textAnchor="middle" fill="#94a3b8" className="font-sans text-xs">REST / gRPC Gateway</text>
+            <rect x="50" y="50" width="300" height="80" rx="2" fill="url(#cyberGradient)" stroke={activeLayer === "api" ? "#F0D83A" : "#32342C"} strokeWidth="1" />
+            <text x="200" y="90" textAnchor="middle" fill="#F3F1EA" className="font-mono text-lg">1. Submission API</text>
+            <text x="200" y="110" textAnchor="middle" fill="#C8C5BC" className="font-sans text-xs">REST gateway</text>
           </g>
 
           {/* Layer 2: Scanners */}
@@ -88,18 +81,18 @@ export function ArchitectureDiagram() {
             className="cursor-pointer transition-all duration-300 transform origin-center"
             style={{ transform: activeLayer === "orchestrator" ? "scale(1.02)" : "scale(1)" }}
           >
-            <rect x="30" y="180" width="340" height="120" rx="8" fill="url(#emeraldGradient)" stroke={activeLayer === "orchestrator" ? "#10b981" : "#1e293b"} strokeWidth="2" filter={activeLayer === "orchestrator" ? "url(#glow)" : ""} />
-            <text x="200" y="215" textAnchor="middle" fill="#f8fafc" className="font-mono text-lg font-bold">2. Distributed Nodes</text>
+            <rect x="30" y="180" width="340" height="120" rx="2" fill="url(#emeraldGradient)" stroke={activeLayer === "orchestrator" ? "#F0D83A" : "#32342C"} strokeWidth="1" />
+            <text x="200" y="215" textAnchor="middle" fill="#F3F1EA" className="font-mono text-lg">2. Distributed Nodes</text>
             
             {/* Inner boxes for engines */}
-            <rect x="50" y="235" width="80" height="40" rx="4" fill="#0f172a" stroke="#334155" />
-            <text x="90" y="260" textAnchor="middle" fill="#10b981" className="font-mono text-xs">YARA</text>
+            <rect x="50" y="235" width="80" height="40" rx="2" fill="#141513" stroke="#32342C" />
+            <text x="90" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">YARA</text>
             
-            <rect x="160" y="235" width="80" height="40" rx="4" fill="#0f172a" stroke="#334155" />
-            <text x="200" y="260" textAnchor="middle" fill="#10b981" className="font-mono text-xs">ClamAV</text>
+            <rect x="160" y="235" width="80" height="40" rx="2" fill="#141513" stroke="#32342C" />
+            <text x="200" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">ClamAV</text>
             
-            <rect x="270" y="235" width="80" height="40" rx="4" fill="#0f172a" stroke="#334155" />
-            <text x="310" y="260" textAnchor="middle" fill="#10b981" className="font-mono text-xs">ML (ONNX)</text>
+            <rect x="270" y="235" width="80" height="40" rx="2" fill="#141513" stroke="#32342C" />
+            <text x="310" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">ML</text>
           </g>
 
           {/* Layer 3: Consensus */}
@@ -109,9 +102,9 @@ export function ArchitectureDiagram() {
             className="cursor-pointer transition-all duration-300 transform origin-center"
             style={{ transform: activeLayer === "consensus" ? "scale(1.02)" : "scale(1)" }}
           >
-            <rect x="50" y="350" width="300" height="80" rx="8" fill="url(#purpleGradient)" stroke={activeLayer === "consensus" ? "#a855f7" : "#1e293b"} strokeWidth="2" filter={activeLayer === "consensus" ? "url(#glow)" : ""} />
-            <text x="200" y="390" textAnchor="middle" fill="#f8fafc" className="font-mono text-lg font-bold">3. Consensus Engine</text>
-            <text x="200" y="410" textAnchor="middle" fill="#94a3b8" className="font-sans text-xs">Aggregation & Verifiability</text>
+            <rect x="50" y="350" width="300" height="80" rx="2" fill="url(#purpleGradient)" stroke={activeLayer === "consensus" ? "#F0D83A" : "#32342C"} strokeWidth="1" />
+            <text x="200" y="390" textAnchor="middle" fill="#F3F1EA" className="font-mono text-lg">3. Consensus</text>
+            <text x="200" y="410" textAnchor="middle" fill="#C8C5BC" className="font-sans text-xs">Sealed, then opened</text>
           </g>
         </svg>
       </div>

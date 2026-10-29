@@ -1,6 +1,5 @@
 import { Navigation } from "@/components/navigation";
 import { Footer } from "@/components/footer";
-import { KineticText } from "@/components/motion/kinetic-text";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
@@ -15,15 +14,14 @@ export default function Pricing() {
       />
       <Navigation />
       
-      <main id="main-content" tabIndex={-1} className="pt-32 pb-24">
+      <main id="main-content" tabIndex={-1} className="pb-20 pt-12 sm:pt-16">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-20 max-w-3xl mx-auto animate-fade-up">
-            <span className="inline-block text-xs font-medium uppercase tracking-widest text-primary mb-4">Pricing</span>
-            <h1 className="text-4xl md:text-6xl font-bold font-display text-foreground tracking-[-0.03em] mb-6">
-              <KineticText text="Transparent API Pricing" />
+          <div className="mb-12 max-w-xl">
+            <h1 className="text-3xl font-medium tracking-[-0.035em] text-foreground sm:text-5xl">
+              Pricing
             </h1>
-            <p className="text-lg md:text-xl text-muted-foreground leading-relaxed mt-4">
-              Pay strictly for the compute you consume. No required sales calls, no artificial rate limits, and zero hidden fees.
+            <p className="mt-3 text-base leading-relaxed text-muted-foreground">
+              Pay for the analyses you run. The developer tier includes a monthly allowance. Enterprise volume is priced on the scans you actually send.
             </p>
           </div>
 
@@ -32,7 +30,7 @@ export default function Pricing() {
             {/* Developer Tier - Pay As You Go */}
             <div className="bg-card/50 border border-border rounded-2xl p-8 hover:border-primary/40 transition-colors relative h-full flex flex-col">
               <div className="mb-8">
-                <div className="inline-flex px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-medium mb-4">Pay As You Go</div>
+                <div className="mb-4 inline-flex border border-border px-2 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Pay as you go</div>
                 <h2 className="text-3xl font-bold text-foreground mb-2 font-display">Developer</h2>
                 <div className="flex items-baseline gap-1 mt-4">
                   <span className="text-4xl font-bold text-foreground">$0.005</span>

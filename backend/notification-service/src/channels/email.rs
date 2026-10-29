@@ -25,11 +25,18 @@ impl EmailChannel {
         // Build SMTP transport
         let creds = Credentials::new(config.smtp_username.clone(), config.smtp_password.clone());
 
-        let smtp_transport = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_host)
-            .map_err(|e| NotificationError::ConfigError(format!("Invalid SMTP host: {e}")))?
-            .port(config.smtp_port)
-            .credentials(creds)
-            .build();
+        let host = if config.smtp_host.trim().is_empty() {
+            "localhost"
+        } else {
+            config.smtp_host.trim()
+        };
+        let smtp_transport = match AsyncSmtpTransport::<Tokio1Executor>::relay(host) {
+            Ok(builder) => builder.port(config.smtp_port).credentials(creds).build(),
+            Err(_) => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous("localhost")
+                .port(config.smtp_port)
+                .credentials(creds)
+                .build(),
+        };
 
         // Initialize template engine
         let mut template_engine = handlebars::Handlebars::new();

@@ -319,6 +319,8 @@ use crate::models::analysis_result::{
     AnalysisResult, DetectionResult, EngineType, FileMetadata, SeverityLevel, ThreatCategory,
     ThreatVerdict,
 };
+use crate::scanners::email_scanner::{AuthResult, EmailScanner, EmailScannerConfig};
+use crate::scanners::Scanner;
 
 /// Configuration for the combined analysis engine
 #[derive(Debug, Clone)]
@@ -619,6 +621,10 @@ impl AnalysisEngine {
             }
         }
 
+        if let Some(email_det) = self.run_email_analysis(request).await {
+            detections.push(email_det);
+        }
+
         // Add detections to result
         for det in detections {
             result.add_detection(det);
@@ -882,6 +888,153 @@ impl AnalysisEngine {
         info!("All analyzer caches cleared");
     }
 
+    /// Run the MIME scanner when the artifact is an email.
+    ///
+    /// Other files return `None` so a binary scan does not grow an email
+    /// engine that has nothing to say. A `.eml` that fails to parse is an
+    /// explicit unavailable detection, not a silent clean.
+    async fn run_email_analysis(&self, request: &FileAnalysisRequest) -> Option<DetectionResult> {
+        if !looks_like_email(&request.filename, &request.file_data) {
+            return None;
+        }
+
+        let started = std::time::Instant::now();
+        let scanner = match EmailScanner::new(EmailScannerConfig::default()) {
+            Ok(scanner) => scanner,
+            Err(e) => {
+                return Some(Self::create_unavailable_detection(
+                    "Email Scanner",
+                    "mime",
+                    EngineType::Static,
+                    e.to_string(),
+                ));
+            }
+        };
+
+        match scanner.scan(&request.file_data, None).await {
+            Ok(scanned) => {
+                let (verdict, severity) = match scanned.base.verdict {
+                    crate::scanners::ScanVerdict::Malicious => {
+                        (ThreatVerdict::Malicious, SeverityLevel::High)
+                    }
+                    crate::scanners::ScanVerdict::Suspicious => {
+                        (ThreatVerdict::Suspicious, SeverityLevel::Medium)
+                    }
+                    crate::scanners::ScanVerdict::Clean => (ThreatVerdict::Benign, SeverityLevel::Info),
+                    _ => (ThreatVerdict::Unknown, SeverityLevel::Low),
+                };
+                let mut metadata = HashMap::new();
+                metadata.insert(
+                    "from".to_string(),
+                    serde_json::json!(scanned.email_info.from),
+                );
+                metadata.insert(
+                    "subject".to_string(),
+                    serde_json::json!(scanned.email_info.subject),
+                );
+                metadata.insert(
+                    "spf".to_string(),
+                    serde_json::json!(auth_label(&scanned.authentication_results.spf_result)),
+                );
+                metadata.insert(
+                    "dkim".to_string(),
+                    serde_json::json!(auth_label(&scanned.authentication_results.dkim_result)),
+                );
+                metadata.insert(
+                    "dmarc".to_string(),
+                    serde_json::json!(auth_label(&scanned.authentication_results.dmarc_result)),
+                );
+                metadata.insert(
+                    "forgedHeaders".to_string(),
+                    serde_json::json!(scanned.header_analysis.is_forged),
+                );
+                metadata.insert(
+                    "suspiciousAttachments".to_string(),
+                    serde_json::json!(
+                        scanned
+                            .attachments
+                            .iter()
+                            .filter(|a| a.is_suspicious)
+                            .map(|a| a.filename.clone())
+                            .collect::<Vec<_>>()
+                    ),
+                );
+                metadata.insert(
+                    "to".to_string(),
+                    serde_json::json!(scanned.email_info.to),
+                );
+                metadata.insert(
+                    "date".to_string(),
+                    serde_json::json!(scanned.email_info.date),
+                );
+                metadata.insert(
+                    "messageId".to_string(),
+                    serde_json::json!(scanned.email_info.message_id),
+                );
+                metadata.insert(
+                    "replyTo".to_string(),
+                    serde_json::json!(scanned.email_info.reply_to),
+                );
+                metadata.insert(
+                    "returnPath".to_string(),
+                    serde_json::json!(scanned.email_info.return_path),
+                );
+                metadata.insert(
+                    "receivedHops".to_string(),
+                    serde_json::json!(scanned.header_analysis.received_hops),
+                );
+                metadata.insert(
+                    "headerCount".to_string(),
+                    serde_json::json!(scanned.header_analysis.header_count),
+                );
+                metadata.insert(
+                    "suspiciousHeaders".to_string(),
+                    serde_json::json!(scanned.header_analysis.suspicious_headers),
+                );
+                metadata.insert(
+                    "suspiciousPatterns".to_string(),
+                    serde_json::json!(scanned.content_analysis.suspicious_patterns),
+                );
+                metadata.insert(
+                    "urgencyIndicators".to_string(),
+                    serde_json::json!(scanned.content_analysis.urgency_indicators),
+                );
+                metadata.insert(
+                    "extractedUrls".to_string(),
+                    serde_json::json!(scanned.extracted_urls),
+                );
+                metadata.insert(
+                    "attachments".to_string(),
+                    serde_json::json!(scanned.attachments),
+                );
+                metadata.insert(
+                    "spamScore".to_string(),
+                    serde_json::json!(format!("{:.1}/10", scanned.spam_score)),
+                );
+                Some(DetectionResult {
+                    detection_id: Uuid::new_v4(),
+                    engine_name: "Email Scanner".to_string(),
+                    engine_version: "mime".to_string(),
+                    engine_type: EngineType::Static,
+                    verdict,
+                    confidence: (scanned.spam_score / 10.0).clamp(0.0, 1.0),
+                    severity,
+                    categories: vec![ThreatCategory::Phishing],
+                    metadata,
+                    detected_at: Utc::now(),
+                    processing_time_ms: started.elapsed().as_millis() as u64,
+                    error_message: None,
+                })
+            }
+            Err(e) => Some(Self::create_unavailable_detection(
+                "Email Scanner",
+                "mime",
+                EngineType::Static,
+                e.to_string(),
+            )),
+        }
+    }
+
     /// Create an explicit DetectionResult representing an unavailable or disabled engine
     pub fn create_unavailable_detection(
         engine_name: &str,
@@ -1055,6 +1208,36 @@ impl AnalysisEngine {
                 "ml_engine".to_string(),
             ],
         }
+    }
+}
+
+fn looks_like_email(filename: &str, data: &[u8]) -> bool {
+    let name = filename.to_ascii_lowercase();
+    if name.ends_with(".eml") || name.ends_with(".mime") {
+        return true;
+    }
+    let head = &data[..data.len().min(4096)];
+    let Ok(text) = std::str::from_utf8(head) else {
+        return false;
+    };
+    let lower = text.to_ascii_lowercase();
+    let has_route = lower.starts_with("received:")
+        || lower.contains("\nreceived:")
+        || lower.contains("dkim-signature:")
+        || lower.contains("mime-version:");
+    let has_from = lower.starts_with("from:") || lower.contains("\nfrom:");
+    has_route && has_from
+}
+
+fn auth_label(result: &AuthResult) -> &'static str {
+    match result {
+        AuthResult::Pass => "pass",
+        AuthResult::Fail => "fail",
+        AuthResult::SoftFail => "softfail",
+        AuthResult::Neutral => "neutral",
+        AuthResult::None => "none",
+        AuthResult::TempError => "temperror",
+        AuthResult::PermError => "permerror",
     }
 }
 

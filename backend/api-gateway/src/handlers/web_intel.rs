@@ -10,9 +10,11 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -116,10 +118,10 @@ pub async fn inspect_url_web_intel(
     Ok(Json(report))
 }
 
-async fn doh_query(client: &reqwest::Client, name: &str, record_type: &str) -> Value {
+async fn doh_query(client: &reqwest::Client, name: String, record_type: &'static str) -> Value {
     let url = format!(
         "https://cloudflare-dns.com/dns-query?name={}&type={}",
-        urlencoding::encode(name),
+        urlencoding::encode(&name),
         record_type
     );
     match client
@@ -206,31 +208,16 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     // 2. Run external & direct probes concurrently
     let redirect_fut = trace_redirects(&no_redirect_client, &full_url_str);
     let page_fut = fetch_main_page(&client, &full_url_str);
-    let geo_fut = async {
-        if primary_ip.is_empty() {
-            json!({})
-        } else {
-            client
-                .get(format!("https://ipwho.is/{primary_ip}"))
-                .timeout(Duration::from_secs(4))
-                .send()
-                .await
-                .ok()
-                .and_then(|r| futures_util::FutureExt::now_or_never(r.json::<Value>()))
-                .and_then(|r| r.ok())
-                .unwrap_or_default()
-        }
-    };
-    let geo_ip_fut = fetch_json(&client, &format!("https://ipwho.is/{primary_ip}"), 4);
+    let geo_ip_fut = fetch_json(&client, format!("https://ipwho.is/{primary_ip}"), 4);
     let shodan_fut = fetch_json(
         &client,
-        &format!("https://internetdb.shodan.io/{primary_ip}"),
+        format!("https://internetdb.shodan.io/{primary_ip}"),
         4,
     );
-    let rdap_fut = fetch_json(&client, &format!("https://rdap.org/domain/{root_domain}"), 5);
+    let rdap_fut = fetch_json(&client, format!("https://rdap.org/domain/{root_domain}"), 5);
     let wayback_fut = fetch_json(
         &client,
-        &format!(
+        format!(
             "https://archive.org/wayback/available?url={}",
             urlencoding::encode(&full_url_str)
         ),
@@ -238,7 +225,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     );
     let crt_fut = fetch_json(
         &client,
-        &format!(
+        format!(
             "https://crt.sh/?q={}&output=json",
             urlencoding::encode(&root_domain)
         ),
@@ -246,28 +233,26 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     );
     let hibp_fut = fetch_json(
         &client,
-        &format!(
+        format!(
             "https://haveibeenpwned.com/api/v3/breaches?domain={}",
             urlencoding::encode(&root_domain)
         ),
         4,
     );
 
-    let doh_a_fut = doh_query(&client, &host, "A");
-    let doh_aaaa_fut = doh_query(&client, &host, "AAAA");
-    let doh_mx_fut = doh_query(&client, &root_domain, "MX");
-    let doh_ns_fut = doh_query(&client, &root_domain, "NS");
-    let doh_txt_fut = doh_query(&client, &root_domain, "TXT");
-    let doh_cname_fut = doh_query(&client, &host, "CNAME");
-    let doh_caa_fut = doh_query(&client, &root_domain, "CAA");
-    let doh_soa_fut = doh_query(&client, &root_domain, "SOA");
-    let doh_dmarc_fut = doh_query(&client, &format!("_dmarc.{root_domain}"), "TXT");
+    let doh_a_fut = doh_query(&client, host.clone(), "A");
+    let doh_aaaa_fut = doh_query(&client, host.clone(), "AAAA");
+    let doh_mx_fut = doh_query(&client, root_domain.clone(), "MX");
+    let doh_ns_fut = doh_query(&client, root_domain.clone(), "NS");
+    let doh_txt_fut = doh_query(&client, root_domain.clone(), "TXT");
+    let doh_cname_fut = doh_query(&client, host.clone(), "CNAME");
+    let doh_caa_fut = doh_query(&client, root_domain.clone(), "CAA");
+    let doh_soa_fut = doh_query(&client, root_domain.clone(), "SOA");
+    let doh_dmarc_fut = doh_query(&client, format!("_dmarc.{root_domain}"), "TXT");
 
-    let robots_fut = fetch_text(&client, &format!("{origin}/robots.txt"), 3);
-    let sitemap_fut = fetch_text(&client, &format!("{origin}/sitemap.xml"), 3);
-    let sectxt_fut = fetch_text(&client, &format!("{origin}/.well-known/security.txt"), 3);
-
-    drop(geo_fut);
+    let robots_fut = fetch_text(&client, format!("{origin}/robots.txt"), 3);
+    let sitemap_fut = fetch_text(&client, format!("{origin}/sitemap.xml"), 3);
+    let sectxt_fut = fetch_text(&client, format!("{origin}/.well-known/security.txt"), 3);
 
     let (
         redirect_chain,
@@ -522,6 +507,12 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
     // ── HTML DOM Analysis (Links, Social, Tech Stack, Mixed Content, SRI, Trackers) ──
     let html_analysis = analyze_html_document(&html_body, &host, &origin, &headers_map);
+    let favicon_info = favicon_record(
+        html_analysis.get("faviconHref").and_then(|v| v.as_str()),
+        &origin,
+        &host,
+    )
+    .await;
 
     // ── Certificate Transparency (SSL Cert & Subdomains) ──────────────────
     let (ssl_cert_info, subdomains_list) = parse_crt_sh(&crt_json, &host, &root_domain, parsed_url.scheme() == "https");
@@ -1035,17 +1026,34 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
             ]
         },
 
-        // 44. Screenshot
+        // 44. DOM phishing inspector (script-stripped snapshot, not a browser)
+        "domInspector": {
+            "forms": html_analysis["forms"].clone(),
+            "passwordInputCount": html_analysis["passwordInputCount"].clone(),
+            "credentialHarvesting": html_analysis["credentialHarvesting"].clone(),
+            "crossOriginFormAction": html_analysis["crossOriginFormAction"].clone(),
+            "externalScripts": html_analysis["externalScripts"].clone(),
+            "inlineScriptCount": html_analysis["inlineScriptCount"].clone(),
+            "previewHtml": html_analysis["previewHtml"].clone(),
+            "previewNote": "Script-stripped snapshot of the HTML fetched for this scan. Scripts, iframes, objects, and inline event handlers are removed. JavaScript is not executed."
+        },
+
+        // 45. Favicon MurmurHash3 (Shodan http.favicon.hash construction)
+        "favicon": favicon_info,
+
+        // 46. External thumbnail. Not a Verdyx headless browser.
         "screenshot": {
             "imageUrl": screenshot_url,
             "targetUrl": full_url_str,
+            "source": "WordPress mShots",
+            "note": "External thumbnail rendered by WordPress mShots. The safe snapshot is domInspector.previewHtml."
         }
     }))
 }
 
-async fn fetch_json(client: &reqwest::Client, url: &str, timeout_secs: u64) -> Value {
+async fn fetch_json(client: &reqwest::Client, url: String, timeout_secs: u64) -> Value {
     match client
-        .get(url)
+        .get(&url)
         .timeout(Duration::from_secs(timeout_secs))
         .send()
         .await
@@ -1055,9 +1063,9 @@ async fn fetch_json(client: &reqwest::Client, url: &str, timeout_secs: u64) -> V
     }
 }
 
-async fn fetch_text(client: &reqwest::Client, url: &str, timeout_secs: u64) -> Option<String> {
+async fn fetch_text(client: &reqwest::Client, url: String, timeout_secs: u64) -> Option<String> {
     match client
-        .get(url)
+        .get(&url)
         .timeout(Duration::from_secs(timeout_secs))
         .send()
         .await
@@ -1266,8 +1274,8 @@ fn analyze_html_document(
         }
     }
 
-    // Script tags: Mixed Content, SRI, Trackers
-    let script_re = Regex::new(r#"(?is)<script([^>]+)>"#).unwrap();
+    // Script tags: Mixed Content, SRI, Trackers, inline vs external
+    let script_re = Regex::new(r"(?is)<script\b([^>]*)>").unwrap();
     let src_re = Regex::new(r#"(?i)src=["']([^"']+)["']"#).unwrap();
     let mut sri_protected = 0u64;
     let mut sri_missing = 0u64;
@@ -1275,10 +1283,15 @@ fn analyze_html_document(
     let mut mixed_content = Vec::new();
     let mut third_party_hosts = HashSet::new();
     let mut detected_trackers = Vec::new();
+    let mut external_scripts = Vec::new();
+    let mut inline_scripts = 0u64;
 
     for cap in script_re.captures_iter(html) {
         if let Some(attrs) = cap.get(1).map(|m| m.as_str()) {
             if let Some(src) = src_re.captures(attrs).and_then(|c| c.get(1)).map(|m| m.as_str()) {
+                if external_scripts.len() < 25 {
+                    external_scripts.push(src.to_string());
+                }
                 if origin.starts_with("https://") && src.starts_with("http://") {
                     mixed_content.push(src.to_string());
                 }
@@ -1299,6 +1312,8 @@ fn analyze_html_document(
                         }
                     }
                 }
+            } else if !attrs.to_lowercase().contains("src=") {
+                inline_scripts += 1;
             }
         }
     }
@@ -1359,6 +1374,81 @@ fn analyze_html_document(
         }
     }
 
+    let form_re = Regex::new(r"(?is)<form\b([^>]*)>(.*?)</form>").unwrap();
+    let input_re = Regex::new(r"(?is)<input\b([^>]*)/?>").unwrap();
+    let password_re = Regex::new(r#"(?i)\btype\s*=\s*(?:"password"|'password'|password\b)"#).unwrap();
+    let mut forms = Vec::new();
+    let mut cross_origin_form = false;
+    let mut form_password_inputs = 0u64;
+
+    for cap in form_re.captures_iter(html).take(12) {
+        let attrs = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let body = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+        let action = html_attr(attrs, "action").unwrap_or_default();
+        let method = html_attr(attrs, "method")
+            .unwrap_or_else(|| "GET".to_string())
+            .to_uppercase();
+        let mut inputs = Vec::new();
+        let mut password_inputs = 0u64;
+        for icap in input_re.captures_iter(body).take(30) {
+            let iattrs = icap.get(1).map(|m| m.as_str()).unwrap_or("");
+            let itype = html_attr(iattrs, "type")
+                .unwrap_or_else(|| "text".to_string())
+                .to_lowercase();
+            let name = html_attr(iattrs, "name")
+                .or_else(|| html_attr(iattrs, "id"))
+                .unwrap_or_default();
+            if itype == "password" {
+                password_inputs += 1;
+            }
+            if inputs.len() < 12 {
+                inputs.push(json!({ "type": itype, "name": name }));
+            }
+        }
+        form_password_inputs += password_inputs;
+        let off_host = action_host(&action, origin, host)
+            .map(|h| h != host)
+            .unwrap_or(false);
+        if off_host {
+            cross_origin_form = true;
+        }
+        forms.push(json!({
+            "action": action,
+            "method": method,
+            "passwordInputs": password_inputs,
+            "offHostAction": off_host,
+            "inputs": inputs,
+        }));
+    }
+
+    let document_password_inputs = password_re.find_iter(html).count() as u64;
+    let password_input_count = document_password_inputs.max(form_password_inputs);
+
+    let mut favicon_href: Option<String> = None;
+    let link_re = Regex::new(r"(?is)<link\b([^>]+)>").unwrap();
+    for cap in link_re.captures_iter(html) {
+        let attrs = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let rel = html_attr(attrs, "rel").unwrap_or_default().to_lowercase();
+        let tokens: Vec<&str> = rel.split_whitespace().collect();
+        let is_icon = tokens.iter().any(|t| *t == "icon" || *t == "shortcut" || t.contains("icon"));
+        if !is_icon {
+            continue;
+        }
+        let Some(href) = html_attr(attrs, "href") else {
+            continue;
+        };
+        let preferred = tokens.iter().any(|t| *t == "icon" || *t == "shortcut");
+        if preferred {
+            favicon_href = Some(href);
+            break;
+        }
+        if favicon_href.is_none() {
+            favicon_href = Some(href);
+        }
+    }
+
+    let preview_html = strip_active_html(html);
+
     json!({
         "hasTitle": title.is_some(),
         "hasMetaDescription": description.is_some(),
@@ -1401,7 +1491,15 @@ fn analyze_html_document(
         "trackersThirdParties": {
             "detectedTrackers": detected_trackers,
             "thirdPartyScriptHosts": third_party_hosts.into_iter().collect::<Vec<_>>(),
-        }
+        },
+        "forms": forms,
+        "passwordInputCount": password_input_count,
+        "credentialHarvesting": password_input_count > 0,
+        "crossOriginFormAction": cross_origin_form,
+        "externalScripts": external_scripts,
+        "inlineScriptCount": inline_scripts,
+        "faviconHref": favicon_href,
+        "previewHtml": preview_html,
     })
 }
 
@@ -1602,4 +1700,321 @@ fn parse_security_txt(sectxt: &Option<String>) -> Value {
         "expires": expires,
         "policy": policy,
     })
+}
+
+fn html_attr(attrs: &str, name: &str) -> Option<String> {
+    let pattern = format!(r#"(?i)\b{name}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#);
+    let re = Regex::new(&pattern).ok()?;
+    let caps = re.captures(attrs)?;
+    caps.get(1)
+        .or_else(|| caps.get(2))
+        .or_else(|| caps.get(3))
+        .map(|m| m.as_str().trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn action_host(action: &str, origin: &str, page_host: &str) -> Option<String> {
+    if action.is_empty() || action.starts_with('#') || action.starts_with('?') {
+        return Some(page_host.to_string());
+    }
+    if action.starts_with("javascript:") || action.starts_with("mailto:") {
+        return None;
+    }
+    let base = reqwest::Url::parse(origin).ok()?;
+    let absolute = if action.starts_with("//") {
+        reqwest::Url::parse(&format!("{}:{action}", base.scheme())).ok()?
+    } else if action.starts_with("http://") || action.starts_with("https://") {
+        reqwest::Url::parse(action).ok()?
+    } else {
+        base.join(action).ok()?
+    };
+    absolute.host_str().map(|h| h.to_lowercase())
+}
+
+fn resolve_same_host(href: &str, origin: &str, host: &str) -> Option<String> {
+    let base = reqwest::Url::parse(origin).ok()?;
+    let absolute = if href.starts_with("//") {
+        reqwest::Url::parse(&format!("{}:{href}", base.scheme())).ok()?
+    } else if href.starts_with("http://") || href.starts_with("https://") {
+        reqwest::Url::parse(href).ok()?
+    } else {
+        base.join(href).ok()?
+    };
+    if absolute.scheme() != "http" && absolute.scheme() != "https" {
+        return None;
+    }
+    let resolved_host = absolute.host_str()?.to_lowercase();
+    if resolved_host != host.to_lowercase() || is_private_or_local_host(&resolved_host) {
+        return None;
+    }
+    Some(absolute.to_string())
+}
+
+/// Remove active content so the snapshot can be placed in a script-disabled frame.
+fn strip_active_html(html: &str) -> String {
+    let patterns = [
+        r"(?is)<script\b[^>]*>.*?</script>",
+        r"(?is)<iframe\b[^>]*>.*?</iframe>",
+        r"(?is)<object\b[^>]*>.*?</object>",
+        r"(?is)<embed\b[^>]*>",
+        r#"(?is)<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>"#,
+        r"(?is)<base\b[^>]*>",
+    ];
+    let mut out = html.to_string();
+    for pattern in patterns {
+        if let Ok(re) = Regex::new(pattern) {
+            out = re.replace_all(&out, "").into_owned();
+        }
+    }
+    if let Ok(re) = Regex::new(r#"(?i)\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)"#) {
+        out = re.replace_all(&out, "").into_owned();
+    }
+    if let Ok(re) = Regex::new(r"(?i)javascript:") {
+        out = re.replace_all(&out, "").into_owned();
+    }
+    const CAP: usize = 40_000;
+    if out.len() > CAP {
+        let mut end = CAP;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+        out.push_str("\n<!-- truncated by Verdyx -->");
+    }
+    out
+}
+
+fn murmur3_x86_32(data: &[u8], seed: u32) -> u32 {
+    const C1: u32 = 0xcc9e_2d51;
+    const C2: u32 = 0x1b87_3593;
+    let mut h = seed;
+    let mut chunks = data.chunks_exact(4);
+    for chunk in chunks.by_ref() {
+        let mut k = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        k = k.wrapping_mul(C1);
+        k = k.rotate_left(15);
+        k = k.wrapping_mul(C2);
+        h ^= k;
+        h = h.rotate_left(13);
+        h = h.wrapping_mul(5).wrapping_add(0xe654_6b64);
+    }
+    let rem = chunks.remainder();
+    if !rem.is_empty() {
+        let mut k = 0u32;
+        if rem.len() >= 3 {
+            k ^= (rem[2] as u32) << 16;
+        }
+        if rem.len() >= 2 {
+            k ^= (rem[1] as u32) << 8;
+        }
+        k ^= rem[0] as u32;
+        k = k.wrapping_mul(C1);
+        k = k.rotate_left(15);
+        k = k.wrapping_mul(C2);
+        h ^= k;
+    }
+    h ^= data.len() as u32;
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xc2b2_ae35);
+    h ^= h >> 16;
+    h
+}
+
+fn mime_base64(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let b64 = STANDARD.encode(bytes);
+    let mut mime = String::new();
+    for (i, chunk) in b64.as_bytes().chunks(76).enumerate() {
+        if i > 0 {
+            mime.push('\n');
+        }
+        mime.push_str(std::str::from_utf8(chunk).unwrap_or(""));
+    }
+    mime.push('\n');
+    mime
+}
+
+fn shodan_favicon_hash(bytes: &[u8]) -> i32 {
+    murmur3_x86_32(mime_base64(bytes).as_bytes(), 0) as i32
+}
+
+fn looks_like_icon(bytes: &[u8]) -> bool {
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G'])
+        || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+        || bytes.starts_with(b"GIF8")
+        || bytes.starts_with(&[0x00, 0x00, 0x01, 0x00])
+        || bytes.starts_with(&[0x00, 0x00, 0x02, 0x00])
+    {
+        return true;
+    }
+    if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return true;
+    }
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(240)]).to_lowercase();
+    head.contains("<svg")
+}
+
+async fn favicon_record(href: Option<&str>, origin: &str, host: &str) -> Value {
+    let candidate = href.filter(|s| !s.is_empty()).unwrap_or("/favicon.ico");
+    let Some(url) = resolve_same_host(candidate, origin, host) else {
+        return json!({
+            "url": candidate,
+            "status": "skipped-off-host",
+            "note": "The favicon URL is not on the scanned host, so Verdyx did not fetch it."
+        });
+    };
+
+    let client = match reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(4))
+        .user_agent("Verdyx-Recon/2.1")
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            return json!({
+                "url": url,
+                "status": "not-found",
+                "note": "Favicon client could not be created."
+            });
+        }
+    };
+
+    let mut current = url.clone();
+    for _ in 0..3 {
+        let resp = match client.get(&current).send().await {
+            Ok(resp) => resp,
+            Err(_) => {
+                return json!({
+                    "url": current,
+                    "status": "not-found",
+                    "note": "Favicon request failed."
+                });
+            }
+        };
+        if resp.status().is_redirection() {
+            let loc = resp
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            match resolve_same_host(loc, origin, host) {
+                Some(next) => {
+                    current = next;
+                    continue;
+                }
+                None => {
+                    return json!({
+                        "url": current,
+                        "status": "skipped-off-host",
+                        "note": "Favicon redirect left the scanned host and was not followed."
+                    });
+                }
+            }
+        }
+        if !resp.status().is_success() {
+            return json!({
+                "url": current,
+                "status": "not-found",
+                "note": "Favicon request did not return a successful response."
+            });
+        }
+        let final_host = resp.url().host_str().unwrap_or("").to_lowercase();
+        if final_host != host.to_lowercase() {
+            return json!({
+                "url": current,
+                "status": "skipped-off-host",
+                "note": "Favicon response host did not match the scanned host."
+            });
+        }
+        let bytes = match resp.bytes().await {
+            Ok(bytes) if !bytes.is_empty() && bytes.len() <= 256 * 1024 => bytes.to_vec(),
+            _ => {
+                return json!({
+                    "url": current,
+                    "status": "not-found",
+                    "note": "Favicon body was empty or larger than 256 KB."
+                });
+            }
+        };
+        if !looks_like_icon(&bytes) {
+            return json!({
+                "url": current,
+                "status": "not-image",
+                "note": "Favicon response was not an icon."
+            });
+        }
+        let hash = shodan_favicon_hash(&bytes);
+        let digest = hex::encode(Sha256::digest(&bytes));
+        return json!({
+            "url": current,
+            "bytes": bytes.len(),
+            "sha256": digest,
+            "murmur3": hash,
+            "shodanQuery": format!("http.favicon.hash:{hash}"),
+            "status": "hashed",
+            "note": "Signed MurmurHash3 of the MIME base64 favicon bytes. This matches the Shodan http.favicon.hash construction."
+        });
+    }
+
+    json!({
+        "url": url,
+        "status": "not-found",
+        "note": "Favicon redirected too many times."
+    })
+}
+
+#[cfg(test)]
+mod dom_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn murmur3_empty_is_zero() {
+        assert_eq!(murmur3_x86_32(b"", 0), 0);
+    }
+
+    #[test]
+    fn strip_removes_scripts_and_handlers() {
+        let html = r#"<html><body onclick="alert(1)"><script>alert(1)</script><input type="password"></body></html>"#;
+        let clean = strip_active_html(html);
+        assert!(!clean.to_lowercase().contains("<script"));
+        assert!(!clean.to_lowercase().contains("onclick"));
+        assert!(clean.to_lowercase().contains("password"));
+    }
+
+    #[test]
+    fn dom_inspector_finds_password_form_and_favicon() {
+        let html = r#"<html><head><link rel="icon" href="/fav.ico"></head><body>
+            <form method="POST" action="https://evil.example/login">
+              <input type="text" name="user">
+              <input type="password" name="pass">
+            </form>
+            <script src="https://cdn.example/a.js"></script>
+            </body></html>"#;
+        let headers = HashMap::new();
+        let value = analyze_html_document(html, "bank.test", "https://bank.test", &headers);
+        assert_eq!(value["passwordInputCount"].as_u64(), Some(1));
+        assert_eq!(value["credentialHarvesting"].as_bool(), Some(true));
+        assert_eq!(value["crossOriginFormAction"].as_bool(), Some(true));
+        assert_eq!(value["faviconHref"].as_str(), Some("/fav.ico"));
+        let preview = value["previewHtml"].as_str().unwrap_or("");
+        assert!(preview.contains("password"));
+        assert!(!preview.to_lowercase().contains("<script"));
+        let scripts = value["externalScripts"].as_array().cloned().unwrap_or_default();
+        assert_eq!(scripts.len(), 1);
+    }
+
+    #[test]
+    fn favicon_off_host_is_not_resolved() {
+        assert!(resolve_same_host("https://cdn.example/fav.ico", "https://bank.test", "bank.test").is_none());
+        assert_eq!(
+            resolve_same_host("/fav.ico", "https://bank.test", "bank.test").as_deref(),
+            Some("https://bank.test/fav.ico")
+        );
+    }
 }

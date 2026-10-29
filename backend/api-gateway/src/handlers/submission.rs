@@ -98,6 +98,9 @@ pub struct FileSubmissionListItem {
     pub analysis_type: Option<String>,
     pub bounty_amount: Option<String>,
     pub priority: Option<bool>,
+    /// Bounty opened for this upload, when one exists. Commit-reveal and
+    /// disputes are keyed by this id, not by the submission id.
+    pub bounty_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -517,10 +520,9 @@ pub async fn get_submissions(
     State(state): State<AppState>,
     Query(filters): Query<SubmissionFilters>,
 ) -> Result<Json<SubmissionListResponse>, StatusCode> {
-    let page = filters.page.unwrap_or(1);
-    let limit = filters.limit.unwrap_or(20);
+    let page = filters.page.unwrap_or(1).max(1);
+    let limit = filters.limit.unwrap_or(20).clamp(1, 100);
 
-    // Call service (stubbed currently but correctly signed)
     let (submissions, total) = state
         .db
         .get_submissions_with_filters(&filters, page, limit)
@@ -531,7 +533,6 @@ pub async fn get_submissions(
         })?;
 
     // Map internal submissions to response DTOs
-    // This part assumes we have the data. Since the service returns empty vec, this loop won't run.
     let response_items: Vec<SubmissionResponse> = submissions
         .into_iter()
         .map(|s| {
@@ -904,9 +905,21 @@ pub async fn create_file_submission(
             file.write_all(&data)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let mtype = detect_file_type(&data);
+            let mtype = if fname.to_ascii_lowercase().ends_with(".eml")
+                || fname.to_ascii_lowercase().ends_with(".mime")
+                || submission_type_override.as_deref() == Some("email")
+            {
+                "message/rfc822".to_string()
+            } else {
+                detect_file_type(&data)
+            };
+            let stype = match submission_type_override.as_deref() {
+                Some("email") => "email".to_string(),
+                _ if mtype == "message/rfc822" => "email".to_string(),
+                _ => "file".to_string(),
+            };
             (
-                "file".to_string(),
+                stype,
                 fname,
                 hash,
                 data.len() as i64,
@@ -951,7 +964,9 @@ pub async fn create_file_submission(
             submitter_id = EXCLUDED.submitter_id,
             original_filename = EXCLUDED.original_filename,
             url = COALESCE(EXCLUDED.url, submissions.url),
+            mime_type = EXCLUDED.mime_type,
             file_path = COALESCE(EXCLUDED.file_path, submissions.file_path),
+            submission_type = EXCLUDED.submission_type,
             analysis_status = 'pending',
             metadata = EXCLUDED.metadata,
             updated_at = NOW()

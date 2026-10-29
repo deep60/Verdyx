@@ -1,3 +1,4 @@
+import { fetchLiveWebsiteIntel } from "@/lib/browser-osint";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -49,9 +50,25 @@ type CategoryFilter = "all" | "network" | "tls" | "dns" | "http" | "threat";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IntelData = Record<string, any>;
 
-export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIntelligencePanelProps) {
-  const [customUrl, setCustomUrl] = useState(initialUrl || "https://google.com");
-  const [activeTargetUrl, setActiveTargetUrl] = useState(initialUrl || "https://google.com");
+export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: WebsiteIntelligencePanelProps) {
+  const [customUrl, setCustomUrl] = useState(() => {
+    if (initialUrl) return initialUrl;
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("verdyx_prefill_osint_url") || "";
+    }
+    return "";
+  });
+  const [activeTargetUrl, setActiveTargetUrl] = useState(() => {
+    if (initialUrl) return initialUrl;
+    if (typeof window !== "undefined") {
+      const prefill = sessionStorage.getItem("verdyx_prefill_osint_url");
+      if (prefill) {
+        sessionStorage.removeItem("verdyx_prefill_osint_url");
+        return prefill;
+      }
+    }
+    return "";
+  });
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [moduleFilter, setModuleFilter] = useState("");
 
@@ -60,8 +77,21 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
     : `/api/analysis/web-intel?url=${encodeURIComponent(activeTargetUrl)}`;
 
   const { data: intel, isLoading, isError, refetch, isFetching } = useQuery<IntelData>({
-    queryKey: [queryEndpoint],
-    enabled: Boolean(submissionId || activeTargetUrl),
+    queryKey: [queryEndpoint, activeTargetUrl],
+    queryFn: async () => {
+      if (submissionId) {
+        try {
+          const res = await fetch(`/api/submissions/${submissionId}/web-intel`, {
+            credentials: "include",
+          });
+          if (res.ok) return await res.json();
+        } catch {
+          // Fall back to direct live OSINT below
+        }
+      }
+      return fetchLiveWebsiteIntel(activeTargetUrl || initialUrl);
+    },
+    enabled: Boolean(submissionId || activeTargetUrl.trim()),
     retry: 1,
   });
 
@@ -81,17 +111,17 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
   return (
     <div className="space-y-6">
       {/* Top Bar: Live URL Recon Input + Category Tabs */}
-      <Card className="glassmorphism border-primary/30">
+      <Card className="bento-card border-primary/30">
         <CardContent className="p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <Globe className="h-5 w-5 text-primary" />
                 <h2 className="text-xl font-bold font-display">
-                  Deep Website Intelligence & OSINT Reconnaissance
+                  Deep Website Intelligence &amp; OSINT Reconnaissance
                 </h2>
                 <Badge variant="outline" className="border-primary/40 text-primary font-mono">
-                  36 Live Modules
+                  36+ Live Modules
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground mt-1">
@@ -104,10 +134,10 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
                 <Input
                   value={customUrl}
                   onChange={(e) => setCustomUrl(e.target.value)}
-                  placeholder="https://example.com"
-                  className="w-full sm:w-72 font-mono text-sm"
+                  placeholder="Enter domain or URL (e.g. example.com)"
+                  className="w-full sm:w-80 font-mono text-sm"
                 />
-                <Button type="submit" disabled={isFetching}>
+                <Button type="submit" disabled={isFetching || !customUrl.trim()}>
                   <Search className="h-4 w-4 mr-1.5" />
                   {isFetching ? "Scanning..." : "Inspect Site"}
                 </Button>
@@ -121,50 +151,64 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
             )}
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border/50">
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                [
-                  ["all", "All Modules (36)"],
-                  ["network", "Network & Server"],
-                  ["tls", "SSL / TLS & Security"],
-                  ["dns", "DNS, Mail & WHOIS"],
-                  ["http", "HTTP, Tech & DOM"],
-                  ["threat", "Threat, OSINT & Carbon"],
-                ] as const
-              ).map(([key, label]) => (
-                <Button
-                  key={key}
-                  size="sm"
-                  variant={category === key ? "default" : "outline"}
-                  onClick={() => setCategory(key)}
-                >
-                  {label}
-                </Button>
-              ))}
+          {(submissionId || activeTargetUrl.trim()) && (
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-border/50">
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    ["all", "All Modules (36+)"],
+                    ["network", "Network & Server"],
+                    ["tls", "SSL / TLS & Security"],
+                    ["dns", "DNS, Mail & WHOIS"],
+                    ["http", "HTTP, Tech & DOM"],
+                    ["threat", "Threat, OSINT & Carbon"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Button
+                    key={key}
+                    size="sm"
+                    variant={category === key ? "default" : "outline"}
+                    onClick={() => setCategory(key)}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              <Input
+                value={moduleFilter}
+                onChange={(e) => setModuleFilter(e.target.value)}
+                placeholder="Filter modules (e.g., DNS, TLS, Ports, Whois)..."
+                className="w-full sm:w-64 h-8 text-xs"
+              />
             </div>
-            <Input
-              value={moduleFilter}
-              onChange={(e) => setModuleFilter(e.target.value)}
-              placeholder="Filter modules (e.g., DNS, TLS, Ports, Whois)..."
-              className="w-full sm:w-64 h-8 text-xs"
-            />
-          </div>
+          )}
         </CardContent>
       </Card>
 
-      {isLoading ? (
-        <Card className="glassmorphism">
+      {!submissionId && !activeTargetUrl.trim() ? (
+        <Card className="bento-card border-dashed border-border/70">
+          <CardContent className="p-12 text-center space-y-3">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 border border-primary/25 text-primary">
+              <Globe className="h-7 w-7" />
+            </div>
+            <div className="text-lg font-bold font-display">Enter Any Website or Domain Above to Start Recon</div>
+            <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+              Type any domain or URL in the search bar above and click <strong>Inspect Site</strong> to run all 36+ live OSINT probes (IP Info, SSL Certificate, DNS Records, Shodan Open Ports &amp; CVEs, WHOIS, HSTS, Cookies, Crawl Rules, Tech Stack, Carbon Footprint, and Screenshot).
+            </p>
+          </CardContent>
+        </Card>
+      ) : isLoading ? (
+        <Card className="bento-card">
           <CardContent className="p-12 text-center space-y-3">
             <RefreshCw className="h-8 w-8 text-primary animate-spin mx-auto" />
-            <div className="font-semibold">Running Live OSINT & Network Reconnaissance...</div>
+            <div className="font-semibold">Running Live OSINT &amp; Network Reconnaissance...</div>
             <p className="text-xs text-muted-foreground">
               Probing DNS-over-HTTPS, TLS handshake, Shodan InternetDB, RDAP WHOIS, Certificate Transparency, Wayback Machine, and DOM headers...
             </p>
           </CardContent>
         </Card>
       ) : isError || !intel ? (
-        <Card className="glassmorphism border-destructive/30">
+        <Card className="bento-card border-destructive/30">
           <CardContent className="p-8 text-center space-y-3">
             <AlertTriangle className="h-8 w-8 text-destructive mx-auto" />
             <div className="font-semibold">Website Reconnaissance Unavailable</div>
@@ -224,7 +268,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {/* 1. IP Info */}
             {showCategory("network", "IP Info") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Network className="h-4 w-4 text-primary" />
@@ -269,7 +313,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 2. Server Location */}
             {showCategory("network", "Server Location") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <MapPin className="h-4 w-4 text-primary" />
@@ -306,7 +350,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 3. Server Status */}
             {showCategory("network", "Server Status") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
@@ -341,7 +385,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 4. Server Info */}
             {showCategory("network", "Server Info") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Server className="h-4 w-4 text-primary" />
@@ -372,7 +416,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 5. Open Ports */}
             {showCategory("network", "Open Ports") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Wifi className="h-4 w-4 text-primary" />
@@ -397,7 +441,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 6. Associated Hosts */}
             {showCategory("network", "Associated Hosts") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Compass className="h-4 w-4 text-primary" />
@@ -423,7 +467,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 7. Traceroute */}
             {showCategory("network", "Traceroute") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <GitBranch className="h-4 w-4 text-primary" />
@@ -447,7 +491,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 8. Redirect Chain */}
             {showCategory("network", "Redirect Chain") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Share2 className="h-4 w-4 text-primary" />
@@ -475,7 +519,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 9. SSL Certificate */}
             {showCategory("tls", "SSL Certificate") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Lock className="h-4 w-4 text-primary" />
@@ -506,7 +550,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 10. TLS Connection */}
             {showCategory("tls", "TLS Connection") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Shield className="h-4 w-4 text-primary" />
@@ -533,7 +577,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 11. TLS Security Audit */}
             {showCategory("tls", "TLS Security Audit") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Award className="h-4 w-4 text-primary" />
@@ -566,7 +610,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 12. TLS Client Compatibility */}
             {showCategory("tls", "TLS Client Compatibility") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Cpu className="h-4 w-4 text-primary" />
@@ -591,7 +635,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 13. HSTS */}
             {showCategory("tls", "HSTS") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Lock className="h-4 w-4 text-primary" />
@@ -624,7 +668,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 14. HTTP Security */}
             {showCategory("tls", "HTTP Security") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Shield className="h-4 w-4 text-primary" />
@@ -663,7 +707,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 15. Firewall */}
             {showCategory("tls", "Firewall") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Shield className="h-4 w-4 text-primary" />
@@ -691,11 +735,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 16. Mixed Content & SRI */}
             {showCategory("tls", "Mixed Content & SRI") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <FileCode className="h-4 w-4 text-primary" />
-                    Mixed Content & SRI
+                    Mixed Content &amp; SRI
                   </CardTitle>
                   <CardDescription>Insecure resources and third-party scripts without SRI</CardDescription>
                 </CardHeader>
@@ -720,7 +764,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 17. Security.txt */}
             {showCategory("tls", "Security.txt") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <FileText className="h-4 w-4 text-primary" />
@@ -749,7 +793,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 18. DNS Records */}
             {showCategory("dns", "DNS Records") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Database className="h-4 w-4 text-primary" />
@@ -781,7 +825,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 19. TXT Records */}
             {showCategory("dns", "TXT Records") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <FileText className="h-4 w-4 text-primary" />
@@ -805,7 +849,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 20. CAA Records */}
             {showCategory("dns", "CAA Records") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Shield className="h-4 w-4 text-primary" />
@@ -831,7 +875,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 21. DNSSEC */}
             {showCategory("dns", "DNSSEC") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-primary" />
@@ -853,7 +897,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 22. DNS Server */}
             {showCategory("dns", "DNS Server") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Server className="h-4 w-4 text-primary" />
@@ -873,7 +917,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 23. Email Configuration */}
             {showCategory("dns", "Email Configuration") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Mail className="h-4 w-4 text-primary" />
@@ -906,7 +950,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 24. Whois Lookup */}
             {showCategory("dns", "Whois Lookup") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Search className="h-4 w-4 text-primary" />
@@ -937,7 +981,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 25. Domain Info */}
             {showCategory("dns", "Domain Info") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Globe className="h-4 w-4 text-primary" />
@@ -965,7 +1009,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 26. Subdomains */}
             {showCategory("dns", "Subdomains") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Layers className="h-4 w-4 text-primary" />
@@ -989,7 +1033,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 27. Headers */}
             {showCategory("http", "Headers") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <FileCode className="h-4 w-4 text-primary" />
@@ -1010,7 +1054,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 28. Cookies */}
             {showCategory("http", "Cookies") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Cookie className="h-4 w-4 text-primary" />
@@ -1048,7 +1092,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 29. Crawl Rules */}
             {showCategory("http", "Crawl Rules") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Bot className="h-4 w-4 text-primary" />
@@ -1074,7 +1118,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 30. Sitemap */}
             {showCategory("http", "Sitemap") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Compass className="h-4 w-4 text-primary" />
@@ -1098,7 +1142,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 31. Tech Stack */}
             {showCategory("http", "Tech Stack") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Cpu className="h-4 w-4 text-primary" />
@@ -1122,7 +1166,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 32. Linked Pages */}
             {showCategory("http", "Linked Pages") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <ExternalLink className="h-4 w-4 text-primary" />
@@ -1152,11 +1196,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 33. Social Tags & Presence */}
             {showCategory("http", "Social Tags") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Share2 className="h-4 w-4 text-primary" />
-                    Social Tags & Presence
+                    Social Tags &amp; Presence
                   </CardTitle>
                   <CardDescription>Open Graph, Twitter tags, and linked social profiles</CardDescription>
                 </CardHeader>
@@ -1188,7 +1232,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 34. Quality Metrics */}
             {showCategory("http", "Quality Metrics") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Award className="h-4 w-4 text-primary" />
@@ -1219,7 +1263,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 35. Vulnerabilities */}
             {showCategory("threat", "Vulnerabilities") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-primary" />
@@ -1248,11 +1292,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 36. Malware & Phishing + Block Detection */}
             {showCategory("threat", "Malware & Phishing") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Ban className="h-4 w-4 text-primary" />
-                    Malware, Phishing & Blocklists
+                    Malware, Phishing &amp; Blocklists
                   </CardTitle>
                   <CardDescription>Threat heuristics and protective DNS resolver block checks</CardDescription>
                 </CardHeader>
@@ -1282,7 +1326,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 37. Data Breaches */}
             {showCategory("threat", "Data Breaches") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Database className="h-4 w-4 text-primary" />
@@ -1309,11 +1353,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 38. Trackers & Third Parties */}
             {showCategory("threat", "Trackers & Third Parties") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Eye className="h-4 w-4 text-primary" />
-                    Trackers & Third Parties
+                    Trackers &amp; Third Parties
                   </CardTitle>
                   <CardDescription>Analytics, ad trackers and external script hosts loaded</CardDescription>
                 </CardHeader>
@@ -1338,11 +1382,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 39. Archive History & Global Ranking */}
             {showCategory("threat", "Archive History") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <History className="h-4 w-4 text-primary" />
-                    Archive History & Global Rank
+                    Archive History &amp; Global Rank
                   </CardTitle>
                   <CardDescription>Wayback Machine snapshots and domain ranking tier</CardDescription>
                 </CardHeader>
@@ -1371,7 +1415,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
 
             {/* 40. Carbon Footprint */}
             {showCategory("threat", "Carbon Footprint") && (
-              <Card className="glassmorphism border-primary/20">
+              <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Leaf className="h-4 w-4 text-emerald-400" />
@@ -1398,15 +1442,105 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl }: WebsiteIn
               </Card>
             )}
 
-            {/* 41. Live Screenshot */}
+            {/* DOM phishing inspector and script-stripped snapshot */}
+            {showCategory("http", "DOM Phishing Inspector Favicon Snapshot") && (
+              <Card className="bento-card border-primary/20 md:col-span-2 lg:col-span-3">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Eye className="h-4 w-4 text-primary" />
+                    Safe page snapshot and DOM phishing inspector
+                  </CardTitle>
+                  <CardDescription>
+                    {intel.domInspector?.previewNote ||
+                      "Script-stripped snapshot of the fetched HTML. JavaScript is not executed."}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 lg:grid-cols-2">
+                  <div className="space-y-2">
+                    {intel.domInspector?.previewHtml ? (
+                      <iframe
+                        title="Script-stripped page snapshot"
+                        sandbox=""
+                        referrerPolicy="no-referrer"
+                        srcDoc={intel.domInspector.previewHtml}
+                        className="h-80 w-full rounded-lg border border-border bg-white"
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        This scan has no DOM snapshot. Run reconnaissance again to extract forms, scripts, and the favicon hash.
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-muted-foreground">Password inputs</span>
+                      <Badge variant={intel.domInspector?.credentialHarvesting ? "destructive" : "outline"}>
+                        {intel.domInspector?.passwordInputCount ?? 0}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {intel.domInspector?.credentialHarvesting
+                        ? "Password fields are present. Review whether this page should collect credentials."
+                        : "No password input was found in the fetched HTML."}
+                      {intel.domInspector?.crossOriginFormAction
+                        ? " At least one form posts to a different host."
+                        : ""}
+                    </p>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">
+                        Forms ({intel.domInspector?.forms?.length || 0}) · inline scripts {intel.domInspector?.inlineScriptCount ?? 0}
+                      </div>
+                      <div className="max-h-24 overflow-y-auto space-y-1">
+                        {(intel.domInspector?.forms || []).map((form: { method?: string; action?: string; passwordInputs?: number }, index: number) => (
+                          <div key={`${form.action}-${index}`} className="font-mono text-[11px] break-all">
+                            {(form.method || "GET").toUpperCase()} {form.action || "(no action)"}
+                            {form.passwordInputs ? ` · ${form.passwordInputs} password` : ""}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">External scripts</div>
+                      <div className="max-h-24 overflow-y-auto space-y-1">
+                        {(intel.domInspector?.externalScripts || []).length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No external script URLs.</p>
+                        ) : (
+                          (intel.domInspector.externalScripts as string[]).map((src) => (
+                            <div key={src} className="font-mono text-[11px] break-all">{src}</div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <div className="rounded-md border border-border/60 p-2 space-y-1">
+                      <div className="text-xs text-muted-foreground">Favicon murmur3</div>
+                      {intel.favicon?.status === "hashed" ? (
+                        <>
+                          <div className="font-mono text-sm">{intel.favicon.murmur3}</div>
+                          <div className="font-mono text-[11px] text-primary break-all">{intel.favicon.shodanQuery}</div>
+                          <p className="text-[11px] text-muted-foreground">{intel.favicon.note}</p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-muted-foreground">
+                          {intel.favicon?.note || "Favicon hash is not available for this scan."}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* 41. External thumbnail */}
             {showCategory("http", "Screenshot") && (
-              <Card className="glassmorphism border-primary/20 md:col-span-2 lg:col-span-3">
+              <Card className="bento-card border-primary/20 md:col-span-2 lg:col-span-3">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Camera className="h-4 w-4 text-primary" />
-                    Live Website Render Preview
+                    External thumbnail
                   </CardTitle>
-                  <CardDescription>Visual render of {intel.targetUrl}</CardDescription>
+                  <CardDescription>
+                    {intel.screenshot?.note || "Thumbnail rendered outside Verdyx. The safe snapshot is the DOM inspector above."}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="rounded-lg overflow-hidden border border-border bg-black/40 max-h-96 flex items-center justify-center">

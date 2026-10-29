@@ -9,7 +9,6 @@ rule UPX_Packed_Executable : suspicious
     strings:
         $upx0 = "UPX0"
         $upx1 = "UPX1"
-        $upx2 = "UPX2"
         $upx_sig = { 55 50 58 21 } // UPX!
 
     condition:

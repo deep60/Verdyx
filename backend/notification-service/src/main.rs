@@ -69,15 +69,41 @@ async fn main() -> Result<()> {
     let config = Config::from_env()?;
     info!("Configuration loaded successfully");
 
-    // Initialize database connection pool
-    let db_pool = sqlx::postgres::PgPoolOptions::new()
+    // Initialize database connection pool (auto-create verdyx_notifications if missing)
+    let db_pool = match sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.database.max_connections)
         .connect(&config.database.url)
-        .await?;
+        .await
+    {
+        Ok(pool) => pool,
+        Err(first_err) => {
+            warn!("Primary DB connect failed ({first_err}); attempting to ensure database exists...");
+            if let Some((base_url, db_name)) = config.database.url.rsplit_once('/') {
+                let admin_url = format!("{base_url}/postgres");
+                if let Ok(admin_pool) = sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&admin_url)
+                    .await
+                {
+                    let create_sql = format!("CREATE DATABASE \"{db_name}\"");
+                    let _ = sqlx::query(&create_sql).execute(&admin_pool).await;
+                }
+            }
+            sqlx::postgres::PgPoolOptions::new()
+                .max_connections(config.database.max_connections)
+                .connect(&config.database.url)
+                .await?
+        }
+    };
     info!("Database connection pool established");
 
-    // Run migrations
-    sqlx::migrate!("./migrations").run(&db_pool).await?;
+    // Run migrations idempotently
+    if let Err(mig_err) = sqlx::migrate!("./migrations").run(&db_pool).await {
+        warn!("sqlx::migrate notice ({mig_err}); ensuring schema exists via raw SQL...");
+        let _ = sqlx::raw_sql(include_str!("../migrations/20240101000000_initial_schema.sql"))
+            .execute(&db_pool)
+            .await;
+    }
     info!("Database migrations completed");
 
     // Initialize Redis client

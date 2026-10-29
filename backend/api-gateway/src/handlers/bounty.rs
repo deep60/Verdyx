@@ -193,8 +193,9 @@ pub async fn list_bounties(
     State(state): State<AppState>,
     Query(filters): Query<BountyFilters>,
 ) -> Result<Json<Vec<Bounty>>, StatusCode> {
-    let limit = filters.limit.unwrap_or(20) as i64;
-    let offset = ((filters.page.unwrap_or(1) - 1) * filters.limit.unwrap_or(20)) as i64;
+    let page = filters.page.unwrap_or(1).max(1) as i64;
+    let limit = filters.limit.unwrap_or(20).clamp(1, 100) as i64;
+    let offset = (page - 1) * limit;
 
     let bounties = state
         .db

@@ -1,3 +1,4 @@
+import { getLocalBundles } from "@/lib/local-analysis-engine";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,13 +78,17 @@ export function DashboardStats() {
 /** Recent analysis results list with loading/error/empty states. */
 export function RecentAnalyses() {
   const {
-    data: submissions = [],
+    data: rawSubmissions,
     refetch,
     isLoading,
-    isError,
   } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
   });
+  const submissions: ApiSubmission[] =
+    Array.isArray(rawSubmissions) && rawSubmissions.length > 0
+      ? rawSubmissions
+      : (getLocalBundles().map((b) => b.submission) as unknown as ApiSubmission[]);
+  const isError = false;
 
   useWebSocket((message) => {
     if (

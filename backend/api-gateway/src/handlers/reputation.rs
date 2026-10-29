@@ -321,3 +321,129 @@ pub async fn claim_badge(
         "message": format!("Badge '{}' claimed successfully!", badge_name)
     })))
 }
+
+/// Analyst standings from reputation-service.
+///
+/// That service owns accuracy, win streak, and earnings. The gateway only
+/// attaches usernames from its own users table. If reputation-service is
+/// down, the response falls back to reputation score alone so the page
+/// still renders.
+pub async fn get_standings(
+    State(state): State<AppState>,
+    Query(params): Query<LeaderboardQuery>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
+    let base = std::env::var("REPUTATION_SERVICE_URL")
+        .unwrap_or_else(|_| "http://localhost:8087".to_string());
+    let url = format!(
+        "{}/api/v1/reputation/leaderboard?limit={limit}",
+        base.trim_end_matches('/')
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if let Ok(resp) = client.get(&url).send().await {
+        if resp.status().is_success() {
+            if let Ok(body) = resp.json::<serde_json::Value>().await {
+                if let Some(rows) = body.get("leaderboard").and_then(|v| v.as_array()) {
+                    let ids: Vec<Uuid> = rows
+                        .iter()
+                        .filter_map(|row| {
+                            row.get("user_id")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| Uuid::parse_str(s).ok())
+                        })
+                        .collect();
+                    let names = lookup_usernames(&state, &ids).await;
+                    let analysts: Vec<serde_json::Value> = rows
+                        .iter()
+                        .map(|row| {
+                            let user_id = row.get("user_id").and_then(|v| v.as_str()).unwrap_or("");
+                            let username = Uuid::parse_str(user_id)
+                                .ok()
+                                .and_then(|id| names.get(&id).cloned())
+                                .flatten()
+                                .unwrap_or_else(|| {
+                                    row.get("username")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("analyst")
+                                        .to_string()
+                                });
+                            serde_json::json!({
+                                "rank": row.get("rank"),
+                                "userId": user_id,
+                                "username": username,
+                                "score": row.get("score"),
+                                "accuracyRate": row.get("accuracy_rate"),
+                                "totalSubmissions": row.get("total_submissions"),
+                                "currentStreak": row.get("current_streak").cloned().unwrap_or(serde_json::json!(0)),
+                                "totalEarned": row.get("total_earned").cloned().unwrap_or(serde_json::json!("0")),
+                                "badgesCount": row.get("badges_count").cloned().unwrap_or(serde_json::json!(0)),
+                            })
+                        })
+                        .collect();
+                    return Ok(Json(serde_json::json!({
+                        "source": "reputation-service",
+                        "analysts": analysts,
+                    })));
+                }
+            }
+        }
+    }
+
+    tracing::warn!("reputation-service standings unavailable; using gateway scores");
+    let rows = sqlx::query_as::<_, LeaderboardRow>(
+        "SELECT id, username, reputation_score FROM users WHERE is_active = true
+         ORDER BY reputation_score DESC LIMIT $1",
+    )
+    .bind(limit as i64)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| {
+        tracing::error!("DB error fetching standings fallback: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let analysts: Vec<serde_json::Value> = rows
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            serde_json::json!({
+                "rank": i + 1,
+                "userId": row.id,
+                "username": row.username.unwrap_or_else(|| "analyst".to_string()),
+                "score": row.reputation_score,
+                "accuracyRate": null,
+                "totalSubmissions": null,
+                "currentStreak": null,
+                "totalEarned": null,
+                "badgesCount": null,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "source": "gateway",
+        "analysts": analysts,
+    })))
+}
+
+async fn lookup_usernames(
+    state: &AppState,
+    ids: &[Uuid],
+) -> std::collections::HashMap<Uuid, Option<String>> {
+    if ids.is_empty() {
+        return std::collections::HashMap::new();
+    }
+    let rows = sqlx::query_as::<_, (Uuid, Option<String>)>(
+        "SELECT id, username FROM users WHERE id = ANY($1)",
+    )
+    .bind(ids)
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap_or_default();
+    rows.into_iter().collect()
+}
