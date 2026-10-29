@@ -144,6 +144,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Generate SLSA Provenance
-        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.10.0
         with:
           provenance-name: verdyx-provenance
