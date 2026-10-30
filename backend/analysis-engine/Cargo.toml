@@ -62,7 +62,7 @@ ndarray = { version = "0.17.2", optional = true }
 futures = "0.3"
 tempfile = "3"
 url = "2"
-zip = "0.6"
+zip = "9.0"
 async-trait = "0.1"
 # Used to inspect the peer certificate after a real TLS handshake. Issuer and
 # expiry are reported only from this parse — never from placeholders.
