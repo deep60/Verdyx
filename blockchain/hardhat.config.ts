@@ -1,14 +1,10 @@
-// import type { HardhatUserConfig } from "hardhat/config";
-// import "@nomicfoundation/hardhat-toolbox-viem";
-
-// const config: HardhatUserConfig = {
-//   solidity: "0.8.28",
-// };
-
-// export default config;
-// hardhat.config.ts
 import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
+import "@nomicfoundation/hardhat-ethers";
+import "@nomicfoundation/hardhat-chai-matchers";
+import "@nomicfoundation/hardhat-network-helpers";
+import "@nomicfoundation/hardhat-verify";
+import "hardhat-gas-reporter";
+import "solidity-coverage";
 import "dotenv/config";
 
 // Helper to check if private key is valid (64 hex chars = 32 bytes)
@@ -17,11 +13,11 @@ const getPrivateKey = (): string[] => {
   if (!pk) return [];
 
   // Remove 0x prefix if present
-  const cleanPk = pk.startsWith('0x') ? pk.slice(2) : pk;
+  const cleanPk = pk.startsWith("0x") ? pk.slice(2) : pk;
 
   // Check if it's a valid 64-character hex string
   if (cleanPk.length === 64 && /^[0-9a-fA-F]{64}$/.test(cleanPk)) {
-    return ['0x' + cleanPk];
+    return ["0x" + cleanPk];
   }
 
   return [];
