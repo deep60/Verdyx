@@ -435,7 +435,7 @@ jobs:
       !contains(needs.build-and-push.result, 'cancelled')
     environment:
       name: production
-      url: https://verdyx.duckdns.org
+      url: https://api.verdyx.dev
     env:
       # Empty when the SSH deploy secrets aren't configured — used to skip the
       # remote-deploy hop gracefully instead of failing the whole workflow.
@@ -513,7 +513,7 @@ jobs:
         if: env.SSH_HOST != ''
         run: |
           sleep 10
-          curl --fail --retry 3 --retry-delay 10 https://verdyx.duckdns.org/api/v1/health || exit 1
+          curl --fail --retry 3 --retry-delay 10 https://api.verdyx.dev/api/v1/health || exit 1
 
       - name: Notify deployment status
         if: always() && env.SLACK_WEBHOOK_URL != ''

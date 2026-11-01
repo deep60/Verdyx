@@ -231,7 +231,7 @@ export default function ApiDocs() {
   const codeExample = `import hashlib, secrets, requests
 
 API_KEY = "${generatedKey || "YOUR_API_KEY"}"
-BASE = "https://verdyx.pages.dev/api"
+BASE = "https://api.verdyx.dev/api/v1"
 HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 # 1. Submit a binary, .eml phishing message, or URL
