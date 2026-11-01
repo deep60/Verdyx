@@ -57,7 +57,7 @@ sha3 = "0.10"
 # Pinned exactly: a caret range spans pre-releases, so "2.0.0-rc.10" silently
 # resolved to rc.13, whose Session::builder API changed and broke the build.
 # Bump this deliberately, not by resolution drift.
-ort = { version = "=2.0.0-rc.13", optional = true }
+ort = { version = "=2.0.0-rc.15", optional = true }
 ndarray = { version = "0.17.2", optional = true }
 futures = "0.3"
 tempfile = "3"
