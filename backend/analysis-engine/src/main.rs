@@ -216,6 +216,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         _ => db_pool.clone(),
     };
     let consumer_s3_client = s3_client.clone();
+    let consumer_url_scanner = app_state.url_scanner.clone();
     let consumer_analysis_engine = app_state.analysis_engine.clone();
 
     tokio::spawn(async move {
@@ -223,6 +224,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             consumer_redis_client,
             consumer_db_pool,
             consumer_s3_client,
+            consumer_url_scanner,
             consumer_analysis_engine,
         )
         .await

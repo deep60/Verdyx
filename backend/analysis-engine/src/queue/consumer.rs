@@ -7,6 +7,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::analyzers::{AnalysisEngine, AnalysisOptions, FileAnalysisRequest};
+use crate::scanners::url_scanner::UrlScanner;
 use crate::storage::S3Client;
 
 /// Redis queue key for analysis tasks
@@ -42,6 +43,7 @@ pub async fn start_analysis_worker(
     redis_client: redis::Client,
     db_pool: PgPool,
     s3_client: Arc<S3Client>,
+    url_scanner: Arc<UrlScanner>,
     analysis_engine: Arc<Mutex<AnalysisEngine>>,
 ) -> Result<()> {
     info!("Starting analysis queue consumer worker");
@@ -92,6 +94,7 @@ pub async fn start_analysis_worker(
             &redis_client,
             &db_pool,
             &s3_client,
+            &url_scanner,
             &analysis_engine,
         )
         .await
@@ -249,6 +252,7 @@ async fn process_submission(
     redis_client: &redis::Client,
     db_pool: &PgPool,
     s3_client: &S3Client,
+    url_scanner: &UrlScanner,
     analysis_engine: &Arc<Mutex<AnalysisEngine>>,
 ) -> Result<()> {
     // Step 2: Fetch submission from database
@@ -273,7 +277,7 @@ async fn process_submission(
     )
     .await?;
 
-    // Step 3: Load artifact bytes (from disk/S3 for files, or URL bytes for URL submissions)
+    // Step 3: Load artifact bytes (from disk/S3 for files, or the page for URL submissions)
     let file_data = match submission.file_path.as_deref() {
         Some(fp) if !fp.is_empty() => load_artifact(s3_client, fp).await?,
         _ if submission.submission_type == "url" => {
@@ -282,7 +286,12 @@ async fn process_submission(
                 .as_deref()
                 .or(submission.original_filename.as_deref())
                 .ok_or_else(|| anyhow!("URL submission has no url"))?;
-            target_url.as_bytes().to_vec()
+            // A failed fetch must fail the job: scanning only the URL's text
+            // would report every unreachable page as clean.
+            url_scanner
+                .fetch_page(target_url)
+                .await
+                .map_err(|e| anyhow!("Could not fetch {target_url}: {e}"))?
         }
         _ => return Err(anyhow!("Submission has no file_path")),
     };
@@ -304,7 +313,7 @@ async fn process_submission(
         filename: filename.clone(),
         file_data,
         file_hashes: None,
-        analysis_options: AnalysisOptions::default(), // Enable all analyzers
+        analysis_options: analysis_options_for(&submission.submission_type),
     };
 
     let mut engine = analysis_engine.lock().await;
@@ -441,6 +450,17 @@ async fn record_job_status(
     Ok(())
 }
 
+/// The static and heuristic analyzers read program files. Given a web page they
+/// flag ordinary minified JavaScript, so a github.com scan drew a "malicious" vote.
+fn analysis_options_for(submission_type: &str) -> AnalysisOptions {
+    let is_page = submission_type == "url";
+    AnalysisOptions {
+        enable_static_analysis: !is_page,
+        enable_heuristic_analysis: !is_page,
+        ..AnalysisOptions::default()
+    }
+}
+
 /// Calculate final verdict from analysis result
 fn calculate_verdict(
     analysis_result: &crate::models::analysis_result::AnalysisResult,
@@ -448,7 +468,7 @@ fn calculate_verdict(
     use crate::models::analysis_result::ThreatVerdict;
 
     let is_malicious = analysis_result.consensus_verdict == ThreatVerdict::Malicious;
-    let confidence = (analysis_result.agreement_score * 100.0) as f64;
+    let confidence = analysis_result.agreement_score as f64;
     (is_malicious, confidence)
 }
 
@@ -561,4 +581,25 @@ async fn publish_ws_event(
 
     info!("Published WebSocket event to channel: {}", channel);
     Ok(())
+}
+
+#[cfg(test)]
+mod analysis_options_tests {
+    use super::analysis_options_for;
+
+    #[test]
+    fn web_pages_skip_analyzers_built_for_program_files() {
+        let options = analysis_options_for("url");
+        assert!(!options.enable_static_analysis);
+        assert!(!options.enable_heuristic_analysis);
+        assert!(options.enable_signature_analysis);
+        assert!(options.enable_ml_analysis);
+    }
+
+    #[test]
+    fn files_run_every_analyzer() {
+        let options = analysis_options_for("file");
+        assert!(options.enable_static_analysis);
+        assert!(options.enable_heuristic_analysis);
+    }
 }

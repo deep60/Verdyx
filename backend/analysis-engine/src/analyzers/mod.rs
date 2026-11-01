@@ -572,6 +572,8 @@ impl AnalysisEngine {
                 }
             }
             match clamav_res {
+                // Turned off by config, so it took no part in this analysis.
+                Ok(det) if det.engine_version == "Disabled" => {}
                 Ok(det) => detections.push(det),
                 Err(e) => {
                     warn!("ClamAV analysis unavailable: {}", e);
@@ -810,7 +812,6 @@ impl AnalysisEngine {
             metadata: HashMap::from([
                 ("match_count".to_string(), serde_json::json!(matches.len())),
                 ("risk_score".to_string(), serde_json::json!(risk_score)),
-                ("rules_evaluated".to_string(), serde_json::json!(42)),
                 ("matches".to_string(), serde_json::to_value(&matches)?),
             ]),
             detected_at: Utc::now(),
@@ -834,7 +835,7 @@ impl AnalysisEngine {
             .await
             .map_err(|e| anyhow!("Signature matching error: {e}"))?;
         let raw_match_conf = matches.iter().map(|m| m.confidence).fold(0.0_f32, f32::max);
-        let sig_count = self.signature_matcher.signature_count().max(128);
+        let sig_count = self.signature_matcher.signature_count();
 
         let (verdict, calibrated_confidence) = if matches.is_empty() {
             (ThreatVerdict::Benign, 0.96_f32)

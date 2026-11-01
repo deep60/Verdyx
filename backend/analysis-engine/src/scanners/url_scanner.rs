@@ -778,9 +778,16 @@ impl UrlScanner {
         }
     }
 
-    /// Fetch and analyze page content. Redirects are followed manually so each
-    /// hop is policy-checked and DNS-pinned. The body is capped.
-    async fn analyze_content(&self, url: &Url) -> Result<ContentAnalysis> {
+    /// Download a submitted page so the engines scan its content, not its URL.
+    pub async fn fetch_page(&self, raw_url: &str) -> Result<Vec<u8>> {
+        let url = Url::parse(raw_url).map_err(|e| anyhow!("invalid URL {raw_url}: {e}"))?;
+        validate_url_policy(&url)?;
+        Ok(self.fetch_html(&url).await?.into_bytes())
+    }
+
+    /// Redirects are followed manually so each hop is policy-checked and
+    /// DNS-pinned. The body is capped.
+    async fn fetch_html(&self, url: &Url) -> Result<String> {
         let mut current = url.clone();
         let mut seen = Vec::new();
         let mut final_response = None;
@@ -804,7 +811,12 @@ impl UrlScanner {
         }
 
         let response = final_response.ok_or_else(|| anyhow!("too many redirects"))?;
-        let html = read_body_limited(response, MAX_FETCH_BYTES).await?;
+        read_body_limited(response, MAX_FETCH_BYTES).await
+    }
+
+    /// Fetch and analyze page content.
+    async fn analyze_content(&self, url: &Url) -> Result<ContentAnalysis> {
+        let html = self.fetch_html(url).await?;
         let html_lower = html.to_lowercase();
 
         let has_login_form = html_lower.contains("<form")
