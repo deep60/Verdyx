@@ -285,7 +285,7 @@ impl AnalysisMetrics {
 #[derive(Debug, Clone)]
 pub struct HashAnalyzerConfig {
     pub virustotal_api_key: Option<String>,
-    pub malwarebazaar_enabled: bool,
+    pub malwarebazaar_api_key: Option<String>,
     pub hybrid_analysis_api_key: Option<String>,
     pub local_cache_enabled: bool,
     pub cache_ttl_minutes: u64,
@@ -302,9 +302,9 @@ pub struct HashAnalyzerConfig {
 impl Default for HashAnalyzerConfig {
     fn default() -> Self {
         Self {
-            virustotal_api_key: None,
-            malwarebazaar_enabled: true,
-            hybrid_analysis_api_key: None,
+            virustotal_api_key: api_key_from_env("VIRUSTOTAL_API_KEY"),
+            malwarebazaar_api_key: api_key_from_env("ABUSE_CH_API_KEY"),
+            hybrid_analysis_api_key: api_key_from_env("HYBRID_ANALYSIS_API_KEY"),
             local_cache_enabled: true,
             cache_ttl_minutes: 60,
             timeout_seconds: 30,
@@ -317,6 +317,13 @@ impl Default for HashAnalyzerConfig {
             retry_delay_seconds: 1,
         }
     }
+}
+
+/// An empty value means the source isn't configured, so it gets skipped.
+fn api_key_from_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .filter(|key| !key.trim().is_empty())
 }
 
 /// Cached reputation entry with TTL
@@ -516,10 +523,10 @@ impl HashAnalyzer {
         }
 
         // Query MalwareBazaar with circuit breaker
-        if self.config.malwarebazaar_enabled {
+        if let Some(ref api_key) = self.config.malwarebazaar_api_key {
             match self
                 .query_with_retry("malwarebazaar", || {
-                    self.query_malwarebazaar(&hash_info.hash_value)
+                    self.query_malwarebazaar(&hash_info.hash_value, api_key)
                 })
                 .await
             {
@@ -880,7 +887,11 @@ impl HashAnalyzer {
     }
 
     /// Enhanced MalwareBazaar query
-    async fn query_malwarebazaar(&self, hash: &str) -> Result<HashReputation, HashAnalysisError> {
+    async fn query_malwarebazaar(
+        &self,
+        hash: &str,
+        api_key: &str,
+    ) -> Result<HashReputation, HashAnalysisError> {
         let start_time = Instant::now();
         let url = "https://mb-api.abuse.ch/api/v1/";
 
@@ -888,7 +899,11 @@ impl HashAnalyzer {
 
         let response = timeout(
             Duration::from_secs(self.config.timeout_seconds),
-            self.http_client.post(url).form(&form_data).send(),
+            self.http_client
+                .post(url)
+                .header("Auth-Key", api_key)
+                .form(&form_data)
+                .send(),
         )
         .await
         .map_err(|_| HashAnalysisError::ApiTimeout {
@@ -1723,7 +1738,7 @@ mod tests {
     async fn test_bulk_analysis() {
         let config = HashAnalyzerConfig {
             virustotal_api_key: None, // Disable external APIs for testing
-            malwarebazaar_enabled: false,
+            malwarebazaar_api_key: None,
             hybrid_analysis_api_key: None,
             ..Default::default()
         };
