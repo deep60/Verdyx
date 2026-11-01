@@ -301,6 +301,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonwebtoken::Algorithm;
 
     #[test]
     fn test_claims_creation() {
@@ -402,5 +403,137 @@ mod tests {
         .unwrap();
 
         assert!(JwtService::new(secret).validate_token(&token).is_err());
+    }
+
+    const TEST_SECRET: &str = "test_secret_key_for_testing_only";
+
+    // Minted by this code while it was on jsonwebtoken 9.3.1, signed with
+    // TEST_SECRET and expiring in 2126. Do not regenerate them: they prove that
+    // tokens issued before the upgrade to 10.x stay valid.
+    const GATEWAY_TOKEN_9_3: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJlbWFpbCI6ImdhdGV3YXlAZXhhbXBsZS5jb20iLCJyb2xlIjoidXNlciIsImV4cCI6NDk0NzE0NDkxNCwiaWF0IjoxNzkzNTQ0OTE0LCJuYmYiOjE3OTM1NDQ5MTQsImp0aSI6Ijg2NWI1ZmUyLTM1MTMtNDI2ZC04NTNjLTc0ZWZjYmJiODg5OCIsImlzX2FkbWluIjpmYWxzZSwidXNlcm5hbWUiOiIiLCJ0b2tlbl90eXBlIjoiYWNjZXNzIn0.NSm0MhvNmd22CyFzamiO7rL-OAnXKC4izXz50_mk1sA"; // gitleaks:allow
+    const USER_SERVICE_ACCESS_TOKEN_9_3: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VybmFtZSI6ImZpeHR1cmUiLCJpc19hZG1pbiI6ZmFsc2UsImV4cCI6NDk0NzE0NTA3NywiaWF0IjoxNzkzNTQ1MDc3LCJ0b2tlbl90eXBlIjoiYWNjZXNzIn0.a-o2vEyBvgTpjdhyXM3UZqVGGq9flKjlY7VpiPMNwT8"; // gitleaks:allow
+    const USER_SERVICE_REFRESH_TOKEN_9_3: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VybmFtZSI6ImZpeHR1cmUiLCJpc19hZG1pbiI6ZmFsc2UsImV4cCI6NDk0NzE0NTA3NywiaWF0IjoxNzkzNTQ1MDc3LCJ0b2tlbl90eXBlIjoicmVmcmVzaCJ9.Tk35zi1RYDdWYjRCn0NyftenUcrO1a68bz6i8zKGFyc"; // gitleaks:allow
+
+    fn sign(claims: &serde_json::Value, secret: &str) -> String {
+        encode(
+            &Header::default(),
+            claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    fn valid_claims() -> serde_json::Value {
+        serde_json::json!({
+            "sub": Uuid::new_v4().to_string(),
+            "email": "u@example.com",
+            "exp": (Utc::now() + Duration::hours(1)).timestamp(),
+        })
+    }
+
+    #[test]
+    fn test_accepts_tokens_issued_before_upgrade() {
+        let service = JwtService::new(TEST_SECRET);
+
+        let gateway = service.validate_token(GATEWAY_TOKEN_9_3).unwrap();
+        assert_eq!(gateway.email, "gateway@example.com");
+        assert_eq!(gateway.role, "user");
+        assert_eq!(gateway.token_type, "access");
+
+        let user_service = service
+            .validate_token(USER_SERVICE_ACCESS_TOKEN_9_3)
+            .unwrap();
+        assert_eq!(user_service.email, "user@example.com");
+        assert_eq!(user_service.username, "fixture");
+        assert_eq!(user_service.token_type, "access");
+
+        assert!(service
+            .validate_token(USER_SERVICE_REFRESH_TOKEN_9_3)
+            .is_err());
+    }
+
+    /// Claims of the wrong JSON type (GHSA-h395-gr6q-cpjc) must be rejected,
+    /// not treated as absent.
+    #[test]
+    fn test_rejects_claims_of_wrong_type() {
+        let service = JwtService::new(TEST_SECRET);
+        assert!(service
+            .validate_token(&sign(&valid_claims(), TEST_SECRET))
+            .is_ok());
+
+        let far_future = serde_json::json!("99999999999");
+        for (claim, bad_value) in [
+            ("exp", far_future.clone()),
+            ("exp", serde_json::json!(null)),
+            ("exp", serde_json::json!(true)),
+            ("exp", serde_json::json!(9_999_999_999.5)),
+            ("nbf", far_future),
+            ("iat", serde_json::json!("now")),
+            ("sub", serde_json::json!(1)),
+            ("role", serde_json::json!(1)),
+            ("is_admin", serde_json::json!("true")),
+            ("token_type", serde_json::json!(["access"])),
+        ] {
+            let mut claims = valid_claims();
+            claims[claim] = bad_value.clone();
+            assert!(
+                service.validate_token(&sign(&claims, TEST_SECRET)).is_err(),
+                "accepted {claim} = {bad_value}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rejects_token_without_exp() {
+        let mut claims = valid_claims();
+        claims.as_object_mut().unwrap().remove("exp");
+        assert!(JwtService::new(TEST_SECRET)
+            .validate_token(&sign(&claims, TEST_SECRET))
+            .is_err());
+    }
+
+    #[test]
+    fn test_rejects_expired_token() {
+        let mut claims = valid_claims();
+        claims["exp"] = (Utc::now() - Duration::hours(1)).timestamp().into();
+        assert!(JwtService::new(TEST_SECRET)
+            .validate_token(&sign(&claims, TEST_SECRET))
+            .is_err());
+    }
+
+    #[test]
+    fn test_rejects_token_signed_with_another_key() {
+        let token = sign(&valid_claims(), "another_secret_key_of_the_same_size");
+        assert!(JwtService::new(TEST_SECRET).validate_token(&token).is_err());
+    }
+
+    #[test]
+    fn test_rejects_token_signed_with_another_algorithm() {
+        let token = encode(
+            &Header::new(Algorithm::HS512),
+            &valid_claims(),
+            &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+        )
+        .unwrap();
+        assert!(JwtService::new(TEST_SECRET).validate_token(&token).is_err());
+    }
+
+    /// The advisory's proof of concept: it passes on jsonwebtoken < 10.3, so it
+    /// fails here if the library is ever downgraded. Verdyx does not enable
+    /// `validate_nbf` itself; this pins the library behaviour, not ours.
+    #[test]
+    fn test_library_rejects_wrong_type_nbf_when_validated() {
+        let mut claims = valid_claims();
+        claims["nbf"] = "99999999999".into();
+
+        let mut validation = Validation::default();
+        validation.validate_nbf = true;
+
+        assert!(decode::<serde_json::Value>(
+            &sign(&claims, TEST_SECRET),
+            &DecodingKey::from_secret(TEST_SECRET.as_bytes()),
+            &validation,
+        )
+        .is_err());
     }
 }

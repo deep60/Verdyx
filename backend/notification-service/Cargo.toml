@@ -58,7 +58,7 @@ dotenvy = "0.15"
 handlebars = "5.0"
 
 # JWT for WebSocket authentication
-jsonwebtoken = "9.3"
+jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 
 # Async trait support
 async-trait = "0.1"

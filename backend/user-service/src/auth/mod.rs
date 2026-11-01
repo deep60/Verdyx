@@ -250,4 +250,93 @@ mod tests {
         assert_eq!(token.len(), 32);
         assert!(token.chars().all(|c| c.is_ascii_alphanumeric()));
     }
+
+    // Minted by this code while it was on jsonwebtoken 9.3.1, signed with the
+    // `get_test_jwt_config` secret and expiring in 2126. Do not regenerate them: they prove that
+    // tokens issued before the upgrade to 10.x stay valid.
+    const ACCESS_TOKEN_9_3: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VybmFtZSI6ImZpeHR1cmUiLCJpc19hZG1pbiI6ZmFsc2UsImV4cCI6NDk0NzE0NTA3NywiaWF0IjoxNzkzNTQ1MDc3LCJ0b2tlbl90eXBlIjoiYWNjZXNzIn0.a-o2vEyBvgTpjdhyXM3UZqVGGq9flKjlY7VpiPMNwT8"; // gitleaks:allow
+    const REFRESH_TOKEN_9_3: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJlbWFpbCI6InVzZXJAZXhhbXBsZS5jb20iLCJ1c2VybmFtZSI6ImZpeHR1cmUiLCJpc19hZG1pbiI6ZmFsc2UsImV4cCI6NDk0NzE0NTA3NywiaWF0IjoxNzkzNTQ1MDc3LCJ0b2tlbl90eXBlIjoicmVmcmVzaCJ9.Tk35zi1RYDdWYjRCn0NyftenUcrO1a68bz6i8zKGFyc"; // gitleaks:allow
+
+    fn sign(claims: &serde_json::Value, secret: &str) -> String {
+        encode(
+            &Header::default(),
+            claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    fn valid_claims() -> serde_json::Value {
+        serde_json::json!({
+            "sub": Uuid::new_v4().to_string(),
+            "email": "test@example.com",
+            "username": "testuser",
+            "is_admin": false,
+            "exp": (Utc::now() + Duration::hours(1)).timestamp(),
+            "iat": Utc::now().timestamp(),
+            "token_type": "access",
+        })
+    }
+
+    #[test]
+    fn test_accepts_tokens_issued_before_upgrade() {
+        let auth_service = AuthService::new(get_test_jwt_config());
+
+        let access = auth_service.validate_token(ACCESS_TOKEN_9_3).unwrap();
+        assert_eq!(access.sub, "11111111-1111-4111-8111-111111111111");
+        assert_eq!(access.email, "user@example.com");
+        assert_eq!(access.token_type, "access");
+
+        let refresh = auth_service.validate_token(REFRESH_TOKEN_9_3).unwrap();
+        assert_eq!(refresh.sub, access.sub);
+        assert_eq!(refresh.token_type, "refresh");
+    }
+
+    /// Claims of the wrong JSON type (GHSA-h395-gr6q-cpjc) must be rejected,
+    /// not treated as absent.
+    #[test]
+    fn test_rejects_claims_of_wrong_type() {
+        let config = get_test_jwt_config();
+        let auth_service = AuthService::new(get_test_jwt_config());
+        assert!(auth_service
+            .validate_token(&sign(&valid_claims(), &config.secret))
+            .is_ok());
+
+        for (claim, bad_value) in [
+            ("exp", serde_json::json!("99999999999")),
+            ("exp", serde_json::json!(null)),
+            ("exp", serde_json::json!(9_999_999_999.5)),
+            ("iat", serde_json::json!("now")),
+            ("sub", serde_json::json!(1)),
+            ("is_admin", serde_json::json!("true")),
+            ("token_type", serde_json::json!(1)),
+        ] {
+            let mut claims = valid_claims();
+            claims[claim] = bad_value.clone();
+            assert!(
+                auth_service
+                    .validate_token(&sign(&claims, &config.secret))
+                    .is_err(),
+                "accepted {claim} = {bad_value}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_rejects_expired_token() {
+        let config = get_test_jwt_config();
+        let mut claims = valid_claims();
+        claims["exp"] = (Utc::now() - Duration::hours(1)).timestamp().into();
+        assert!(AuthService::new(get_test_jwt_config())
+            .validate_token(&sign(&claims, &config.secret))
+            .is_err());
+    }
+
+    #[test]
+    fn test_rejects_token_signed_with_another_key() {
+        let token = sign(&valid_claims(), "another_secret_key_of_the_same_size");
+        assert!(AuthService::new(get_test_jwt_config())
+            .validate_token(&token)
+            .is_err());
+    }
 }
