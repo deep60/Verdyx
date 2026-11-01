@@ -22,13 +22,13 @@ use thiserror::Error;
 pub enum ObservabilityError {
     #[error("Logging setup error: {0}")]
     Logging(String),
-    
+
     #[error("Tracing setup error: {0}")]
     Tracing(String),
-    
+
     #[error("Metrics error: {0}")]
     Metrics(String),
-    
+
     #[error("OpenTelemetry error: {0}")]
     Otel(String),
 }

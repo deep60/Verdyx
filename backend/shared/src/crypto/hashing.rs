@@ -1,8 +1,8 @@
 //! Secure hashing functions for passwords, data integrity, and identifiers
 
-use sha2::{Sha256, Sha512, Digest};
-use blake3;
 use super::{CryptoError, CryptoResult};
+use blake3;
+use sha2::{Digest, Sha256, Sha512};
 
 /// Hash data using SHA-256
 pub fn sha256(data: &[u8]) -> String {
@@ -63,8 +63,7 @@ pub fn hmac_sha256(key: &[u8], message: &[u8]) -> String {
     use hmac::{Hmac, Mac};
     type HmacSha256 = Hmac<Sha256>;
 
-    let mut mac = HmacSha256::new_from_slice(key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(message);
     let result = mac.finalize();
     hex::encode(result.into_bytes())
@@ -81,11 +80,12 @@ fn constant_time_compare(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    
+
     a.as_bytes()
         .iter()
         .zip(b.as_bytes())
-        .fold(0, |acc, (a, b)| acc | (a ^ b)) == 0
+        .fold(0, |acc, (a, b)| acc | (a ^ b))
+        == 0
 }
 
 /// Generate a cryptographically secure random token
@@ -131,7 +131,7 @@ mod tests {
     fn test_password_hashing() {
         let password = "SuperSecurePassword123!";
         let hash = hash_password(password).unwrap();
-        
+
         assert!(verify_password(password, &hash).unwrap());
         assert!(!verify_password("WrongPassword", &hash).unwrap());
     }
@@ -141,7 +141,7 @@ mod tests {
         let key = b"secret_key";
         let message = b"important message";
         let mac = hmac_sha256(key, message);
-        
+
         assert!(verify_hmac_sha256(key, message, &mac).unwrap());
         assert!(!verify_hmac_sha256(b"wrong_key", message, &mac).unwrap());
     }
@@ -150,7 +150,7 @@ mod tests {
     fn test_token_generation() {
         let token = generate_token(32);
         assert_eq!(token.len(), 32);
-        
+
         let hex_token = generate_hex_token(16);
         assert_eq!(hex_token.len(), 32); // 16 bytes = 32 hex chars
     }

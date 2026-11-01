@@ -1,18 +1,14 @@
 pub mod web3_client;
 
 pub use web3_client::{
-    Web3Client,
-    ContractAddresses,
-    BountyInfo,
-    AnalysisSubmission,
-    ReputationScore,
+    AnalysisSubmission, BountyInfo, ContractAddresses, ReputationScore, Web3Client,
 };
 
-use ethers::types::{Address, U256, H256};
-use std::str::FromStr;
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use ethers::types::{Address, H256, U256};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 /// Configuration for blockchain connections
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,7 +74,8 @@ impl BlockchainConfig {
             self.private_key.as_deref(),
             self.chain_id,
             self.contract_addresses.clone(),
-        ).await
+        )
+        .await
     }
 }
 
@@ -87,25 +84,25 @@ impl BlockchainConfig {
 pub enum BlockchainError {
     #[error("Invalid contract address: {address}")]
     InvalidAddress { address: String },
-    
+
     #[error("Transaction failed: {reason}")]
     TransactionFailed { reason: String },
-    
+
     #[error("Insufficient balance: required {required} ETH, available {available} ETH")]
     InsufficientBalance { required: String, available: String },
-    
+
     #[error("Contract call failed: {reason}")]
     ContractError { reason: String },
-    
+
     #[error("Network connection error: {reason}")]
     NetworkError { reason: String },
-    
+
     #[error("Invalid bounty: {reason}")]
     InvalidBounty { reason: String },
-    
+
     #[error("Unauthorized operation")]
     Unauthorized,
-    
+
     #[error("Timeout waiting for transaction confirmation")]
     TransactionTimeout,
 }
@@ -322,8 +319,8 @@ pub enum BlockchainEvent {
 /// Utility functions for blockchain operations
 pub mod utils {
     use super::*;
-    use ethers::utils::{parse_ether, format_ether, keccak256};
     use ethers::types::Bytes;
+    use ethers::utils::{format_ether, keccak256, parse_ether};
 
     /// Converts ETH amount to Wei
     pub fn eth_to_wei(eth_amount: &str) -> Result<U256> {
@@ -363,22 +360,23 @@ pub mod utils {
 
     /// Converts timestamp to human-readable format
     pub fn timestamp_to_datetime(timestamp: U256) -> Result<chrono::DateTime<chrono::Utc>> {
-        use chrono::{DateTime, Utc, TimeZone};
-        
+        use chrono::{DateTime, TimeZone, Utc};
+
         let timestamp_secs = timestamp.as_u64() as i64;
-        Ok(Utc.timestamp_opt(timestamp_secs, 0)
-           .single()
-           .context("Invalid timestamp")?)
+        Ok(Utc
+            .timestamp_opt(timestamp_secs, 0)
+            .single()
+            .context("Invalid timestamp")?)
     }
 
     /// Gets current Unix timestamp as U256
     pub fn current_timestamp() -> U256 {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         let duration = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
-        
+
         U256::from(duration.as_secs())
     }
 
@@ -397,18 +395,19 @@ pub mod utils {
         let mut verdict_confidences: HashMap<ThreatVerdict, Vec<u8>> = HashMap::new();
 
         for submission in submissions {
-            let current_stake = verdict_stakes.entry(submission.verdict.clone()).or_insert(U256::zero());
+            let current_stake = verdict_stakes
+                .entry(submission.verdict.clone())
+                .or_insert(U256::zero());
             *current_stake += submission.stake_amount;
-            
-            verdict_confidences.entry(submission.verdict.clone())
+
+            verdict_confidences
+                .entry(submission.verdict.clone())
                 .or_insert_with(Vec::new)
                 .push(submission.confidence);
         }
 
         // Find verdict with highest total stake
-        let (consensus_verdict, _) = verdict_stakes
-            .iter()
-            .max_by_key(|(_, &stake)| stake)?;
+        let (consensus_verdict, _) = verdict_stakes.iter().max_by_key(|(_, &stake)| stake)?;
 
         // Calculate weighted average confidence for the consensus verdict
         let confidences = verdict_confidences.get(consensus_verdict)?;
@@ -430,7 +429,7 @@ pub mod utils {
 
         let accuracy = (correct_predictions * 100) / total_submissions; // Percentage
         let volume_factor = total_submissions.min(100); // Cap at 100
-        
+
         // Simple reputation formula: (accuracy * volume_factor) + earning_bonus
         let base_score = U256::from(accuracy * volume_factor);
         let earning_bonus = if total_staked > U256::zero() {
@@ -483,21 +482,23 @@ pub mod constants {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::utils::*;
+    use super::*;
 
     #[test]
     fn test_eth_wei_conversion() {
         let wei = eth_to_wei("1.0").unwrap();
         assert_eq!(wei, U256::from(1000000000000000000u64));
-        
+
         let eth_str = wei_to_eth(wei);
         assert_eq!(eth_str, "1.000000000000000000");
     }
 
     #[test]
     fn test_address_validation() {
-        assert!(is_valid_address("0x742d35Cc6634C0532925a3b8D0fC9E0C4b17b3b0"));
+        assert!(is_valid_address(
+            "0x742d35Cc6634C0532925a3b8D0fC9E0C4b17b3b0"
+        ));
         assert!(!is_valid_address("invalid_address"));
         assert!(!is_valid_address("0x123")); // Too short
     }
@@ -511,14 +512,9 @@ mod tests {
 
     #[test]
     fn test_reputation_calculation() {
-        let score = calculate_reputation_score(
-            100, 
-            80, 
-            U256::from(1000),
-            U256::from(900)
-        );
+        let score = calculate_reputation_score(100, 80, U256::from(1000), U256::from(900));
         assert!(score > U256::zero());
-        
+
         // Perfect accuracy should give higher score
         let perfect_score = calculate_reputation_score(50, 50, U256::from(500), U256::from(500));
         let imperfect_score = calculate_reputation_score(50, 25, U256::from(500), U256::from(500));
@@ -532,8 +528,9 @@ mod tests {
             "0x742d35Cc6634C0532925a3b8D0fC9E0C4b17b3b0",
             "0x742d35Cc6634C0532925a3b8D0fC9E0C4b17b3b1",
             "0x742d35Cc6634C0532925a3b8D0fC9E0C4b17b3b2",
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         assert_eq!(config.chain_id, 11155111);
         assert!(config.rpc_url.contains("sepolia.infura.io"));
     }

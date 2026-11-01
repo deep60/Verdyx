@@ -103,9 +103,7 @@ impl Config {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(3),
-                timeout_seconds: env_non_empty("WEBHOOK_TIMEOUT", "30")
-                    .parse()
-                    .unwrap_or(30),
+                timeout_seconds: env_non_empty("WEBHOOK_TIMEOUT", "30").parse().unwrap_or(30),
             },
         })
     }

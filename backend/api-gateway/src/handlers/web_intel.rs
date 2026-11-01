@@ -73,7 +73,7 @@ fn extract_root_domain(host: &str) -> String {
     }
     let second_level_tlds = ["co", "com", "org", "net", "gov", "edu", "ac"];
     if parts.len() >= 3
-        && parts.last().map_or(false, |last| last.len() == 2)
+        && parts.last().is_some_and(|last| last.len() == 2)
         && second_level_tlds.contains(&parts[parts.len() - 2])
     {
         parts[parts.len() - 3..].join(".")
@@ -175,11 +175,10 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
     // 1. Resolve IP addresses (IPv4 & IPv6)
     let port = parsed_url.port_or_known_default().unwrap_or(443);
-    let resolved_addrs: Vec<std::net::SocketAddr> =
-        tokio::net::lookup_host((host.as_str(), port))
-            .await
-            .map(|iter| iter.collect())
-            .unwrap_or_default();
+    let resolved_addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+        .await
+        .map(|iter| iter.collect())
+        .unwrap_or_default();
 
     let mut ipv4_list = Vec::new();
     let mut ipv6_list = Vec::new();
@@ -321,14 +320,8 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     let soa_records = extract_doh_answers(&doh_soa);
     let dmarc_records = extract_doh_answers(&doh_dmarc);
 
-    let dnssec_ad = doh_a
-        .get("AD")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-        || doh_ns
-            .get("AD")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+    let dnssec_ad = doh_a.get("AD").and_then(|v| v.as_bool()).unwrap_or(false)
+        || doh_ns.get("AD").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // ── Email Configuration (MX, SPF, DMARC, DKIM) ────────────────────────
     let txt_strings: Vec<String> = txt_records
@@ -492,16 +485,21 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     if headers_map.contains_key("x-fastly-request-id") || headers_map.contains_key("x-served-by") {
         detected_wafs.push("Fastly Edge CDN");
     }
-    if headers_map.contains_key("x-akamai-transformed") || server_banner.to_lowercase().contains("akamaighost") {
+    if headers_map.contains_key("x-akamai-transformed")
+        || server_banner.to_lowercase().contains("akamaighost")
+    {
         detected_wafs.push("Akamai Kona Site Defender");
     }
     if headers_map.contains_key("x-vercel-id") || server_banner.to_lowercase().contains("vercel") {
         detected_wafs.push("Vercel Edge Network");
     }
-    if headers_map.contains_key("x-nf-request-id") || server_banner.to_lowercase().contains("netlify") {
+    if headers_map.contains_key("x-nf-request-id")
+        || server_banner.to_lowercase().contains("netlify")
+    {
         detected_wafs.push("Netlify Edge");
     }
-    if server_banner.to_lowercase().contains("gws") || headers_map.contains_key("x-goog-generation") {
+    if server_banner.to_lowercase().contains("gws") || headers_map.contains_key("x-goog-generation")
+    {
         detected_wafs.push("Google Front End (GFE) / Cloud Armor");
     }
 
@@ -515,7 +513,12 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     .await;
 
     // ── Certificate Transparency (SSL Cert & Subdomains) ──────────────────
-    let (ssl_cert_info, subdomains_list) = parse_crt_sh(&crt_json, &host, &root_domain, parsed_url.scheme() == "https");
+    let (ssl_cert_info, subdomains_list) = parse_crt_sh(
+        &crt_json,
+        &host,
+        &root_domain,
+        parsed_url.scheme() == "https",
+    );
 
     // ── RDAP / WHOIS & Domain Info ────────────────────────────────────────
     let (whois_info, domain_info) = parse_rdap(&rdap_json, &root_domain);
@@ -610,7 +613,10 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         if html_analysis["hasTitle"].as_bool().unwrap_or(false) {
             s += 15;
         }
-        if html_analysis["hasMetaDescription"].as_bool().unwrap_or(false) {
+        if html_analysis["hasMetaDescription"]
+            .as_bool()
+            .unwrap_or(false)
+        {
             s += 15;
         }
         if html_analysis["hasViewport"].as_bool().unwrap_or(false) {
@@ -669,7 +675,14 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         .unwrap_or_default();
 
     // ── Malware & Phishing + Block Detection ──────────────────────────────
-    let suspicious_keywords = ["login", "verify", "secure-update", "wallet-connect", "account-unlock", "free-claim"];
+    let suspicious_keywords = [
+        "login",
+        "verify",
+        "secure-update",
+        "wallet-connect",
+        "account-unlock",
+        "free-claim",
+    ];
     let matched_phish_tokens: Vec<&str> = suspicious_keywords
         .iter()
         .copied()
@@ -1058,7 +1071,9 @@ async fn fetch_json(client: &reqwest::Client, url: String, timeout_secs: u64) ->
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.unwrap_or_else(|_| json!({})),
+        Ok(resp) if resp.status().is_success() => {
+            resp.json::<Value>().await.unwrap_or_else(|_| json!({}))
+        }
         _ => json!({}),
     }
 }
@@ -1101,7 +1116,9 @@ async fn trace_redirects(client: &reqwest::Client, start_url: &str) -> Vec<Value
 
                 if (300..400).contains(&status) {
                     if let Some(loc) = location {
-                        if let Ok(resolved) = reqwest::Url::parse(&current).and_then(|base| base.join(&loc)) {
+                        if let Ok(resolved) =
+                            reqwest::Url::parse(&current).and_then(|base| base.join(&loc))
+                        {
                             current = resolved.to_string();
                             continue;
                         }
@@ -1233,7 +1250,10 @@ fn analyze_html_document(
     for cap in href_re.captures_iter(html).take(200) {
         if let Some(m) = cap.get(1) {
             let link = m.as_str().trim();
-            if link.starts_with("javascript:") || link.starts_with("mailto:") || link.starts_with("tel:") {
+            if link.starts_with("javascript:")
+                || link.starts_with("mailto:")
+                || link.starts_with("tel:")
+            {
                 continue;
             }
             if link.starts_with('/') {
@@ -1288,7 +1308,11 @@ fn analyze_html_document(
 
     for cap in script_re.captures_iter(html) {
         if let Some(attrs) = cap.get(1).map(|m| m.as_str()) {
-            if let Some(src) = src_re.captures(attrs).and_then(|c| c.get(1)).map(|m| m.as_str()) {
+            if let Some(src) = src_re
+                .captures(attrs)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str())
+            {
                 if external_scripts.len() < 25 {
                     external_scripts.push(src.to_string());
                 }
@@ -1321,7 +1345,10 @@ fn analyze_html_document(
     for (tracker_name, kw) in [
         ("Google Analytics", "google-analytics.com"),
         ("Google Tag Manager", "googletagmanager.com"),
-        ("Cloudflare Browser Insights", "static.cloudflareinsights.com"),
+        (
+            "Cloudflare Browser Insights",
+            "static.cloudflareinsights.com",
+        ),
         ("Meta / Facebook Pixel", "connect.facebook.net"),
         ("Hotjar", "static.hotjar.com"),
         ("Segment Analytics", "cdn.segment.com"),
@@ -1340,7 +1367,10 @@ fn analyze_html_document(
     let mut missing_alt = 0u64;
     for cap in img_re.captures_iter(html) {
         total_imgs += 1;
-        let attrs = cap.get(1).map(|m| m.as_str().to_lowercase()).unwrap_or_default();
+        let attrs = cap
+            .get(1)
+            .map(|m| m.as_str().to_lowercase())
+            .unwrap_or_default();
         if !attrs.contains("alt=") {
             missing_alt += 1;
         }
@@ -1376,7 +1406,8 @@ fn analyze_html_document(
 
     let form_re = Regex::new(r"(?is)<form\b([^>]*)>(.*?)</form>").unwrap();
     let input_re = Regex::new(r"(?is)<input\b([^>]*)/?>").unwrap();
-    let password_re = Regex::new(r#"(?i)\btype\s*=\s*(?:"password"|'password'|password\b)"#).unwrap();
+    let password_re =
+        Regex::new(r#"(?i)\btype\s*=\s*(?:"password"|'password'|password\b)"#).unwrap();
     let mut forms = Vec::new();
     let mut cross_origin_form = false;
     let mut form_password_inputs = 0u64;
@@ -1430,7 +1461,9 @@ fn analyze_html_document(
         let attrs = cap.get(1).map(|m| m.as_str()).unwrap_or("");
         let rel = html_attr(attrs, "rel").unwrap_or_default().to_lowercase();
         let tokens: Vec<&str> = rel.split_whitespace().collect();
-        let is_icon = tokens.iter().any(|t| *t == "icon" || *t == "shortcut" || t.contains("icon"));
+        let is_icon = tokens
+            .iter()
+            .any(|t| *t == "icon" || *t == "shortcut" || t.contains("icon"));
         if !is_icon {
             continue;
         }
@@ -1503,7 +1536,12 @@ fn analyze_html_document(
     })
 }
 
-fn parse_crt_sh(crt_json: &Value, host: &str, root_domain: &str, tls_enabled: bool) -> (Value, Vec<String>) {
+fn parse_crt_sh(
+    crt_json: &Value,
+    host: &str,
+    root_domain: &str,
+    tls_enabled: bool,
+) -> (Value, Vec<String>) {
     let mut subdomains = HashSet::new();
     let mut latest_cert: Option<Value> = None;
 
@@ -1569,7 +1607,10 @@ fn parse_rdap(rdap: &Value, root_domain: &str) -> (Value, Value) {
     if let Some(events) = rdap.get("events").and_then(|e| e.as_array()) {
         for ev in events {
             let action = ev.get("eventAction").and_then(|v| v.as_str()).unwrap_or("");
-            let date = ev.get("eventDate").and_then(|v| v.as_str()).map(str::to_string);
+            let date = ev
+                .get("eventDate")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             match action {
                 "registration" => reg_date = date,
                 "expiration" => exp_date = date,
@@ -1584,7 +1625,11 @@ fn parse_rdap(rdap: &Value, root_domain: &str) -> (Value, Value) {
         .and_then(|n| n.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|ns| ns.get("ldhName").and_then(|v| v.as_str()).map(str::to_string))
+                .filter_map(|ns| {
+                    ns.get("ldhName")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -1622,7 +1667,13 @@ fn parse_robots_txt(robots: &Option<String>) -> Value {
     let mut preview = Vec::new();
     let mut ai_blocked = Vec::new();
     let lower = text.to_lowercase();
-    for bot in ["gptbot", "claudebot", "ccbot", "google-extended", "bytespider"] {
+    for bot in [
+        "gptbot",
+        "claudebot",
+        "ccbot",
+        "google-extended",
+        "bytespider",
+    ] {
         if lower.contains(bot) {
             ai_blocked.push(bot);
         }
@@ -1788,9 +1839,9 @@ fn murmur3_x86_32(data: &[u8], seed: u32) -> u32 {
     const C1: u32 = 0xcc9e_2d51;
     const C2: u32 = 0x1b87_3593;
     let mut h = seed;
-    let mut chunks = data.chunks_exact(4);
-    for chunk in chunks.by_ref() {
-        let mut k = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    let (chunks, rem) = data.as_chunks::<4>();
+    for chunk in chunks {
+        let mut k = u32::from_le_bytes(*chunk);
         k = k.wrapping_mul(C1);
         k = k.rotate_left(15);
         k = k.wrapping_mul(C2);
@@ -1798,7 +1849,6 @@ fn murmur3_x86_32(data: &[u8], seed: u32) -> u32 {
         h = h.rotate_left(13);
         h = h.wrapping_mul(5).wrapping_add(0xe654_6b64);
     }
-    let rem = chunks.remainder();
     if !rem.is_empty() {
         let mut k = 0u32;
         if rem.len() >= 3 {
@@ -2005,13 +2055,21 @@ mod dom_tests {
         let preview = value["previewHtml"].as_str().unwrap_or("");
         assert!(preview.contains("password"));
         assert!(!preview.to_lowercase().contains("<script"));
-        let scripts = value["externalScripts"].as_array().cloned().unwrap_or_default();
+        let scripts = value["externalScripts"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         assert_eq!(scripts.len(), 1);
     }
 
     #[test]
     fn favicon_off_host_is_not_resolved() {
-        assert!(resolve_same_host("https://cdn.example/fav.ico", "https://bank.test", "bank.test").is_none());
+        assert!(resolve_same_host(
+            "https://cdn.example/fav.ico",
+            "https://bank.test",
+            "bank.test"
+        )
+        .is_none());
         assert_eq!(
             resolve_same_host("/fav.ico", "https://bank.test", "bank.test").as_deref(),
             Some("https://bank.test/fav.ico")

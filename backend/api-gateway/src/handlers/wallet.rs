@@ -84,16 +84,15 @@ pub async fn get_balance(
     State(state): State<AppState>,
     claims: crate::middleware::auth::Claims,
 ) -> Result<Json<WalletBalance>, StatusCode> {
-    let wallet_address: String = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT wallet_address FROM users WHERE id = $1",
-    )
-    .bind(claims.sub)
-    .fetch_optional(state.db.pool())
-    .await
-    .ok()
-    .flatten()
-    .flatten()
-    .unwrap_or_default();
+    let wallet_address: String =
+        sqlx::query_scalar::<_, Option<String>>("SELECT wallet_address FROM users WHERE id = $1")
+            .bind(claims.sub)
+            .fetch_optional(state.db.pool())
+            .await
+            .ok()
+            .flatten()
+            .flatten()
+            .unwrap_or_default();
 
     let on_chain_balance = if let Ok(addr) = wallet_address.parse::<ethers::types::Address>() {
         if !addr.is_zero() {
@@ -198,15 +197,14 @@ pub async fn get_transactions(
     let limit = params.limit.unwrap_or(20).min(100);
     let offset = (page.saturating_sub(1)) * limit;
 
-    let wallet_address: Option<String> = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT wallet_address FROM users WHERE id = $1",
-    )
-    .bind(claims.sub)
-    .fetch_optional(state.db.pool())
-    .await
-    .ok()
-    .flatten()
-    .flatten();
+    let wallet_address: Option<String> =
+        sqlx::query_scalar::<_, Option<String>>("SELECT wallet_address FROM users WHERE id = $1")
+            .bind(claims.sub)
+            .fetch_optional(state.db.pool())
+            .await
+            .ok()
+            .flatten()
+            .flatten();
 
     #[derive(sqlx::FromRow)]
     struct TxRow {

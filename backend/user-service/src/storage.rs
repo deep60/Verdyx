@@ -25,8 +25,7 @@ impl AvatarStorage {
         let bucket = env::var("S3_AVATAR_BUCKET")
             .or_else(|_| env::var("S3_BUCKET"))
             .unwrap_or_else(|_| "verdyx-avatars".to_string());
-        let access_key =
-            shared::env::credential_or_dev_default("S3_ACCESS_KEY", "verdyx_admin")?;
+        let access_key = shared::env::credential_or_dev_default("S3_ACCESS_KEY", "verdyx_admin")?;
         let secret_key =
             shared::env::credential_or_dev_default("S3_SECRET_KEY", "verdyx_secret_key_2024")?;
         let public_base_url = env::var("S3_PUBLIC_URL").unwrap_or_else(|_| endpoint.clone());

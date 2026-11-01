@@ -380,7 +380,10 @@ async fn commit_reveal_storage_and_phase_clock() {
         .bind(bad)
         .execute(&mut *tx)
         .await;
-        assert!(res.is_err(), "malformed commitment {bad:?} must be rejected");
+        assert!(
+            res.is_err(),
+            "malformed commitment {bad:?} must be rejected"
+        );
         // A failed statement poisons the transaction; restart it.
         tx.rollback().await.ok();
         tx = pool.begin().await.expect("re-begin tx");
@@ -408,7 +411,10 @@ async fn commit_reveal_storage_and_phase_clock() {
         .fetch_one(&mut *tx)
         .await
         .expect("phase query is valid");
-    assert!(first.is_some(), "a committed bounty must have a phase anchor");
+    assert!(
+        first.is_some(),
+        "a committed bounty must have a phase anchor"
+    );
     assert_eq!(total, 1);
     assert_eq!(revealed, 0);
 
@@ -443,10 +449,7 @@ async fn commit_reveal_storage_and_phase_clock() {
             .fetch_one(&mut *tx)
             .await
             .expect("read back commitment");
-    assert_eq!(
-        stored, good,
-        "a revealed commitment must not be rewritable"
-    );
+    assert_eq!(stored, good, "a revealed commitment must not be rewritable");
 
     tx.rollback().await.expect("rollback tx");
     pool.close().await;

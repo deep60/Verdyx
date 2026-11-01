@@ -281,10 +281,7 @@ impl StaticAnalyzer {
         debug!("Detected file type: {:?}", file_type);
 
         let mut metadata = HashMap::new();
-        metadata.insert(
-            "file_type".to_string(),
-            serde_json::to_value(&file_type)?,
-        );
+        metadata.insert("file_type".to_string(), serde_json::to_value(&file_type)?);
         let mut threat_score = 0.0;
         let mut threat_details = Vec::new();
 
@@ -439,17 +436,13 @@ impl StaticAnalyzer {
                             .push("ELF entropy suggests packing or encryption".to_string());
                     }
                     if !analysis.suspicious_imports.is_empty() {
-                        threat_score +=
-                            (analysis.suspicious_imports.len() as f64 * 0.05).min(0.30);
+                        threat_score += (analysis.suspicious_imports.len() as f64 * 0.05).min(0.30);
                         threat_details.push(format!(
                             "{} suspicious ELF imports",
                             analysis.suspicious_imports.len()
                         ));
                     }
-                    metadata.insert(
-                        "elf_analysis".to_string(),
-                        serde_json::to_value(&analysis)?,
-                    );
+                    metadata.insert("elf_analysis".to_string(), serde_json::to_value(&analysis)?);
                 }
                 Err(e) => {
                     warn!("ELF analysis failed: {}", e);
@@ -1186,7 +1179,7 @@ mod tests {
     fn test_packer_signature_detection() {
         // This would require a real PE file with UPX signature
         // Placeholder test - in production, use actual packed samples
-        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        let _analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
 
         // Test that the packer signatures list is loaded
         assert!(

@@ -14,6 +14,8 @@
 
 interface Env {
   API_GATEWAY_URL?: string;
+  /** Shared with the gateway (`EDGE_PROXY_SECRET`) so it can trust the client IP below. */
+  EDGE_PROXY_SECRET?: string;
 }
 
 /** Hop-by-hop headers that must not be forwarded to the origin. */
@@ -69,6 +71,16 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   // URLs (redirects, cookie domains) despite sitting behind this proxy.
   headers.set("X-Forwarded-Host", incoming.host);
   headers.set("X-Forwarded-Proto", incoming.protocol.replace(":", ""));
+
+  // Rate limits need the browser's IP, not this proxy's. Drop anything the
+  // caller sent, then state the IP Cloudflare observed.
+  headers.delete("X-Verdyx-Edge-Secret");
+  headers.delete("X-Verdyx-Client-IP");
+  const clientIp = request.headers.get("CF-Connecting-IP");
+  if (env.EDGE_PROXY_SECRET && clientIp) {
+    headers.set("X-Verdyx-Edge-Secret", env.EDGE_PROXY_SECRET);
+    headers.set("X-Verdyx-Client-IP", clientIp);
+  }
 
   // GET/HEAD must not carry a body; everything else streams straight through.
   const hasBody = request.method !== "GET" && request.method !== "HEAD";

@@ -323,11 +323,13 @@ fn decode_directory_string(tag: u8, value: &[u8]) -> Result<String> {
 }
 
 fn decode_bmp_string(value: &[u8]) -> Result<String> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err(anyhow!("invalid BMPString in certificate issuer"));
     }
     let units: Vec<u16> = value
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
         .collect();
     Ok(String::from_utf16_lossy(&units))

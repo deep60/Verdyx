@@ -38,16 +38,11 @@ jobs:
         with:
           workspaces: backend
 
-      - name: Install cargo-cyclonedx
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-cyclonedx
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
 
-      - name: Generate SBOM (CycloneDX)
-        run: cargo cyclonedx --all-features --output-format json --output-file ../sbom-rust.json
-
-      - name: Generate SBOM (SPDX)
-        run: cargo cyclonedx --all-features --output-format spdx-json --output-file ../sbom-rust.spdx.json
+      - name: Generate SBOM (CycloneDX and SPDX)
+        run: syft dir:. -o cyclonedx-json=../sbom-rust.json -o spdx-json=../sbom-rust.spdx.json
 
       - name: Upload SBOM as artifact
         uses: actions/upload-artifact@v4
@@ -82,11 +77,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate SBOM (CycloneDX)
-        run: npx @cyclonedx/bom --json --output-file ../sbom-npm.json
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
 
-      - name: Generate SBOM (SPDX)
-        run: npx @cyclonedx/bom --spdx-json --output-file ../sbom-npm.spdx.json
+      - name: Generate SBOM (CycloneDX and SPDX)
+        run: syft dir:. -o cyclonedx-json=../sbom-npm.json -o spdx-json=../sbom-npm.spdx.json
 
       - name: Upload SBOM as artifact
         uses: actions/upload-artifact@v4
@@ -114,11 +109,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate SBOM (CycloneDX)
-        run: npx @cyclonedx/bom --json --output-file ../sbom-contracts.json
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
 
-      - name: Generate SBOM (SPDX)
-        run: npx @cyclonedx/bom --spdx-json --output-file ../sbom-contracts.spdx.json
+      - name: Generate SBOM (CycloneDX and SPDX)
+        run: syft dir:. -o cyclonedx-json=../sbom-contracts.json -o spdx-json=../sbom-contracts.spdx.json
 
       - name: Upload SBOM as artifact
         uses: actions/upload-artifact@v4
@@ -134,9 +129,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'  # Only run on push/release to avoid scanning PR images
     steps:
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Generate SBOM for each service image from GHCR
         run: |
-          cargo install syft
           SERVICES="frontend api-gateway analysis-engine bounty-manager consensus-service notification-service payment-service reputation-service submission-service user-service"
           for service in $SERVICES; do
             image="ghcr.io/deep60/verdyx-${service}:latest"
@@ -166,17 +163,15 @@ jobs:
 
       - name: Merge SBOMs with CycloneDX CLI
         run: |
-          cargo install cyclonedx-cli
-          cyclonedx merge ./sboms/*.json --output-file sbom-merged.json
-          cyclonedx merge ./sboms/*.spdx.json --output-file sbom-merged.spdx.json
+          curl -fsSL -o cyclonedx https://github.com/CycloneDX/cyclonedx-cli/releases/latest/download/cyclonedx-linux-x64
+          chmod +x cyclonedx
+          ./cyclonedx merge --input-files $(ls ./sboms/*.json | grep -v '\.spdx\.json$') --output-file sbom-merged.json
 
       - name: Upload merged SBOM
         uses: actions/upload-artifact@v4
         with:
           name: sbom-merged
-          path: |
-            sbom-merged.json
-            sbom-merged.spdx.json
+          path: sbom-merged.json
           retention-days: 365
 
       - name: Upload to GHCR as attestation

@@ -30,8 +30,8 @@ sha2 = "0.10"
 hex = "0.4"
 
 # Storage (S3/MinIO)
-aws-sdk-s3 = "1.0"
-aws-config = "1.0"
+aws-sdk-s3 = { version = "1.0", default-features = false, features = ["default-https-client", "rt-tokio", "sigv4a"] }
+aws-config = { version = "1.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 
 # Error handling
 anyhow = { workspace = true }

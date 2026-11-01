@@ -465,7 +465,10 @@ mod tests {
     #[test]
     fn test_default_feature_size_preserves_full_histogram() {
         assert_eq!(DEFAULT_FEATURE_SIZE, SCALAR_FEATURES + HISTOGRAM_BINS);
-        assert_eq!(MlAnalyzerConfig::default().feature_size, DEFAULT_FEATURE_SIZE);
+        assert_eq!(
+            MlAnalyzerConfig::default().feature_size,
+            DEFAULT_FEATURE_SIZE
+        );
 
         let analyzer = MlAnalyzer::new(disabled_config());
 

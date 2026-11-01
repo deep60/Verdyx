@@ -151,37 +151,37 @@ pub async fn verify_email(
     }))
 }
 
-/// Forgot password - send reset email (and return resetUrl for local/self-hosted access)
+/// Forgot password - email a reset link.
+///
+/// The token is only ever delivered by email: returning it (or a link holding
+/// it) here would let anyone who knows an address take over that account. The
+/// response is identical whether or not the account exists.
 pub async fn forgot_password(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ForgotPasswordRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut reset_url: Option<String> = None;
-    let mut reset_token: Option<String> = None;
+    let email = req.email.trim().to_ascii_lowercase();
 
-    match state
-        .user_service
-        .create_password_reset_token(&req.email)
-        .await
-    {
+    match state.user_service.create_password_reset_token(&email).await {
         Ok(token) => {
-            tracing::info!(
-                email = %req.email,
-                "Password reset link: /reset-password?token={}",
-                token
-            );
-            reset_url = Some(format!("/reset-password?token={token}"));
-            reset_token = Some(token);
+            // Send in the background so response time doesn't reveal whether
+            // the account exists.
+            let config = state.config.email.clone();
+            tokio::spawn(async move {
+                if let Err(e) =
+                    crate::services::mailer::send_password_reset(&config, &email, &token).await
+                {
+                    tracing::error!("Could not send password reset email: {}", e);
+                }
+            });
         }
         Err(e) => {
-            tracing::debug!("Password reset request for {}: {}", req.email, e);
+            tracing::debug!("Password reset not issued: {}", e);
         }
     }
 
     Ok(Json(json!({
         "message": "If an account with that email exists, a reset link has been sent.",
-        "resetUrl": reset_url,
-        "resetToken": reset_token,
     })))
 }
 
@@ -270,6 +270,10 @@ impl IntoResponse for AppError {
             AppError::UserError(UserError::InvalidToken) => (
                 StatusCode::UNAUTHORIZED,
                 "Invalid or expired token".to_string(),
+            ),
+            AppError::UserError(UserError::TooManyAttempts) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many failed attempts. Please try again in 15 minutes.".to_string(),
             ),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
             AppError::InternalError(msg) => {

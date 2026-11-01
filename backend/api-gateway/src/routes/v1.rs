@@ -9,7 +9,7 @@ use crate::{
         analysis, auth, bounty, consensus_proxy, engines, health, reputation, submission, user,
         wallet, web_intel, webhook,
     },
-    middleware::auth as auth_mw,
+    middleware::{auth as auth_mw, rate_limiter},
     AppState,
 };
 
@@ -18,7 +18,7 @@ pub fn create_routes(state: AppState) -> Router {
     // ── Public routes (no auth) ──────────────────────────
     let public_routes = Router::new()
         .nest("/health", health_routes())
-        .nest("/auth", auth_routes());
+        .nest("/auth", auth_routes(state.clone()));
 
     // ── Mixed routes (optional auth) ─────────────────────
     let mixed_routes = Router::new()
@@ -78,17 +78,25 @@ fn health_routes() -> Router<AppState> {
         .route("/metrics", get(health::metrics))
 }
 
-fn auth_routes() -> Router<AppState> {
-    Router::new()
+fn auth_routes(state: AppState) -> Router<AppState> {
+    // Endpoints an attacker can hammer without an account.
+    let rate_limited = Router::new()
         .route("/register", post(auth::register))
         .route("/login", post(auth::login))
+        .route("/forgot-password", post(auth::forgot_password))
+        .route("/reset-password", post(auth::reset_password))
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            rate_limiter::auth_rate_limit_middleware,
+        ));
+
+    Router::new()
+        .merge(rate_limited)
         .route("/logout", post(auth::logout))
         .route("/refresh", post(auth::refresh_token))
         .route("/verify", get(auth::verify_token))
         .route("/profile", get(auth::get_profile))
         .route("/verify-email", post(auth::verify_email))
-        .route("/forgot-password", post(auth::forgot_password))
-        .route("/reset-password", post(auth::reset_password))
         .route("/api-key", post(auth::generate_api_key))
         .route("/wallet/connect", post(auth::collect_wallet))
         .route("/wallet/disconnect", post(auth::disconnect_wallet))
@@ -118,7 +126,10 @@ fn analysis_routes() -> Router<AppState> {
         .route("/stats", get(analysis::get_analysis_stats))
         .route("/web-intel", get(web_intel::inspect_url_web_intel))
         .route("/{analysis_id}", get(analysis::get_analysis))
-        .route("/{analysis_id}/details", get(analysis::get_analysis_details))
+        .route(
+            "/{analysis_id}/details",
+            get(analysis::get_analysis_details),
+        )
         .route(
             "/by-bounty/{bounty_id}",
             get(analysis::get_analyses_by_bounty),
@@ -135,7 +146,10 @@ fn reputation_routes() -> Router<AppState> {
         .route("/standings", get(reputation::get_standings))
         .route("/user/{user_id}", get(reputation::get_user_reputation))
         .route("/badges", get(reputation::list_available_badges))
-        .route("/history/{user_id}", get(reputation::get_reputation_history))
+        .route(
+            "/history/{user_id}",
+            get(reputation::get_reputation_history),
+        )
         .route("/claim-badge", post(reputation::claim_badge))
 }
 
@@ -172,7 +186,10 @@ fn submission_routes() -> Router<AppState> {
         .route("/{submission_id}", get(submission::get_submission))
         .route("/", post(submission::create_submission))
         .route("/file", post(submission::create_file_submission))
-        .route("/{submission_id}/vote", post(submission::vote_on_submission))
+        .route(
+            "/{submission_id}/vote",
+            post(submission::vote_on_submission),
+        )
         .route(
             "/{submission_id}/verify",
             post(submission::verify_submission),

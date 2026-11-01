@@ -10,6 +10,7 @@ import { Wallet, Mail, Lock, User, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SEO } from "@/components/seo";
+import { passwordPolicyError } from "@/lib/password-policy";
 
 export default function Register() {
   const [, setLocation] = useLocation();
@@ -40,8 +41,9 @@ export default function Register() {
       return;
     }
 
-    if (formData.password.length < 8) {
-      setError("Password must be at least 8 characters");
+    const policyError = passwordPolicyError(formData.password);
+    if (policyError) {
+      setError(policyError);
       return;
     }
 
@@ -55,8 +57,12 @@ export default function Register() {
     try {
       await register(formData.username, formData.email, formData.password);
       setLocation("/dashboard");
-    } catch (_err) {
-      setError("Registration failed. Email may already be in use.");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Registration failed. Please check your details and try again."
+      );
     } finally {
       setIsLoading(false);
     }

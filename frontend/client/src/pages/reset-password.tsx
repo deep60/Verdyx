@@ -1,4 +1,4 @@
-import { Link } from "wouter";
+import { Link, useSearchParams } from "wouter";
 import { VerdyxLogo } from "@/components/verdyx-logo";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { verdyxFetch } from "@/lib/csrf";
-import { useSearchParams } from "wouter";
+import { passwordPolicyError } from "@/lib/password-policy";
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -30,10 +30,11 @@ export default function ResetPassword() {
       return;
     }
 
-    if (password.length < 8) {
+    const policyError = passwordPolicyError(password);
+    if (policyError) {
       toast({
         title: "Error",
-        description: "Password must be at least 8 characters",
+        description: policyError,
         variant: "destructive",
       });
       return;
@@ -51,20 +52,25 @@ export default function ResetPassword() {
         setIsSuccess(true);
         toast({
           title: "Password reset successful",
-          description: "You can now login with your new password",
+          description: "You can now sign in with your new password.",
         });
-      } else {
-        const data = await response.json();
-        toast({
-          title: "Error",
-          description: data.message || "Failed to reset password",
-          variant: "destructive",
-        });
+        return;
       }
+
+      toast({
+        title: "Password not reset",
+        description:
+          response.status === 429
+            ? "Too many attempts. Please wait a few minutes and try again."
+            : response.status >= 500
+              ? "Verdyx is temporarily unavailable. Please try again in a few minutes."
+              : "This reset link is invalid or has expired. Please request a new one.",
+        variant: "destructive",
+      });
     } catch {
       toast({
-        title: "Error",
-        description: "Something went wrong. Please try again.",
+        title: "Password not reset",
+        description: "Verdyx is temporarily unavailable. Please try again in a few minutes.",
         variant: "destructive",
       });
     } finally {
@@ -77,6 +83,9 @@ export default function ResetPassword() {
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
+            <Link href="/" className="flex justify-center items-center gap-2.5 mb-3">
+              <VerdyxLogo size={40} textClassName="text-lg text-foreground" showSubtitle />
+            </Link>
             <CardTitle>Invalid Link</CardTitle>
             <CardDescription>
               This password reset link is invalid or has expired
@@ -84,7 +93,7 @@ export default function ResetPassword() {
           </CardHeader>
           <CardContent>
             <Button asChild className="w-full">
-              <a href="/forgot-password">Request new reset link</a>
+              <Link href="/forgot-password">Request new reset link</Link>
             </Button>
           </CardContent>
         </Card>
@@ -97,6 +106,9 @@ export default function ResetPassword() {
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
+            <Link href="/" className="flex justify-center items-center gap-2.5 mb-3">
+              <VerdyxLogo size={40} textClassName="text-lg text-foreground" showSubtitle />
+            </Link>
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-accent/15">
               <svg className="h-6 w-6 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -109,7 +121,7 @@ export default function ResetPassword() {
           </CardHeader>
           <CardContent>
             <Button asChild className="w-full">
-              <a href="/login">Proceed to login</a>
+              <Link href="/login">Proceed to login</Link>
             </Button>
           </CardContent>
         </Card>
@@ -120,7 +132,10 @@ export default function ResetPassword() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
-        <CardHeader>
+        <CardHeader className="space-y-1">
+          <Link href="/" className="flex justify-center items-center gap-2.5 mb-3">
+            <VerdyxLogo size={40} textClassName="text-lg text-foreground" showSubtitle />
+          </Link>
           <CardTitle>Reset Password</CardTitle>
           <CardDescription>
             Enter your new password
@@ -154,9 +169,9 @@ export default function ResetPassword() {
               {isLoading ? "Resetting..." : "Reset Password"}
             </Button>
             <div className="text-center text-sm">
-              <a href="/login" className="text-primary hover:underline">
+              <Link href="/login" className="text-primary hover:underline">
                 Back to login
-              </a>
+              </Link>
             </div>
           </form>
         </CardContent>

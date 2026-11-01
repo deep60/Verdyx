@@ -30,7 +30,7 @@
 # Budget: the mem_limit values sum to more than 1 GB on purpose. They are caps
 # that stop any single service from taking the box down, not reservations.
 # Steady-state usage is ~700 MB; the bootstrap script adds 3 GB of swap to
-# absorb spikes.
+# absorb spikes. ClamAV is not included, so production runs without that engine.
 
 name: verdyx
 
@@ -89,6 +89,8 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
+      # Caddy is the only route to this container and overwrites X-Real-IP.
+      - TRUST_PROXY_HEADERS=true
       - DATABASE_URL=${PG_BASE_URL}/verdyx_gateway?sslmode=require
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0

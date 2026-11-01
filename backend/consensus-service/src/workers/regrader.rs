@@ -81,7 +81,10 @@ pub async fn start(service: Arc<ConsensusService>) -> Result<()> {
                 Err(e) => {
                     // One bad sample must not stall the queue. The bounty stays
                     // ungraded and is retried on the next pass.
-                    warn!("Regrader: bounty {} could not be graded: {}", bounty.bounty_id, e);
+                    warn!(
+                        "Regrader: bounty {} could not be graded: {}",
+                        bounty.bounty_id, e
+                    );
                 }
             }
         }
@@ -143,11 +146,7 @@ async fn grade_one(
 }
 
 /// Ask analysis-engine to re-scan a sample by hash.
-async fn rescan_by_hash(
-    http: &reqwest::Client,
-    engine_url: &str,
-    hash: &str,
-) -> Result<Verdict> {
+async fn rescan_by_hash(http: &reqwest::Client, engine_url: &str, hash: &str) -> Result<Verdict> {
     let url = format!("{}/analyze/hash", engine_url.trim_end_matches('/'));
 
     let resp = http
@@ -157,7 +156,11 @@ async fn rescan_by_hash(
         .await?;
 
     if !resp.status().is_success() {
-        anyhow::bail!("analysis-engine returned {} for hash {}", resp.status(), hash);
+        anyhow::bail!(
+            "analysis-engine returned {} for hash {}",
+            resp.status(),
+            hash
+        );
     }
 
     let body: RescanResponse = resp.json().await?;

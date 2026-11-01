@@ -11,7 +11,6 @@ import "./ThreatToken.sol";
  * @notice Allows token holders to propose and vote on platform changes
  */
 contract Governance is AccessControl, ReentrancyGuard {
-
     // ============ STATE VARIABLES ============
 
     ThreatToken public immutable threatToken;
@@ -23,7 +22,7 @@ contract Governance is AccessControl, ReentrancyGuard {
     uint256 public constant VOTING_PERIOD = 3 days;
     uint256 public constant EXECUTION_DELAY = 1 days;
     uint256 public constant QUORUM_PERCENTAGE = 10; // 10% of total supply
-    uint256 public constant PROPOSAL_THRESHOLD = 10000 * 10**18; // 10,000 tokens to propose
+    uint256 public constant PROPOSAL_THRESHOLD = 10000 * 10 ** 18; // 10,000 tokens to propose
 
     // ============ ENUMS ============
 
@@ -93,18 +92,11 @@ contract Governance is AccessControl, ReentrancyGuard {
         uint256 votes
     );
 
-    event ProposalQueued(
-        uint256 indexed proposalId,
-        uint256 executionTime
-    );
+    event ProposalQueued(uint256 indexed proposalId, uint256 executionTime);
 
-    event ProposalExecuted(
-        uint256 indexed proposalId
-    );
+    event ProposalExecuted(uint256 indexed proposalId);
 
-    event ProposalCancelled(
-        uint256 indexed proposalId
-    );
+    event ProposalCancelled(uint256 indexed proposalId);
 
     // ============ CONSTRUCTOR ============
 
@@ -182,7 +174,10 @@ contract Governance is AccessControl, ReentrancyGuard {
         uint256 proposalId,
         VoteType support
     ) external nonReentrant {
-        require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
+        require(
+            proposalId > 0 && proposalId <= proposalCount,
+            "Invalid proposal"
+        );
 
         Proposal storage proposal = proposals[proposalId];
         require(proposal.state == ProposalState.Active, "Voting not active");
@@ -214,7 +209,10 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @param proposalId ID of the proposal
      */
     function queue(uint256 proposalId) external {
-        require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
+        require(
+            proposalId > 0 && proposalId <= proposalCount,
+            "Invalid proposal"
+        );
 
         Proposal storage proposal = proposals[proposalId];
         require(proposal.state == ProposalState.Active, "Proposal not active");
@@ -223,7 +221,9 @@ contract Governance is AccessControl, ReentrancyGuard {
         require(!proposal.cancelled, "Proposal cancelled");
 
         // Check if proposal succeeded
-        uint256 totalVotes = proposal.forVotes + proposal.againstVotes + proposal.abstainVotes;
+        uint256 totalVotes = proposal.forVotes +
+            proposal.againstVotes +
+            proposal.abstainVotes;
         uint256 quorum = (threatToken.totalSupply() * QUORUM_PERCENTAGE) / 100;
 
         if (totalVotes >= quorum && proposal.forVotes > proposal.againstVotes) {
@@ -241,12 +241,20 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @dev Execute a queued proposal
      * @param proposalId ID of the proposal
      */
-    function execute(uint256 proposalId) external nonReentrant onlyRole(EXECUTOR_ROLE) {
-        require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
+    function execute(
+        uint256 proposalId
+    ) external nonReentrant onlyRole(EXECUTOR_ROLE) {
+        require(
+            proposalId > 0 && proposalId <= proposalCount,
+            "Invalid proposal"
+        );
 
         Proposal storage proposal = proposals[proposalId];
         require(proposal.state == ProposalState.Queued, "Not queued");
-        require(block.timestamp >= proposal.executionTime, "Execution delay not met");
+        require(
+            block.timestamp >= proposal.executionTime,
+            "Execution delay not met"
+        );
         require(!proposal.executed, "Already executed");
 
         proposal.executed = true;
@@ -254,9 +262,9 @@ contract Governance is AccessControl, ReentrancyGuard {
 
         // Execute all actions
         for (uint256 i = 0; i < proposal.targets.length; i++) {
-            (bool success, ) = proposal.targets[i].call{value: proposal.values[i]}(
-                proposal.calldatas[i]
-            );
+            (bool success, ) = proposal.targets[i].call{
+                value: proposal.values[i]
+            }(proposal.calldatas[i]);
             require(success, "Execution failed");
         }
 
@@ -268,11 +276,15 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @param proposalId ID of the proposal
      */
     function cancel(uint256 proposalId) external {
-        require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
+        require(
+            proposalId > 0 && proposalId <= proposalCount,
+            "Invalid proposal"
+        );
 
         Proposal storage proposal = proposals[proposalId];
         require(
-            msg.sender == proposal.proposer || hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
+            msg.sender == proposal.proposer ||
+                hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
             "Not authorized"
         );
         require(!proposal.executed, "Already executed");
@@ -291,8 +303,13 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @param proposalId ID of the proposal
      * @return Current state of the proposal
      */
-    function getProposalState(uint256 proposalId) external view returns (ProposalState) {
-        require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
+    function getProposalState(
+        uint256 proposalId
+    ) external view returns (ProposalState) {
+        require(
+            proposalId > 0 && proposalId <= proposalCount,
+            "Invalid proposal"
+        );
         return proposals[proposalId].state;
     }
 
@@ -301,8 +318,13 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @param proposalId ID of the proposal
      * @return Proposal struct
      */
-    function getProposal(uint256 proposalId) external view returns (Proposal memory) {
-        require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
+    function getProposal(
+        uint256 proposalId
+    ) external view returns (Proposal memory) {
+        require(
+            proposalId > 0 && proposalId <= proposalCount,
+            "Invalid proposal"
+        );
         return proposals[proposalId];
     }
 
@@ -312,7 +334,10 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @param voter Address of the voter
      * @return Receipt struct
      */
-    function getReceipt(uint256 proposalId, address voter) external view returns (Receipt memory) {
+    function getReceipt(
+        uint256 proposalId,
+        address voter
+    ) external view returns (Receipt memory) {
         return receipts[proposalId][voter];
     }
 
@@ -321,7 +346,9 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @param user Address of the user
      * @return Array of proposal IDs
      */
-    function getUserProposals(address user) external view returns (uint256[] memory) {
+    function getUserProposals(
+        address user
+    ) external view returns (uint256[] memory) {
         return userProposals[user];
     }
 
@@ -348,10 +375,15 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @return Whether quorum is reached
      */
     function hasReachedQuorum(uint256 proposalId) external view returns (bool) {
-        require(proposalId > 0 && proposalId <= proposalCount, "Invalid proposal");
+        require(
+            proposalId > 0 && proposalId <= proposalCount,
+            "Invalid proposal"
+        );
 
         Proposal storage proposal = proposals[proposalId];
-        uint256 totalVotes = proposal.forVotes + proposal.againstVotes + proposal.abstainVotes;
+        uint256 totalVotes = proposal.forVotes +
+            proposal.againstVotes +
+            proposal.abstainVotes;
         uint256 quorum = (threatToken.totalSupply() * QUORUM_PERCENTAGE) / 100;
 
         return totalVotes >= quorum;
@@ -363,7 +395,9 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @dev Grant proposer role to an address
      * @param account Address to grant role
      */
-    function grantProposerRole(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function grantProposerRole(
+        address account
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         grantRole(PROPOSER_ROLE, account);
     }
 
@@ -371,7 +405,9 @@ contract Governance is AccessControl, ReentrancyGuard {
      * @dev Revoke proposer role from an address
      * @param account Address to revoke role
      */
-    function revokeProposerRole(address account) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function revokeProposerRole(
+        address account
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         revokeRole(PROPOSER_ROLE, account);
     }
 

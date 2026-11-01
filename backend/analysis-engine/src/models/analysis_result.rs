@@ -339,10 +339,9 @@ impl AnalysisResult {
 
             if is_unavailable {
                 unknown_count += 1;
-                let reason = detection
-                    .error_message
-                    .clone()
-                    .unwrap_or_else(|| "Engine unavailable or did not produce a verdict".to_string());
+                let reason = detection.error_message.clone().unwrap_or_else(|| {
+                    "Engine unavailable or did not produce a verdict".to_string()
+                });
 
                 unavailable.push(UnavailableEngineInfo {
                     engine_name: detection.engine_name.clone(),
@@ -389,7 +388,8 @@ impl AnalysisResult {
             );
         } else {
             // Confidence is calculated strictly across active participating engines
-            self.consensus_confidence = (total_confidence / total_participating as f32).clamp(0.0, 1.0);
+            self.consensus_confidence =
+                (total_confidence / total_participating as f32).clamp(0.0, 1.0);
 
             // Verdict resolution
             if malicious_count > benign_count && malicious_count > suspicious_count {
@@ -406,7 +406,8 @@ impl AnalysisResult {
             self.agreement_score = (max_votes as f32 / total_participating as f32) * 100.0;
 
             let unavailable_note = if !unavailable.is_empty() {
-                let unavail_names: Vec<String> = unavailable.iter().map(|u| u.engine_name.clone()).collect();
+                let unavail_names: Vec<String> =
+                    unavailable.iter().map(|u| u.engine_name.clone()).collect();
                 format!(
                     " {} engine(s) ({}) were unavailable and excluded from consensus.",
                     unavailable.len(),
@@ -429,8 +430,9 @@ impl AnalysisResult {
         }
 
         // Record auditable history entry if verdict differs or history is empty
-        let needs_audit = self.verdict_history.last().map_or(true, |last| {
-            last.verdict != self.consensus_verdict || (last.confidence - self.consensus_confidence).abs() > 0.001
+        let needs_audit = self.verdict_history.last().is_none_or(|last| {
+            last.verdict != self.consensus_verdict
+                || (last.confidence - self.consensus_confidence).abs() > 0.001
         });
 
         if needs_audit {

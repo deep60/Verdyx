@@ -69,7 +69,7 @@ export function IocGraph({
           const b = current[ids[j]];
           let dx = a.x - b.x;
           let dy = a.y - b.y;
-          let dist = Math.hypot(dx, dy) || 1;
+          const dist = Math.hypot(dx, dy) || 1;
           const force = 900 / (dist * dist);
           dx = (dx / dist) * force;
           dy = (dy / dist) * force;

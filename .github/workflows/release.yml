@@ -1,8 +1,8 @@
 name: Release
 
+# Manual only: publishing a release is a deliberate step. Add a `push` trigger
+# here to release automatically from main.
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
     inputs:
       version:
@@ -31,7 +31,8 @@ jobs:
   release:
     name: Semantic Release
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,12 +82,6 @@ jobs:
         run: |
           # Build all Docker images with the new version tag
           ./scripts/release/build-all.sh "${{ steps.version.outputs.version }}"
-
-      - name: Generate release SBOM
-        if: steps.semantic.outputs.new_release_published == 'true'
-        uses: actions/workflow_call
-        with:
-          ref: main
 
   build-release-images:
     name: Build & Push Release Images

@@ -656,7 +656,7 @@ impl UrlScanner {
             .no_proxy()
             .timeout(Duration::from_secs(self.config.timeout_seconds))
             .connect_timeout(Duration::from_secs(
-                self.config.timeout_seconds.min(10).max(1),
+                self.config.timeout_seconds.clamp(1, 10),
             ))
             .user_agent(&self.config.user_agent);
         // Literal IPs are not resolved by reqwest. Hostnames must be pinned so
@@ -766,7 +766,7 @@ impl UrlScanner {
         let der = peer
             .to_der()
             .map_err(|e| anyhow!("peer certificate could not be encoded: {e}"))?;
-        match parse_certificate(&der).and_then(|parsed| certificate_facts(parsed)) {
+        match parse_certificate(&der).and_then(certificate_facts) {
             Ok(info) => Ok(info),
             Err(e) => Ok(SslInfo {
                 has_ssl: true,
@@ -987,8 +987,8 @@ async fn read_body_limited(mut response: reqwest::Response, max_bytes: usize) ->
 #[cfg(test)]
 mod tests {
     use super::certificate_facts;
-    use crate::scanners::url_policy::{is_public_ip, parse_certificate, validate_url_policy};
     use super::*;
+    use crate::scanners::url_policy::{is_public_ip, parse_certificate, validate_url_policy};
 
     #[tokio::test]
     async fn test_url_scanner_creation() {

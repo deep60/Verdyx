@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (use npm install as fallback if lockfile was updated)
+RUN npm ci || npm install
 
 # Copy source code
 COPY . .
@@ -22,7 +22,7 @@ RUN npm run build
 # - banner defines __dirname/__filename which don't exist in ESM output
 # - vite + vite.config are loaded dynamically in dev only (server/vite.ts), so
 #   they are marked external and never initialized in production.
-RUN npx esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.js \
+RUN npx --yes esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.js \
     --banner:js="import{createRequire as _cr}from'module';import{fileURLToPath as _f}from'url';import{dirname as _d}from'path';const require=_cr(import.meta.url);const __filename=_f(import.meta.url);const __dirname=_d(__filename);" \
     --external:express --external:dotenv \
     --external:vite --external:../vite.config --external:lightningcss \
@@ -35,7 +35,7 @@ WORKDIR /app
 
 # Install production dependencies only
 COPY package*.json ./
-RUN npm ci --production
+RUN npm ci --omit=dev || npm install --omit=dev
 
 # Copy built assets and bundled server from builder
 COPY --from=builder /app/dist ./dist

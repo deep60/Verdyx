@@ -183,9 +183,8 @@ pub async fn update_profile(
         }
     }
 
-    let hm = bearer_map(&headers).ok_or_else(|| {
-        api_err(StatusCode::UNAUTHORIZED, "missing or invalid bearer token")
-    })?;
+    let hm = bearer_map(&headers)
+        .ok_or_else(|| api_err(StatusCode::UNAUTHORIZED, "missing or invalid bearer token"))?;
 
     let body = serde_json::json!({
         "username": payload.username,
@@ -198,15 +197,12 @@ pub async fn update_profile(
         .await
         .map_err(|_| api_err(StatusCode::BAD_GATEWAY, "user-service unavailable"))?;
     if !resp.status().is_success() {
-        let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let status =
+            StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         let text = resp.text().await.unwrap_or_default();
         let message = serde_json::from_str::<serde_json::Value>(&text)
             .ok()
-            .and_then(|v| {
-                v.get("error")
-                    .and_then(|e| e.as_str())
-                    .map(str::to_string)
-            })
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
             .unwrap_or_else(|| "profile update failed".to_string());
         return Err(api_err(status, &message));
     }
@@ -395,9 +391,8 @@ pub async fn delete_account(
     headers: HeaderMap,
     _claims: crate::middleware::auth::Claims,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    let hm = bearer_map(&headers).ok_or_else(|| {
-        api_err(StatusCode::UNAUTHORIZED, "missing or invalid bearer token")
-    })?;
+    let hm = bearer_map(&headers)
+        .ok_or_else(|| api_err(StatusCode::UNAUTHORIZED, "missing or invalid bearer token"))?;
     let resp = state
         .proxy
         .delete("user-service", "/api/v1/account", Some(hm))
@@ -483,7 +478,16 @@ pub async fn list_api_keys(
     let keys = rows
         .into_iter()
         .map(
-            |(id, name, permissions, rate_limit, is_active, last_used_at, created_at, expires_at)| {
+            |(
+                id,
+                name,
+                permissions,
+                rate_limit,
+                is_active,
+                last_used_at,
+                created_at,
+                expires_at,
+            )| {
                 serde_json::json!({
                     "id": id,
                     "name": name,

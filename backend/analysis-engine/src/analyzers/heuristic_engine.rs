@@ -626,7 +626,6 @@ fn extract_browser_context(content: &str, offset: usize) -> HashMap<String, Stri
 mod tests {
     use super::*;
     use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[tokio::test]
     async fn test_heuristic_engine_creation() {

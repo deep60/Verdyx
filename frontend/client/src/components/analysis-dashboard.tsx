@@ -1,4 +1,3 @@
-import { getLocalBundles } from "@/lib/local-analysis-engine";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,10 +20,14 @@ function getMeta(status: string) {
   return statusMeta[status] ?? statusMeta.pending;
 }
 
+/** How often the dashboard's stats and results refresh on their own. */
+export const DASHBOARD_REFRESH_MS = 30_000;
+
 /** KPI row — four uniform cards for a balanced, symmetrical header. */
 export function DashboardStats() {
   const { data: stats, isLoading, isError } = useQuery<ApiStats>({
     queryKey: ["/api/analysis/stats"],
+    refetchInterval: DASHBOARD_REFRESH_MS,
   });
 
   const cards = [
@@ -65,9 +68,10 @@ export function DashboardStats() {
           key={c.label}
           label={c.label}
           value={isError ? "—" : c.value}
+          live={!isError}
           icon={c.icon}
           accent={c.accent}
-          hint={c.hint}
+          hint={isError ? "Unable to load" : c.hint}
           loading={isLoading}
         />
       ))}
@@ -79,16 +83,14 @@ export function DashboardStats() {
 export function RecentAnalyses() {
   const {
     data: rawSubmissions,
+    isError,
     refetch,
     isLoading,
   } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
+    refetchInterval: DASHBOARD_REFRESH_MS,
   });
-  const submissions: ApiSubmission[] =
-    Array.isArray(rawSubmissions) && rawSubmissions.length > 0
-      ? rawSubmissions
-      : (getLocalBundles().map((b) => b.submission) as unknown as ApiSubmission[]);
-  const isError = false;
+  const submissions: ApiSubmission[] = Array.isArray(rawSubmissions) ? rawSubmissions : [];
 
   useWebSocket((message) => {
     if (
@@ -104,9 +106,11 @@ export function RecentAnalyses() {
     <Card className="glassmorphism h-full">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-lg font-semibold">Recent Analysis Results</CardTitle>
-        <Badge variant="outline" className="font-mono text-xs">
-          {submissions.length} total
-        </Badge>
+        {!isError && (
+          <Badge variant="outline" className="font-mono text-xs">
+            {submissions.length} total
+          </Badge>
+        )}
       </CardHeader>
       <CardContent>
         <div className="space-y-3">

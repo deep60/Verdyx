@@ -868,7 +868,13 @@ pub async fn create_file_submission(
         let name = field.name().unwrap_or("").to_string();
         if name == "file" {
             filename = field.file_name().map(|s| s.to_string()).or(filename);
-            file_bytes = Some(field.bytes().await.map_err(|_| StatusCode::BAD_REQUEST)?.to_vec());
+            file_bytes = Some(
+                field
+                    .bytes()
+                    .await
+                    .map_err(|_| StatusCode::BAD_REQUEST)?
+                    .to_vec(),
+            );
         } else {
             let text = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?;
             match name.as_str() {
@@ -1188,25 +1194,19 @@ pub async fn vote_on_submission(
     // Failure here is logged and reported, never fatal: the vote is already
     // committed above and must not be lost because a downstream service is
     // unreachable.
-    let consensus_recorded = match forward_vote_to_consensus(
-        &state,
-        submission_id,
-        voter_id,
-        verdict,
-        confidence,
-    )
-    .await
-    {
-        Ok(recorded) => recorded,
-        Err(e) => {
-            tracing::error!(
-                "Could not prepare consensus forward for vote {}: {}",
-                vote_id,
-                e
-            );
-            false
-        }
-    };
+    let consensus_recorded =
+        match forward_vote_to_consensus(&state, submission_id, voter_id, verdict, confidence).await
+        {
+            Ok(recorded) => recorded,
+            Err(e) => {
+                tracing::error!(
+                    "Could not prepare consensus forward for vote {}: {}",
+                    vote_id,
+                    e
+                );
+                false
+            }
+        };
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -1580,14 +1580,13 @@ pub async fn get_submission_consensus(
         0.0
     };
 
-    let submission_meta: Option<serde_json::Value> = sqlx::query_scalar(
-        "SELECT metadata FROM submissions WHERE id = $1",
-    )
-    .bind(submission_id)
-    .fetch_optional(state.db.pool())
-    .await
-    .unwrap_or_default()
-    .flatten();
+    let submission_meta: Option<serde_json::Value> =
+        sqlx::query_scalar("SELECT metadata FROM submissions WHERE id = $1")
+            .bind(submission_id)
+            .fetch_optional(state.db.pool())
+            .await
+            .unwrap_or_default()
+            .flatten();
 
     let participating_engines: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT engine_name FROM analysis_results WHERE submission_id = $1 AND verdict NOT IN ('Unavailable', 'unavailable', 'Unknown', 'unknown')",

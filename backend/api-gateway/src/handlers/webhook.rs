@@ -311,15 +311,14 @@ pub async fn test_webhook(
     Json(payload): Json<TestWebhookRequest>,
 ) -> Result<Json<WebhookDelivery>, StatusCode> {
     // Verify ownership of the webhook
-    let webhook = sqlx::query_as::<_, Webhook>(
-        "SELECT * FROM webhooks WHERE id = $1 AND user_id = $2",
-    )
-    .bind(webhook_id)
-    .bind(claims.sub)
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    let webhook =
+        sqlx::query_as::<_, Webhook>("SELECT * FROM webhooks WHERE id = $1 AND user_id = $2")
+            .bind(webhook_id)
+            .bind(claims.sub)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::NOT_FOUND)?;
 
     if !is_safe_webhook_url(&webhook.url) {
         return Err(StatusCode::BAD_REQUEST);

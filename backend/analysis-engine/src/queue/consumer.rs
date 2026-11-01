@@ -97,7 +97,8 @@ pub async fn start_analysis_worker(
         .await
         {
             error!("Failed to process submission {}: {}", submission_id, e);
-            if let Err(retry_err) = nack(&redis_client, &db_pool, submission_id, &e.to_string()).await
+            if let Err(retry_err) =
+                nack(&redis_client, &db_pool, submission_id, &e.to_string()).await
             {
                 error!(
                     "Failed to record retry for submission {}: {}",
@@ -188,10 +189,7 @@ async fn nack(
 
     let diagnostic = format!("attempt {attempts}/{MAX_ATTEMPTS}: {error}");
     if attempts >= MAX_ATTEMPTS {
-        let _: i32 = conn
-            .lpush(ANALYSIS_DEAD_LETTER_KEY, &id)
-            .await
-            .unwrap_or(0);
+        let _: i32 = conn.lpush(ANALYSIS_DEAD_LETTER_KEY, &id).await.unwrap_or(0);
         record_job_status(db_pool, submission_id, "failed", &diagnostic).await?;
         error!("Dead-lettered submission {id} after {attempts} attempts");
     } else {
@@ -204,7 +202,10 @@ async fn nack(
 
 /// Delete object keys queued by explicit account or submission removal.
 /// A failed delete is dead-lettered so it cannot block the analysis queue.
-async fn drain_artifact_deletions(redis_client: &redis::Client, s3_client: &S3Client) -> Result<()> {
+async fn drain_artifact_deletions(
+    redis_client: &redis::Client,
+    s3_client: &S3Client,
+) -> Result<()> {
     let mut conn = redis_client
         .get_multiplexed_async_connection()
         .await

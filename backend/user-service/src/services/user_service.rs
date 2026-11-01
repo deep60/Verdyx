@@ -8,6 +8,17 @@ use crate::auth::AuthService;
 use crate::config::Config;
 use crate::models::*;
 
+/// Failed logins allowed per account/identifier before it is temporarily locked.
+const MAX_LOGIN_FAILURES: i64 = 10;
+const LOGIN_FAILURE_WINDOW_SECS: i64 = 15 * 60;
+/// Reset emails allowed per account per hour, so the endpoint can't be used to
+/// flood someone's inbox.
+const MAX_RESET_EMAILS_PER_HOUR: i64 = 3;
+
+fn login_failure_key(identifier: &str) -> String {
+    format!("login_failures:{}", identifier.to_ascii_lowercase())
+}
+
 pub struct UserService {
     config: Config,
     db_pool: PgPool,
@@ -44,6 +55,7 @@ impl UserService {
         req.email = req.email.trim().to_ascii_lowercase();
         validate_username(&req.username)?;
         validate_email(&req.email)?;
+        validate_password(&req.password)?;
 
         // Check if user already exists
         let existing = sqlx::query_as::<_, User>(
@@ -159,6 +171,45 @@ impl UserService {
     }
 
     /// Login user
+    /// Reject the attempt if this identifier has too many recent failures. If
+    /// Redis is unavailable, login stays available and the gateway's IP limit
+    /// still applies.
+    async fn check_login_lockout(&self, identifier: &str) -> UserResult<()> {
+        let mut conn = self.redis_conn.clone();
+        match conn
+            .get::<_, Option<i64>>(login_failure_key(identifier))
+            .await
+        {
+            Ok(Some(failures)) if failures >= MAX_LOGIN_FAILURES => Err(UserError::TooManyAttempts),
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::warn!("Login lockout check unavailable: {}", e);
+                Ok(())
+            }
+        }
+    }
+
+    async fn record_login_failure(&self, identifier: &str) {
+        let key = login_failure_key(identifier);
+        let mut conn = self.redis_conn.clone();
+        match conn.incr::<_, _, i64>(&key, 1).await {
+            Ok(1) => {
+                if let Err(e) = conn.expire::<_, ()>(&key, LOGIN_FAILURE_WINDOW_SECS).await {
+                    tracing::warn!("Could not set login failure expiry: {}", e);
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Could not record login failure: {}", e),
+        }
+    }
+
+    async fn clear_login_failures(&self, identifier: &str) {
+        let mut conn = self.redis_conn.clone();
+        if let Err(e) = conn.del::<_, ()>(login_failure_key(identifier)).await {
+            tracing::warn!("Could not clear login failures: {}", e);
+        }
+    }
+
     pub async fn login(&self, req: LoginRequest) -> UserResult<AuthResponse> {
         req.validate()
             .map_err(|e| UserError::ValidationError(format!("{e}")))?;
@@ -166,20 +217,25 @@ impl UserService {
         // Find user by email or username. Usernames can't contain '@'
         // (validate_username), so the two lookups never overlap. Emails are
         // matched case-insensitively so legacy mixed-case rows still log in.
-        let identifier = req.email.trim();
+        let identifier = req.email.trim().to_string();
+        self.check_login_lockout(&identifier).await?;
+
         let lookup = if identifier.contains('@') {
             "SELECT * FROM users WHERE lower(email) = lower($1)"
         } else {
             "SELECT * FROM users WHERE username = $1"
         };
         let user = sqlx::query_as::<_, User>(lookup)
-            .bind(identifier)
+            .bind(&identifier)
             .fetch_optional(&self.db_pool)
             .await
-            .map_err(|e| UserError::DatabaseError(e.to_string()))?
-            .ok_or(UserError::AuthenticationError(
+            .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+        let Some(user) = user else {
+            self.record_login_failure(&identifier).await;
+            return Err(UserError::AuthenticationError(
                 "Invalid credentials".to_string(),
-            ))?;
+            ));
+        };
 
         // Check if user is active
         if !user.is_active {
@@ -191,6 +247,7 @@ impl UserService {
             .auth_service
             .verify_password(&req.password, &user.password_hash)?
         {
+            self.record_login_failure(&identifier).await;
             return Err(UserError::AuthenticationError(
                 "Invalid credentials".to_string(),
             ));
@@ -208,11 +265,14 @@ impl UserService {
                 .ok_or(UserError::DatabaseError("2FA secret not found".to_string()))?;
 
             if !self.auth_service.verify_2fa_code(secret, &code)? {
+                self.record_login_failure(&identifier).await;
                 return Err(UserError::AuthenticationError(
                     "Invalid 2FA code".to_string(),
                 ));
             }
         }
+
+        self.clear_login_failures(&identifier).await;
 
         // Update last login
         sqlx::query("UPDATE users SET last_login = NOW() WHERE id = $1")
@@ -288,14 +348,13 @@ impl UserService {
 
         if let Some(ref name) = username {
             if name != &current.username {
-                let taken: Option<Uuid> = sqlx::query_scalar(
-                    "SELECT id FROM users WHERE username = $1 AND id <> $2",
-                )
-                .bind(name)
-                .bind(user_id)
-                .fetch_optional(&self.db_pool)
-                .await
-                .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+                let taken: Option<Uuid> =
+                    sqlx::query_scalar("SELECT id FROM users WHERE username = $1 AND id <> $2")
+                        .bind(name)
+                        .bind(user_id)
+                        .fetch_optional(&self.db_pool)
+                        .await
+                        .map_err(|e| UserError::DatabaseError(e.to_string()))?;
                 if taken.is_some() {
                     return Err(UserError::AlreadyExists);
                 }
@@ -487,16 +546,30 @@ impl UserService {
     }
 
     pub async fn create_password_reset_token(&self, email: &str) -> UserResult<String> {
-        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE lower(email) = lower($1)")
             .bind(email)
             .fetch_optional(&self.db_pool)
             .await
             .map_err(|e| UserError::DatabaseError(e.to_string()))?
             .ok_or(UserError::NotFound)?;
 
+        let mut conn = self.redis_conn.clone();
+        let throttle_key = format!("password_reset_throttle:{}", user.id);
+        let sent: i64 = conn
+            .incr(&throttle_key, 1)
+            .await
+            .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+        if sent == 1 {
+            conn.expire::<_, ()>(&throttle_key, 3600)
+                .await
+                .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+        }
+        if sent > MAX_RESET_EMAILS_PER_HOUR {
+            return Err(UserError::TooManyAttempts);
+        }
+
         let token = self.auth_service.generate_verification_token();
         let token_key = format!("password_reset:{token}");
-        let mut conn = self.redis_conn.clone();
         conn.set_ex::<_, _, ()>(&token_key, user.id.to_string(), 3600)
             .await
             .map_err(|e| UserError::DatabaseError(e.to_string()))?;
@@ -509,6 +582,8 @@ impl UserService {
         token: &str,
         new_password: &str,
     ) -> UserResult<()> {
+        validate_password(new_password)?;
+
         let token_key = format!("password_reset:{token}");
         let mut conn = self.redis_conn.clone();
         let user_id: Option<String> = conn
@@ -528,6 +603,12 @@ impl UserService {
             .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
         conn.del::<_, ()>(&token_key)
+            .await
+            .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+
+        // A reset may mean the account was compromised: end the existing
+        // session so a stolen refresh token stops working.
+        conn.del::<_, ()>(format!("session:{user_id}"))
             .await
             .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
@@ -667,6 +748,8 @@ impl UserService {
                 "Invalid current password".to_string(),
             ));
         }
+
+        validate_password(&req.new_password)?;
 
         // Hash new password
         let new_hash = self.auth_service.hash_password(&req.new_password)?;
@@ -875,10 +958,22 @@ fn validate_username(username: &str) -> UserResult<()> {
     Ok(())
 }
 
+fn validate_password(password: &str) -> UserResult<()> {
+    match shared::password_policy::password_policy_error(password) {
+        Some(reason) => Err(UserError::ValidationError(reason.to_string())),
+        None => Ok(()),
+    }
+}
+
 fn validate_email(email: &str) -> UserResult<()> {
     let (local, domain) = email
         .split_once('@')
-        .filter(|(local, domain)| !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.'))
+        .filter(|(local, domain)| {
+            !local.is_empty()
+                && domain.contains('.')
+                && !domain.starts_with('.')
+                && !domain.ends_with('.')
+        })
         .ok_or_else(|| UserError::ValidationError("email is not valid".to_string()))?;
     if email.len() > 255 || local.len() > 64 || domain.len() > 190 {
         return Err(UserError::ValidationError("email is not valid".to_string()));

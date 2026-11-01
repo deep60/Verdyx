@@ -86,8 +86,8 @@ jobs:
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: main
-          head: HEAD
+          base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          head: ${{ github.sha }}
         continue-on-error: true
 
   cargo-audit:
@@ -164,33 +164,28 @@ jobs:
   snyk:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
-    if: env.SNYK_TOKEN != ''
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Run Snyk on frontend
+        if: env.SNYK_TOKEN != ''
         uses: snyk/actions/node@master
         with:
-          args: --severity-threshold=high --sarif-file-output=snyk-frontend.sarif
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          args: --file=frontend/package.json --severity-threshold=high --sarif-file-output=snyk-frontend.sarif
         continue-on-error: true
-        working-directory: ./frontend
 
       - name: Run Snyk on backend (via cargo)
+        if: env.SNYK_TOKEN != ''
         uses: snyk/actions/rust@master
         with:
-          args: --severity-threshold=high --sarif-file-output=snyk-backend.sarif
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          args: --file=backend/Cargo.lock --severity-threshold=high --sarif-file-output=snyk-backend.sarif
         continue-on-error: true
-        working-directory: ./backend
 
       - name: Upload Snyk SARIF
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: always() && env.SNYK_TOKEN != ''
         with:
           sarif_file: snyk-*.sarif
           category: snyk

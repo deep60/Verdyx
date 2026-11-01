@@ -134,7 +134,10 @@ pub fn resolve_verdict(vote_verdict: &str, submission_verdict: Option<&str>) -> 
         "agree" => submission_verdict
             .map(|s| s.trim().to_ascii_lowercase())
             .filter(|s| matches!(s.as_str(), "malicious" | "benign" | "suspicious")),
-        "disagree" => match submission_verdict.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        "disagree" => match submission_verdict
+            .map(|s| s.trim().to_ascii_lowercase())
+            .as_deref()
+        {
             Some("malicious") => Some("benign".to_string()),
             Some("benign") => Some("malicious".to_string()),
             // "not suspicious" is not a verdict.
@@ -150,9 +153,15 @@ mod tests {
 
     #[test]
     fn absolute_verdicts_pass_through() {
-        assert_eq!(resolve_verdict("malicious", None).as_deref(), Some("malicious"));
+        assert_eq!(
+            resolve_verdict("malicious", None).as_deref(),
+            Some("malicious")
+        );
         assert_eq!(resolve_verdict("BENIGN", None).as_deref(), Some("benign"));
-        assert_eq!(resolve_verdict(" suspicious ", None).as_deref(), Some("suspicious"));
+        assert_eq!(
+            resolve_verdict(" suspicious ", None).as_deref(),
+            Some("suspicious")
+        );
     }
 
     #[test]
@@ -161,13 +170,22 @@ mod tests {
             resolve_verdict("agree", Some("malicious")).as_deref(),
             Some("malicious")
         );
-        assert_eq!(resolve_verdict("agree", Some("benign")).as_deref(), Some("benign"));
+        assert_eq!(
+            resolve_verdict("agree", Some("benign")).as_deref(),
+            Some("benign")
+        );
     }
 
     #[test]
     fn disagree_inverts_a_binary_verdict() {
-        assert_eq!(resolve_verdict("disagree", Some("malicious")).as_deref(), Some("benign"));
-        assert_eq!(resolve_verdict("disagree", Some("benign")).as_deref(), Some("malicious"));
+        assert_eq!(
+            resolve_verdict("disagree", Some("malicious")).as_deref(),
+            Some("benign")
+        );
+        assert_eq!(
+            resolve_verdict("disagree", Some("benign")).as_deref(),
+            Some("malicious")
+        );
     }
 
     fn sample_vote() -> ForwardedVote {
@@ -189,7 +207,10 @@ mod tests {
     async fn unreachable_consensus_service_is_not_fatal() {
         // Port 1 is reserved and never listening.
         let recorded = forward_vote_to("http://127.0.0.1:1", &sample_vote()).await;
-        assert!(!recorded, "an unreachable service must report a failed forward");
+        assert!(
+            !recorded,
+            "an unreachable service must report a failed forward"
+        );
     }
 
     /// A malformed base URL must fail the same quiet way.

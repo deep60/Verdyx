@@ -1,7 +1,10 @@
+// Axum middleware returns `Response` as its error type, which is large by design.
+#![allow(clippy::result_large_err)]
+
 use axum::{
     body::Body,
     extract::{ConnectInfo, State},
-    http::{Request, StatusCode},
+    http::{HeaderMap, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -9,7 +12,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -227,6 +230,121 @@ pub struct RateLimitError {
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
+const EDGE_SECRET_HEADER: &str = "x-verdyx-edge-secret";
+const EDGE_CLIENT_IP_HEADER: &str = "x-verdyx-client-ip";
+
+/// Limit for unauthenticated auth endpoints, shared across `/api` and `/api/v1`.
+#[derive(Debug)]
+pub struct AuthRateLimit {
+    limiter: RateLimiter,
+    /// Shared with the Cloudflare Pages proxy, which is the only caller allowed
+    /// to state the browser's IP.
+    edge_secret: Option<String>,
+    /// True only where Caddy is the sole route to the gateway, so it alone can
+    /// set `X-Real-IP`. Otherwise a client could send a new value per request.
+    trust_real_ip: bool,
+}
+
+impl AuthRateLimit {
+    pub fn new(requests_per_15_min: u32, edge_secret: Option<String>, trust_real_ip: bool) -> Self {
+        Self {
+            limiter: RateLimiter::new(RateLimitConfig {
+                requests_per_window: requests_per_15_min,
+                window_duration: Duration::from_secs(15 * 60),
+                burst_size: None,
+            }),
+            edge_secret: edge_secret.filter(|s| !s.is_empty()),
+            trust_real_ip,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        let limit = std::env::var("AUTH_RATE_LIMIT_PER_15_MIN")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        let trust_real_ip = std::env::var("TRUST_PROXY_HEADERS").as_deref() == Ok("true");
+        Self::new(
+            limit,
+            std::env::var("EDGE_PROXY_SECRET").ok(),
+            trust_real_ip,
+        )
+    }
+
+    pub async fn cleanup(&self) {
+        self.limiter.cleanup_old_entries().await;
+    }
+
+    fn client_ip(&self, headers: &HeaderMap, peer: Option<IpAddr>) -> String {
+        let parsed_header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.trim().parse::<IpAddr>().ok())
+        };
+
+        if let (Some(secret), Some(sent)) = (
+            self.edge_secret.as_deref(),
+            headers
+                .get(EDGE_SECRET_HEADER)
+                .and_then(|v| v.to_str().ok()),
+        ) {
+            if constant_time_eq(secret.as_bytes(), sent.as_bytes()) {
+                if let Some(ip) = parsed_header(EDGE_CLIENT_IP_HEADER) {
+                    return ip.to_string();
+                }
+            }
+        }
+
+        if self.trust_real_ip {
+            if let Some(ip) = parsed_header("x-real-ip") {
+                return ip.to_string();
+            }
+        }
+
+        peer.map_or_else(|| "unknown".to_string(), |ip| ip.to_string())
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Per-client limit on login, registration and password reset requests.
+pub async fn auth_rate_limit_middleware(
+    State(state): State<crate::AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, Response> {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0.ip());
+    let ip = state.auth_rate_limit.client_ip(request.headers(), peer);
+
+    match state.auth_rate_limit.limiter.check_rate_limit(&ip).await {
+        RateLimitResult::Allowed { .. } => Ok(next.run(request).await),
+        RateLimitResult::Limited {
+            retry_after_secs,
+            limit,
+            ..
+        } => {
+            let body = RateLimitError {
+                error: "RATE_LIMIT_EXCEEDED".to_string(),
+                message: "Too many attempts. Please wait a few minutes and try again.".to_string(),
+                retry_after_seconds: retry_after_secs,
+                limit,
+                timestamp: Utc::now(),
+            };
+            let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+            if let Ok(value) = retry_after_secs.to_string().parse() {
+                response.headers_mut().insert("Retry-After", value);
+            }
+            Err(response)
+        }
+    }
+}
+
 /// IP-based rate limiting middleware
 pub async fn ip_rate_limit_middleware(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -411,6 +529,79 @@ impl AdaptiveRateLimiter {
 
 #[cfg(test)]
 mod tests {
+    use axum::http::HeaderValue;
+
+    fn peer() -> Option<IpAddr> {
+        Some("10.0.0.9".parse().unwrap())
+    }
+
+    fn headers(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(*name, HeaderValue::from_static(value));
+        }
+        map
+    }
+
+    #[test]
+    fn spoofed_ip_headers_are_ignored_by_default() {
+        let limit = AuthRateLimit::new(5, None, false);
+        let sent = headers(&[
+            ("x-real-ip", "1.1.1.1"),
+            ("x-verdyx-client-ip", "2.2.2.2"),
+            ("x-verdyx-edge-secret", "guess"),
+        ]);
+        assert_eq!(limit.client_ip(&sent, peer()), "10.0.0.9");
+    }
+
+    #[test]
+    fn edge_ip_requires_the_exact_secret() {
+        let limit = AuthRateLimit::new(5, Some("correct".to_string()), false);
+        let wrong = headers(&[
+            ("x-verdyx-client-ip", "2.2.2.2"),
+            ("x-verdyx-edge-secret", "wrong"),
+        ]);
+        assert_eq!(limit.client_ip(&wrong, peer()), "10.0.0.9");
+
+        let right = headers(&[
+            ("x-verdyx-client-ip", "2.2.2.2"),
+            ("x-verdyx-edge-secret", "correct"),
+        ]);
+        assert_eq!(limit.client_ip(&right, peer()), "2.2.2.2");
+    }
+
+    #[test]
+    fn empty_edge_secret_is_treated_as_unset() {
+        let limit = AuthRateLimit::new(5, Some(String::new()), false);
+        let sent = headers(&[
+            ("x-verdyx-client-ip", "2.2.2.2"),
+            ("x-verdyx-edge-secret", ""),
+        ]);
+        assert_eq!(limit.client_ip(&sent, peer()), "10.0.0.9");
+    }
+
+    #[test]
+    fn real_ip_is_used_only_behind_a_trusted_proxy() {
+        let limit = AuthRateLimit::new(5, None, true);
+        assert_eq!(
+            limit.client_ip(&headers(&[("x-real-ip", "3.3.3.3")]), peer()),
+            "3.3.3.3"
+        );
+        assert_eq!(
+            limit.client_ip(&headers(&[("x-real-ip", "not-an-ip")]), peer()),
+            "10.0.0.9"
+        );
+    }
+
+    #[tokio::test]
+    async fn limit_blocks_after_the_configured_attempts() {
+        let limit = AuthRateLimit::new(2, None, false);
+        assert!(limit.limiter.check_rate_limit("ip").await.is_allowed());
+        assert!(limit.limiter.check_rate_limit("ip").await.is_allowed());
+        assert!(!limit.limiter.check_rate_limit("ip").await.is_allowed());
+        assert!(limit.limiter.check_rate_limit("other").await.is_allowed());
+    }
+
     use super::*;
 
     #[tokio::test]

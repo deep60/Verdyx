@@ -7,7 +7,6 @@ pragma solidity ^0.8.19;
  * @notice Provides reusable validation functions with custom error messages
  */
 library ValidationLib {
-
     // ============ CUSTOM ERRORS ============
 
     error InvalidAddress();
@@ -84,7 +83,10 @@ library ValidationLib {
      * @param amount Amount to validate
      * @param minimum Minimum required amount
      */
-    function requireMinimumAmount(uint256 amount, uint256 minimum) internal pure {
+    function requireMinimumAmount(
+        uint256 amount,
+        uint256 minimum
+    ) internal pure {
         if (amount < minimum) revert AmountTooLow(amount, minimum);
     }
 
@@ -93,7 +95,10 @@ library ValidationLib {
      * @param amount Amount to validate
      * @param maximum Maximum allowed amount
      */
-    function requireMaximumAmount(uint256 amount, uint256 maximum) internal pure {
+    function requireMaximumAmount(
+        uint256 amount,
+        uint256 maximum
+    ) internal pure {
         if (amount > maximum) revert AmountTooHigh(amount, maximum);
     }
 

@@ -66,7 +66,7 @@ WORKDIR /app
 
 COPY --from=builder /app/app-bin /usr/local/bin/app
 
-# Ship the signature/YARA rules, trained ONNX ML models, and writable working dirs
+# Ship the signature/YARA rules, ONNX ML models, and writable working dirs
 COPY analysis-engine/rules ./rules
 COPY analysis-engine/ml_models ./ml_models
 RUN mkdir -p ./rules/signatures ./rules/yara ./ml_models ./temp/verdyx-uploads ./models ./logs && \

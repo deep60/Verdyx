@@ -27,6 +27,8 @@ Traditional threat detection relies on single-vendor engines, which creates blin
 3. Verdicts are aggregated by a **consensus service** into a confidence score.
 4. Accurate submitters **earn the bounty and reputation**; inaccurate ones **lose their stake**.
 
+> **Status:** slashing exists in the contracts, but the backend still records stake penalties off-chain only. Contracts have had no external audit and are not yet deployed to a public network.
+
 The result is a threat feed where every verdict has skin in the game, priced and settled on-chain.
 
 ### Backend services (`backend/`)
@@ -48,12 +50,21 @@ Rust workspace, one crate per domain:
 
 ### Smart contracts (`blockchain/`)
 
-Solidity contracts (Hardhat), audited with Slither/Mythril configs included:
+Solidity contracts (Hardhat), with Slither and Mythril static analysis configs included (no external audit yet):
 
 - `ThreatToken` — the ERC-20 staking/reward token
 - `BountyManager` — escrow, staking, and bounty settlement
 - `ReputationSystem` — on-chain analyst/engine reputation
 - `Governance` — protocol parameter governance
+
+### Detection status
+
+| Engine | Status |
+|---|---|
+| YARA, signatures, static, heuristic, hash lookups | Real, with a small starter rule set |
+| ClamAV | Real, but disabled on the 1 GB production box because it needs about 1.5 GB of RAM |
+| ML | Hand-set weights, not trained on data. Expect false positives on compressed files and executables |
+| IP and domain reputation | Simulated placeholder, needs a real threat feed |
 
 ### Frontend (`frontend/`)
 

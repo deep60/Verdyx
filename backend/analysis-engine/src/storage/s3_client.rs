@@ -56,8 +56,7 @@ impl S3Client {
         let endpoint = env::var("S3_ENDPOINT").unwrap_or_else(|_| "http://minio:9000".to_string());
         let region = env::var("S3_REGION").unwrap_or_else(|_| "us-east-1".to_string());
         let bucket = env::var("S3_BUCKET").unwrap_or_else(|_| "verdyx-submissions".to_string());
-        let access_key =
-            shared::env::credential_or_dev_default("S3_ACCESS_KEY", "verdyx_admin")?;
+        let access_key = shared::env::credential_or_dev_default("S3_ACCESS_KEY", "verdyx_admin")?;
         let secret_key =
             shared::env::credential_or_dev_default("S3_SECRET_KEY", "verdyx_secret_key_2024")?;
 
@@ -187,7 +186,8 @@ impl S3Client {
 
         if let StorageBackend::Local { .. } = &self.backend {
             let path = self.local_path(key)?;
-            return std::fs::read(&path).with_context(|| format!("Failed to read {}", path.display()));
+            return std::fs::read(&path)
+                .with_context(|| format!("Failed to read {}", path.display()));
         }
         let StorageBackend::S3 { client, bucket } = &self.backend else {
             unreachable!();

@@ -1,6 +1,8 @@
 # ML Models (`threat_classifier.onnx` & `anomaly_detector.onnx`)
 
-The `analysis-engine` ML analyzer loads two trained ONNX models (IR v8, Opset 13) from this directory:
+> **Not trained on data.** `scripts/train_onnx_models.py` sets these weights by hand from byte-distribution rules. In testing the classifier called ordinary ZIP, PNG, gzip and executable files malicious at 0.94–1.00. Treat its verdict as a weak signal until it is replaced by a model trained on a labelled dataset.
+
+The `analysis-engine` ML analyzer loads two hand-calibrated ONNX models (IR v8, Opset 13) from this directory:
 
 | File | Role | Shape Contract | Env Override |
 | :--- | :--- | :--- | :--- |
@@ -30,9 +32,9 @@ Index-aligned with `MlAnalyzerConfig::labels`:
 8. `worm`
 9. `virus`
 
-## Rebuilding / Retraining the ONNX Models
+## Rebuilding the ONNX Models
 
-Run the zero-dependency training & export script from the repository root:
+Run the zero-dependency export script from the repository root:
 
 ```bash
 python3 scripts/train_onnx_models.py

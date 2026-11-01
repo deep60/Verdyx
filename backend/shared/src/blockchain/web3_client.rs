@@ -1,17 +1,17 @@
-use std::sync::Arc;
-use std::str::FromStr;
+use anyhow::{anyhow, Context, Result};
 use ethers::{
-    prelude::*,
-    providers::{Provider, Http, Middleware},
-    signers::{LocalWallet, Signer},
     contract::Contract,
-    types::{Address, U256, Bytes, TransactionRequest, TransactionReceipt, H256},
-    utils::{parse_ether, format_ether},
+    prelude::*,
+    providers::{Http, Middleware, Provider},
+    signers::{LocalWallet, Signer},
+    types::{Address, Bytes, TransactionReceipt, TransactionRequest, H256, U256},
+    utils::{format_ether, parse_ether},
 };
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+use std::sync::Arc;
 use tokio::sync::RwLock;
-use anyhow::{Result, Context, anyhow};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 // Contract ABIs - In production, these would be loaded from files or generated
 const BOUNTY_MANAGER_ABI: &str = r#"[
@@ -165,15 +165,15 @@ impl Web3Client {
         chain_id: u64,
         contract_addresses: ContractAddresses,
     ) -> Result<Self> {
-        let provider = Provider::<Http>::try_from(rpc_url)
-            .context("Failed to create HTTP provider")?;
+        let provider =
+            Provider::<Http>::try_from(rpc_url).context("Failed to create HTTP provider")?;
         let provider = Arc::new(provider);
 
         let wallet = if let Some(key) = private_key {
             Some(
                 LocalWallet::from_str(key)
                     .context("Invalid private key")?
-                    .with_chain_id(chain_id)
+                    .with_chain_id(chain_id),
             )
         } else {
             None
@@ -233,7 +233,7 @@ impl Web3Client {
             .call()
             .await
             .context("Failed to get token balance")?;
-        
+
         Ok(balance)
     }
 
@@ -244,13 +244,12 @@ impl Web3Client {
         bounty_amount: U256,
         deadline_timestamp: U256,
     ) -> Result<H256> {
-        let wallet = self.wallet.as_ref()
+        let wallet = self
+            .wallet
+            .as_ref()
             .ok_or_else(|| anyhow!("No wallet configured for transactions"))?;
 
-        let client = Arc::new(SignerMiddleware::new(
-            self.provider.clone(),
-            wallet.clone(),
-        ));
+        let client = Arc::new(SignerMiddleware::new(self.provider.clone(), wallet.clone()));
 
         let contract = Contract::new(
             self.contracts.bounty_manager,
@@ -264,7 +263,10 @@ impl Web3Client {
         );
 
         let tx = contract
-            .method::<_, U256>("createBounty", (file_hash, bounty_amount, deadline_timestamp))?
+            .method::<_, U256>(
+                "createBounty",
+                (file_hash, bounty_amount, deadline_timestamp),
+            )?
             .value(bounty_amount) // Send ETH with the transaction
             .send()
             .await
@@ -280,13 +282,12 @@ impl Web3Client {
         is_malicious: bool,
         stake_amount: U256,
     ) -> Result<H256> {
-        let wallet = self.wallet.as_ref()
+        let wallet = self
+            .wallet
+            .as_ref()
             .ok_or_else(|| anyhow!("No wallet configured for transactions"))?;
 
-        let client = Arc::new(SignerMiddleware::new(
-            self.provider.clone(),
-            wallet.clone(),
-        ));
+        let client = Arc::new(SignerMiddleware::new(self.provider.clone(), wallet.clone()));
 
         let contract = Contract::new(
             self.contracts.bounty_manager,
@@ -346,13 +347,12 @@ impl Web3Client {
         was_correct: bool,
         stake_amount: U256,
     ) -> Result<H256> {
-        let wallet = self.wallet.as_ref()
+        let wallet = self
+            .wallet
+            .as_ref()
             .ok_or_else(|| anyhow!("No wallet configured for transactions"))?;
 
-        let client = Arc::new(SignerMiddleware::new(
-            self.provider.clone(),
-            wallet.clone(),
-        ));
+        let client = Arc::new(SignerMiddleware::new(self.provider.clone(), wallet.clone()));
 
         let contract = Contract::new(
             self.contracts.reputation_system,
@@ -375,18 +375,13 @@ impl Web3Client {
     }
 
     /// Transfers threat tokens to another address
-    pub async fn transfer_tokens(
-        &self,
-        to: Address,
-        amount: U256,
-    ) -> Result<H256> {
-        let wallet = self.wallet.as_ref()
+    pub async fn transfer_tokens(&self, to: Address, amount: U256) -> Result<H256> {
+        let wallet = self
+            .wallet
+            .as_ref()
             .ok_or_else(|| anyhow!("No wallet configured for transactions"))?;
 
-        let client = Arc::new(SignerMiddleware::new(
-            self.provider.clone(),
-            wallet.clone(),
-        ));
+        let client = Arc::new(SignerMiddleware::new(self.provider.clone(), wallet.clone()));
 
         let contract = Contract::new(
             self.contracts.threat_token,
@@ -406,18 +401,13 @@ impl Web3Client {
     }
 
     /// Approves another address to spend tokens on behalf of the wallet
-    pub async fn approve_tokens(
-        &self,
-        spender: Address,
-        amount: U256,
-    ) -> Result<H256> {
-        let wallet = self.wallet.as_ref()
+    pub async fn approve_tokens(&self, spender: Address, amount: U256) -> Result<H256> {
+        let wallet = self
+            .wallet
+            .as_ref()
             .ok_or_else(|| anyhow!("No wallet configured for transactions"))?;
 
-        let client = Arc::new(SignerMiddleware::new(
-            self.provider.clone(),
-            wallet.clone(),
-        ));
+        let client = Arc::new(SignerMiddleware::new(self.provider.clone(), wallet.clone()));
 
         let contract = Contract::new(
             self.contracts.threat_token,
@@ -437,11 +427,7 @@ impl Web3Client {
     }
 
     /// Checks token allowance between owner and spender
-    pub async fn get_token_allowance(
-        &self,
-        owner: Address,
-        spender: Address,
-    ) -> Result<U256> {
+    pub async fn get_token_allowance(&self, owner: Address, spender: Address) -> Result<U256> {
         let allowance: U256 = self
             .threat_token
             .method("allowance", (owner, spender))?
@@ -455,7 +441,7 @@ impl Web3Client {
     /// Waits for a transaction to be confirmed
     pub async fn wait_for_confirmation(&self, tx_hash: H256) -> Result<TransactionReceipt> {
         info!("Waiting for transaction confirmation: {:?}", tx_hash);
-        
+
         let receipt = self
             .provider
             .get_transaction_receipt(tx_hash)
@@ -529,8 +515,10 @@ mod tests {
     #[tokio::test]
     async fn test_web3_client_creation() {
         let contract_addresses = ContractAddresses {
-            bounty_manager: Address::from_str("0x1234567890123456789012345678901234567890").unwrap(),
-            reputation_system: Address::from_str("0x2234567890123456789012345678901234567890").unwrap(),
+            bounty_manager: Address::from_str("0x1234567890123456789012345678901234567890")
+                .unwrap(),
+            reputation_system: Address::from_str("0x2234567890123456789012345678901234567890")
+                .unwrap(),
             threat_token: Address::from_str("0x3234567890123456789012345678901234567890").unwrap(),
         };
 
@@ -540,7 +528,8 @@ mod tests {
             None,
             1,
             contract_addresses,
-        ).await;
+        )
+        .await;
 
         // In a real test environment, this should succeed
         assert!(result.is_err() || result.is_ok());
@@ -549,10 +538,10 @@ mod tests {
     #[test]
     fn test_eth_wei_conversion() {
         let client = create_mock_client();
-        
+
         let wei = client.eth_to_wei("1.5").unwrap();
         let eth_str = client.wei_to_eth_string(wei);
-        
+
         assert_eq!(eth_str, "1.500000000000000000");
     }
 
@@ -567,9 +556,21 @@ mod tests {
                 reputation_system: Address::zero(),
                 threat_token: Address::zero(),
             },
-            bounty_manager: Contract::new(Address::zero(), serde_json::Value::Array(vec![]), Provider::<Http>::try_from("http://localhost:8545").unwrap()),
-            reputation_system: Contract::new(Address::zero(), serde_json::Value::Array(vec![]), Provider::<Http>::try_from("http://localhost:8545").unwrap()),
-            threat_token: Contract::new(Address::zero(), serde_json::Value::Array(vec![]), Provider::<Http>::try_from("http://localhost:8545").unwrap()),
+            bounty_manager: Contract::new(
+                Address::zero(),
+                serde_json::Value::Array(vec![]),
+                Provider::<Http>::try_from("http://localhost:8545").unwrap(),
+            ),
+            reputation_system: Contract::new(
+                Address::zero(),
+                serde_json::Value::Array(vec![]),
+                Provider::<Http>::try_from("http://localhost:8545").unwrap(),
+            ),
+            threat_token: Contract::new(
+                Address::zero(),
+                serde_json::Value::Array(vec![]),
+                Provider::<Http>::try_from("http://localhost:8545").unwrap(),
+            ),
         }
     }
 }

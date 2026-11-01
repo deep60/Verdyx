@@ -23,7 +23,7 @@ use crate::{AppError, AppResult};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum CircuitState {
     #[default]
-    Closed,   // Normal operation, requests pass through
+    Closed, // Normal operation, requests pass through
     Open,     // Failing, requests blocked
     HalfOpen, // Testing recovery, limited requests allowed
 }
@@ -102,19 +102,19 @@ impl CircuitBreaker {
             half_open_semaphore: Arc::new(Semaphore::new(1)), // Updated dynamically
         }
     }
-    
+
     /// Get current state
     pub async fn state(&self) -> CircuitState {
         *self.state.read().await
     }
-    
+
     /// Get current stats
     pub async fn stats(&self) -> CircuitStats {
         let mut stats = self.stats.read().await.clone();
         stats.state = *self.state.read().await;
         stats
     }
-    
+
     /// Record a successful call
     pub async fn record_success(&self) {
         let mut stats = self.stats.write().await;
@@ -122,13 +122,15 @@ impl CircuitBreaker {
         stats.successful_requests += 1;
         stats.consecutive_failures = 0;
         stats.consecutive_successes += 1;
-        
+
         let state = *self.state.read().await;
-        if state == CircuitState::HalfOpen && stats.consecutive_successes >= self.config.success_threshold {
+        if state == CircuitState::HalfOpen
+            && stats.consecutive_successes >= self.config.success_threshold
+        {
             self.transition_to_closed(stats).await;
         }
     }
-    
+
     /// Record a failed call
     pub async fn record_failure(&self, error: Option<String>) {
         let mut stats = self.stats.write().await;
@@ -136,11 +138,11 @@ impl CircuitBreaker {
         stats.failed_requests += 1;
         stats.consecutive_successes = 0;
         stats.consecutive_failures += 1;
-        
+
         if let Some(err) = error {
             stats.last_failure = Some(err);
         }
-        
+
         let state = *self.state.read().await;
         match state {
             CircuitState::Closed => {
@@ -148,7 +150,8 @@ impl CircuitBreaker {
                 if stats.total_requests >= self.config.minimum_requests as u64 {
                     let failure_rate = stats.failed_requests as f64 / stats.total_requests as f64;
                     if failure_rate >= self.config.failure_rate_threshold
-                        || stats.consecutive_failures >= self.config.failure_threshold {
+                        || stats.consecutive_failures >= self.config.failure_threshold
+                    {
                         self.transition_to_open(stats).await;
                     }
                 }
@@ -162,11 +165,11 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     /// Check if request should be allowed
     pub async fn allow_request(&self) -> bool {
         let state = *self.state.read().await;
-        
+
         match state {
             CircuitState::Closed => true,
             CircuitState::Open => {
@@ -190,7 +193,7 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     /// Execute a call with circuit breaker protection
     pub async fn call<F, Fut, T>(&self, f: F) -> AppResult<T>
     where
@@ -202,28 +205,28 @@ impl CircuitBreaker {
                 service: self.name.clone(),
             });
         }
-        
+
         let result = f().await;
-        
+
         match &result {
             Ok(_) => self.record_success().await,
             Err(e) => {
                 let is_retriable = matches!(
                     e,
-                    AppError::Timeout(_) |
-                    AppError::ServiceUnavailable(_) |
-                    AppError::Upstream { .. } |
-                    AppError::UpstreamTimeout
+                    AppError::Timeout(_)
+                        | AppError::ServiceUnavailable(_)
+                        | AppError::Upstream { .. }
+                        | AppError::UpstreamTimeout
                 );
                 if is_retriable {
                     self.record_failure(Some(e.to_string())).await;
                 }
             }
         }
-        
+
         result
     }
-    
+
     async fn transition_to_open(&self, mut stats: tokio::sync::RwLockWriteGuard<'_, CircuitStats>) {
         *self.state.write().await = CircuitState::Open;
         *self.last_state_change.write().await = Instant::now();
@@ -231,34 +234,37 @@ impl CircuitBreaker {
         stats.last_state_change = Some(chrono::Utc::now().to_rfc3339());
         tracing::warn!(service = %self.name, "Circuit breaker OPENED");
     }
-    
+
     async fn transition_to_half_open(&self) {
         *self.state.write().await = CircuitState::HalfOpen;
         *self.last_state_change.write().await = Instant::now();
-        
+
         // Update semaphore for half-open max requests
         let new_semaphore = Arc::new(Semaphore::new(self.config.half_open_max_requests as usize));
         self.half_open_semaphore = new_semaphore;
-        
+
         let mut stats = self.stats.write().await;
         stats.state = CircuitState::HalfOpen;
         stats.last_state_change = Some(chrono::Utc::now().to_rfc3339());
         stats.consecutive_successes = 0;
-        
+
         tracing::info!(service = %self.name, "Circuit breaker HALF-OPEN");
     }
-    
-    async fn transition_to_closed(&self, mut stats: tokio::sync::RwLockWriteGuard<'_, CircuitStats>) {
+
+    async fn transition_to_closed(
+        &self,
+        mut stats: tokio::sync::RwLockWriteGuard<'_, CircuitStats>,
+    ) {
         *self.state.write().await = CircuitState::Closed;
         *self.last_state_change.write().await = Instant::now();
         stats.state = CircuitState::Closed;
         stats.last_state_change = Some(chrono::Utc::now().to_rfc3339());
         stats.consecutive_failures = 0;
         stats.consecutive_successes = 0;
-        
+
         tracing::info!(service = %self.name, "Circuit breaker CLOSED");
     }
-    
+
     /// Force reset the circuit breaker (admin operation)
     pub async fn reset(&self) {
         *self.state.write().await = CircuitState::Closed;
@@ -283,22 +289,22 @@ impl CircuitBreakerRegistry {
             breakers: Arc::new(DashMap::new()),
         }
     }
-    
+
     pub fn get_or_create(&self, name: &str, config: CircuitBreakerConfig) -> Arc<CircuitBreaker> {
         self.breakers
             .entry(name.to_string())
             .or_insert_with(|| Arc::new(CircuitBreaker::new(name, config)))
             .clone()
     }
-    
+
     pub fn get(&self, name: &str) -> Option<Arc<CircuitBreaker>> {
         self.breakers.get(name).map(|v| v.clone())
     }
-    
+
     pub fn remove(&self, name: &str) -> bool {
         self.breakers.remove(name).is_some()
     }
-    
+
     pub async fn all_stats(&self) -> Vec<(String, CircuitStats)> {
         let mut result = Vec::new();
         for entry in self.breakers.iter() {
@@ -307,7 +313,7 @@ impl CircuitBreakerRegistry {
         }
         result
     }
-    
+
     pub async fn reset_all(&self) {
         for entry in self.breakers.iter() {
             entry.value().reset().await;
@@ -323,7 +329,7 @@ pub struct CircuitBreakerMiddleware {
 }
 
 /// Simple circuit breaker middleware for axum
-/// 
+///
 /// Usage:
 /// ```rust
 /// let breaker = registry.get_or_create("service-name", CircuitBreakerConfig::default());
@@ -333,7 +339,10 @@ pub struct CircuitBreakerMiddleware {
 #[cfg(feature = "circuit-breaker")]
 pub fn circuit_breaker_middleware(
     breaker: Arc<CircuitBreaker>,
-) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone + Send + 'static {
+) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
+       + Clone
+       + Send
+       + 'static {
     move |request: Request, next: Next| {
         let breaker = breaker.clone();
         Box::pin(async move {
@@ -344,17 +353,19 @@ pub fn circuit_breaker_middleware(
                 };
                 return err.to_api_error(None).into_response();
             }
-            
+
             // Call downstream
             let response = next.run(request).await;
-            
+
             let status = response.status().as_u16();
             if status >= 500 {
-                breaker.record_failure(Some(format!("HTTP {}", status))).await;
+                breaker
+                    .record_failure(Some(format!("HTTP {}", status)))
+                    .await;
             } else {
                 breaker.record_success().await;
             }
-            
+
             response
         })
     }
@@ -365,7 +376,7 @@ pub fn circuit_breaker_middleware(
 mod tests {
     use super::*;
     use tokio::time::sleep;
-    
+
     #[tokio::test]
     async fn test_circuit_breaker_opens_after_failures() {
         let config = CircuitBreakerConfig {
@@ -374,18 +385,18 @@ mod tests {
             failure_rate_threshold: 0.5,
             ..Default::default()
         };
-        
+
         let breaker = CircuitBreaker::new("test-service", config);
-        
+
         // Record failures
         breaker.record_failure(Some("error 1".into())).await;
         breaker.record_failure(Some("error 2".into())).await;
         breaker.record_failure(Some("error 3".into())).await;
-        
+
         // Should be open now
         assert_eq!(breaker.state().await, CircuitState::Open);
     }
-    
+
     #[tokio::test]
     async fn test_circuit_breaker_half_open_recovery() {
         let config = CircuitBreakerConfig {
@@ -396,38 +407,38 @@ mod tests {
             half_open_max_requests: 3,
             ..Default::default()
         };
-        
+
         let breaker = CircuitBreaker::new("test-service", config);
-        
+
         // Trigger open
         breaker.record_failure(None).await;
         breaker.record_failure(None).await;
         assert_eq!(breaker.state().await, CircuitState::Open);
-        
+
         // Wait for timeout
         sleep(Duration::from_millis(150)).await;
-        
+
         // Should be half-open now
         assert!(breaker.allow_request().await);
         assert_eq!(breaker.state().await, CircuitState::HalfOpen);
-        
+
         // Record successes
         breaker.record_success().await;
         breaker.record_success().await;
-        
+
         // Should be closed now
         assert_eq!(breaker.state().await, CircuitState::Closed);
     }
-    
+
     #[tokio::test]
     async fn test_circuit_breaker_registry() {
         let registry = CircuitBreakerRegistry::new();
         let config = CircuitBreakerConfig::default();
-        
+
         let breaker1 = registry.get_or_create("service-a", config.clone());
         let breaker2 = registry.get_or_create("service-b", config.clone());
         let breaker1_again = registry.get("service-a").unwrap();
-        
+
         assert!(Arc::ptr_eq(&breaker1, &breaker1_again));
         assert!(!Arc::ptr_eq(&breaker1, &breaker2));
     }

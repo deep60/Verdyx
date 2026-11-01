@@ -604,9 +604,18 @@ mod money_tests {
     /// successfully, with a transaction hash to prove it.
     #[test]
     fn fractional_amounts_do_not_collapse_to_zero() {
-        assert_eq!(wei("0.05"), U256::from_dec_str("50000000000000000").unwrap());
-        assert_eq!(wei("0.5"), U256::from_dec_str("500000000000000000").unwrap());
-        assert!(!wei("0.000001").is_zero(), "a micro-token must be non-zero in wei");
+        assert_eq!(
+            wei("0.05"),
+            U256::from_dec_str("50000000000000000").unwrap()
+        );
+        assert_eq!(
+            wei("0.5"),
+            U256::from_dec_str("500000000000000000").unwrap()
+        );
+        assert!(
+            !wei("0.000001").is_zero(),
+            "a micro-token must be non-zero in wei"
+        );
     }
 
     /// Values must clear the configured minimum withdrawal, which is written
@@ -615,7 +624,10 @@ mod money_tests {
     #[test]
     fn amounts_are_comparable_with_wei_denominated_config_bounds() {
         let min_withdraw = U256::from_dec_str("1000000000000000000").unwrap(); // 1 token
-        assert!(wei("5") > min_withdraw, "5 tokens must exceed a 1-token minimum");
+        assert!(
+            wei("5") > min_withdraw,
+            "5 tokens must exceed a 1-token minimum"
+        );
         assert!(wei("1") == min_withdraw);
         assert!(wei("0.5") < min_withdraw);
     }

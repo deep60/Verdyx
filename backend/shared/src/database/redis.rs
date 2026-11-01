@@ -2,7 +2,6 @@
 use redis::aio::ConnectionManager;
 use redis::{AsyncCommands, RedisError};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Redis connection wrapper with common operations
 pub struct RedisClient {
@@ -22,8 +21,13 @@ impl RedisClient {
         value: &T,
         expiry_seconds: u64,
     ) -> Result<(), RedisError> {
-        let serialized = serde_json::to_string(value)
-            .map_err(|e| RedisError::from((redis::ErrorKind::TypeError, "Serialization failed", e.to_string())))?;
+        let serialized = serde_json::to_string(value).map_err(|e| {
+            RedisError::from((
+                redis::ErrorKind::TypeError,
+                "Serialization failed",
+                e.to_string(),
+            ))
+        })?;
 
         self.connection
             .set_ex(key, serialized, expiry_seconds)
@@ -39,8 +43,13 @@ impl RedisClient {
 
         match value {
             Some(v) => {
-                let deserialized = serde_json::from_str(&v)
-                    .map_err(|e| RedisError::from((redis::ErrorKind::TypeError, "Deserialization failed", e.to_string())))?;
+                let deserialized = serde_json::from_str(&v).map_err(|e| {
+                    RedisError::from((
+                        redis::ErrorKind::TypeError,
+                        "Deserialization failed",
+                        e.to_string(),
+                    ))
+                })?;
                 Ok(Some(deserialized))
             }
             None => Ok(None),
@@ -135,7 +144,7 @@ pub mod ttl {
     pub const HOUR: u64 = 3600;
     pub const DAY: u64 = 86400;
     pub const WEEK: u64 = 604800;
-    
+
     pub const SESSION: u64 = HOUR; // 1 hour
     pub const VERIFICATION: u64 = DAY; // 24 hours
     pub const RATE_LIMIT: u64 = MINUTE; // 1 minute

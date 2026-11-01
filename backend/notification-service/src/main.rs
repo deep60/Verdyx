@@ -77,7 +77,9 @@ async fn main() -> Result<()> {
     {
         Ok(pool) => pool,
         Err(first_err) => {
-            warn!("Primary DB connect failed ({first_err}); attempting to ensure database exists...");
+            warn!(
+                "Primary DB connect failed ({first_err}); attempting to ensure database exists..."
+            );
             if let Some((base_url, db_name)) = config.database.url.rsplit_once('/') {
                 let admin_url = format!("{base_url}/postgres");
                 if let Ok(admin_pool) = sqlx::postgres::PgPoolOptions::new()
@@ -100,9 +102,11 @@ async fn main() -> Result<()> {
     // Run migrations idempotently
     if let Err(mig_err) = sqlx::migrate!("./migrations").run(&db_pool).await {
         warn!("sqlx::migrate notice ({mig_err}); ensuring schema exists via raw SQL...");
-        let _ = sqlx::raw_sql(include_str!("../migrations/20240101000000_initial_schema.sql"))
-            .execute(&db_pool)
-            .await;
+        let _ = sqlx::raw_sql(include_str!(
+            "../migrations/20240101000000_initial_schema.sql"
+        ))
+        .execute(&db_pool)
+        .await;
     }
     info!("Database migrations completed");
 

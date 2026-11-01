@@ -49,8 +49,8 @@ tower-http = { version = "0.6", features = ["cors", "trace", "catch-panic"] }
 rand = "0.10"  # For nonce generation
 hex = "0.4"  # For hex conversions
 # S3/MinIO storage
-aws-sdk-s3 = "1.0"
-aws-config = "1.0"
+aws-sdk-s3 = { version = "1.0", default-features = false, features = ["default-https-client", "rt-tokio", "sigv4a"] }
+aws-config = { version = "1.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 tokio-test.workspace = true
 blake2 = "0.10.6"
 sha3 = "0.10"
@@ -62,7 +62,7 @@ ndarray = { version = "0.17.2", optional = true }
 futures = "0.3"
 tempfile = "3"
 url = "2"
-zip = "0.6"
+zip = { version = "9", default-features = false, features = ["deflate", "bzip2", "zstd", "time"] }
 async-trait = "0.1"
 # Used to inspect the peer certificate after a real TLS handshake. Issuer and
 # expiry are reported only from this parse — never from placeholders.

@@ -1,11 +1,12 @@
+use sqlx::{
+    migrate::MigrateDatabase,
+    postgres::{PgConnection, PgPoolOptions},
+    Pool, Postgres,
+};
 use std::sync::Arc;
 use std::time::Duration;
-use sqlx::{
-    postgres::{PgPool, PgPoolOptions, PgConnection}, 
-    Pool, Postgres, Connection, migrate::MigrateDatabase,
-};
 use tokio::sync::OnceCell;
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 use super::{DatabaseConfig, DatabaseError, DatabaseResult};
 
@@ -28,7 +29,7 @@ impl DatabaseManager {
     /// Create a new database manager with the given configuration
     pub async fn new(config: DatabaseConfig) -> DatabaseResult<Self> {
         let pool = create_connection_pool(&config).await?;
-        
+
         Ok(Self {
             pool: Arc::new(pool),
             config,
@@ -53,7 +54,7 @@ impl DatabaseManager {
     /// Get database statistics
     pub async fn get_stats(&self) -> DatabaseStats {
         DatabaseStats {
-            active_connections: self.pool.size() as u32,
+            active_connections: self.pool.size(),
             idle_connections: self.pool.num_idle() as u32,
             max_connections: self.config.max_connections,
             min_connections: self.config.min_connections,
@@ -63,11 +64,11 @@ impl DatabaseManager {
     /// Initialize the global database pool
     pub async fn initialize_global_pool(config: DatabaseConfig) -> DatabaseResult<()> {
         let pool = create_connection_pool(&config).await?;
-        
+
         DATABASE_POOL
             .set(Arc::new(pool))
             .map_err(|_| DatabaseError::Config("Failed to set global database pool".to_string()))?;
-        
+
         info!("Global database pool initialized successfully");
         Ok(())
     }
@@ -76,11 +77,13 @@ impl DatabaseManager {
 /// Create a new connection pool with the given configuration
 pub async fn create_connection_pool(config: &DatabaseConfig) -> DatabaseResult<DbPool> {
     info!("Creating database connection pool...");
-    debug!("Database config: host={}, port={}, database={}", 
-           config.host, config.port, config.database_name);
+    debug!(
+        "Database config: host={}, port={}, database={}",
+        config.host, config.port, config.database_name
+    );
 
     let database_url = config.database_url();
-    
+
     // Ensure database exists
     ensure_database_exists(&database_url, &config.database_name).await?;
 
@@ -98,9 +101,11 @@ pub async fn create_connection_pool(config: &DatabaseConfig) -> DatabaseResult<D
             DatabaseError::Connection(e)
         })?;
 
-    info!("Database connection pool created successfully with {} max connections", 
-          config.max_connections);
-    
+    info!(
+        "Database connection pool created successfully with {} max connections",
+        config.max_connections
+    );
+
     Ok(pool)
 }
 
@@ -109,13 +114,13 @@ pub async fn get_connection() -> DatabaseResult<Arc<DbPool>> {
     DATABASE_POOL
         .get()
         .ok_or_else(|| DatabaseError::Config("Database pool not initialized".to_string()))
-        .map(|pool| pool.clone())
+        .cloned()
 }
 
 /// Test database connection
 pub async fn test_connection(pool: &DbPool) -> DatabaseResult<()> {
     debug!("Testing database connection...");
-    
+
     let row: (i32,) = sqlx::query_as("SELECT 1")
         .fetch_one(pool)
         .await
@@ -123,11 +128,13 @@ pub async fn test_connection(pool: &DbPool) -> DatabaseResult<()> {
             error!("Database connection test failed: {}", e);
             DatabaseError::Connection(e)
         })?;
-    
+
     if row.0 != 1 {
-        return Err(DatabaseError::Query("Unexpected result from connection test".to_string()));
+        return Err(DatabaseError::Query(
+            "Unexpected result from connection test".to_string(),
+        ));
     }
-    
+
     info!("Database connection test successful");
     Ok(())
 }
@@ -135,14 +142,16 @@ pub async fn test_connection(pool: &DbPool) -> DatabaseResult<()> {
 /// Ensure the database exists, create if it doesn't
 async fn ensure_database_exists(database_url: &str, database_name: &str) -> DatabaseResult<()> {
     // Parse URL to get connection without database name
-    let mut parts: Vec<&str> = database_url.splitn(4, '/').collect();
+    let parts: Vec<&str> = database_url.splitn(4, '/').collect();
     if parts.len() < 4 {
-        return Err(DatabaseError::Config("Invalid database URL format".to_string()));
+        return Err(DatabaseError::Config(
+            "Invalid database URL format".to_string(),
+        ));
     }
-    
+
     // Remove database name and query params for initial connection
     let base_url = parts[0..3].join("/");
-    let server_url = if base_url.contains('?') {
+    let _server_url = if base_url.contains('?') {
         format!("{}/postgres", base_url.split('?').next().unwrap())
     } else {
         format!("{}/postgres", base_url)
@@ -150,16 +159,17 @@ async fn ensure_database_exists(database_url: &str, database_name: &str) -> Data
 
     debug!("Checking if database '{}' exists...", database_name);
 
-    if !Postgres::database_exists(&database_url).await.unwrap_or(false) {
+    if !Postgres::database_exists(database_url)
+        .await
+        .unwrap_or(false)
+    {
         info!("Database '{}' does not exist, creating...", database_name);
-        
-        Postgres::create_database(&database_url)
-            .await
-            .map_err(|e| {
-                error!("Failed to create database '{}': {}", database_name, e);
-                DatabaseError::Migration(format!("Failed to create database: {}", e))
-            })?;
-        
+
+        Postgres::create_database(database_url).await.map_err(|e| {
+            error!("Failed to create database '{}': {}", database_name, e);
+            DatabaseError::Migration(format!("Failed to create database: {}", e))
+        })?;
+
         info!("Database '{}' created successfully", database_name);
     } else {
         debug!("Database '{}' already exists", database_name);
@@ -171,7 +181,7 @@ async fn ensure_database_exists(database_url: &str, database_name: &str) -> Data
 /// Run database migrations
 pub async fn migrate_database(pool: &DbPool) -> DatabaseResult<()> {
     info!("Running database migrations...");
-    
+
     sqlx::migrate!("./migrations")
         .run(pool)
         .await
@@ -179,7 +189,7 @@ pub async fn migrate_database(pool: &DbPool) -> DatabaseResult<()> {
             error!("Migration failed: {}", e);
             DatabaseError::Migration(e.to_string())
         })?;
-    
+
     info!("Database migrations completed successfully");
     Ok(())
 }
@@ -199,11 +209,8 @@ where
     F: FnOnce(&mut sqlx::Transaction<'_, Postgres>) -> Fut,
     Fut: std::future::Future<Output = DatabaseResult<R>>,
 {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(DatabaseError::Connection)?;
-    
+    let mut tx = pool.begin().await.map_err(DatabaseError::Connection)?;
+
     let res = f(&mut tx).await;
     match res {
         Ok(result) => {

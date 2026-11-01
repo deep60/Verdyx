@@ -106,7 +106,9 @@ fn default_builtin_engines() -> Vec<EngineSummary> {
             name: "YARA Rule Engine".to_string(),
             engine_type: "signature".to_string(),
             r#type: "signature".to_string(),
-            description: Some("Pattern-matching rule engine for APTs, packers, and malware families".to_string()),
+            description: Some(
+                "Pattern-matching rule engine for APTs, packers, and malware families".to_string(),
+            ),
             accuracy_rate: "98.10".to_string(),
             accuracy: "98.10".to_string(),
             total_analyses: 1540,
@@ -119,7 +121,9 @@ fn default_builtin_engines() -> Vec<EngineSummary> {
             name: "PE & Binary Heuristic Analyzer".to_string(),
             engine_type: "ml".to_string(),
             r#type: "ml".to_string(),
-            description: Some("Static PE/ELF/Mach-O structural, import, and section entropy analyzer".to_string()),
+            description: Some(
+                "Static PE/ELF/Mach-O structural, import, and section entropy analyzer".to_string(),
+            ),
             accuracy_rate: "93.50".to_string(),
             accuracy: "93.50".to_string(),
             total_analyses: 980,
@@ -132,7 +136,10 @@ fn default_builtin_engines() -> Vec<EngineSummary> {
             name: "Decompilation & String Inspector".to_string(),
             engine_type: "hybrid".to_string(),
             r#type: "hybrid".to_string(),
-            description: Some("Automated control-flow, suspicious API, and obfuscated indicator extractor".to_string()),
+            description: Some(
+                "Automated control-flow, suspicious API, and obfuscated indicator extractor"
+                    .to_string(),
+            ),
             accuracy_rate: "91.20".to_string(),
             accuracy: "91.20".to_string(),
             total_analyses: 760,

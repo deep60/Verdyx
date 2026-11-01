@@ -48,6 +48,8 @@ const accentMap: Record<
 interface StatCardProps {
   label: string;
   value: string | number;
+  /** False when the value could not be refreshed, which hides the LIVE tag. */
+  live?: boolean;
   icon: LucideIcon;
   accent?: Accent;
   hint?: string;
@@ -58,6 +60,7 @@ interface StatCardProps {
 export function StatCard({
   label,
   value,
+  live = true,
   icon: Icon,
   accent = "primary",
   hint,
@@ -124,9 +127,11 @@ export function StatCard({
           ) : hint ? (
             <p className="text-xs font-mono text-muted-foreground truncate">{hint}</p>
           ) : null}
-          <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/70">
-            LIVE
-          </span>
+          {live && (
+            <span className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground/70">
+              LIVE
+            </span>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -22,10 +22,11 @@ interface DiffSnapshot {
   headers: Record<string, string>;
 }
 
+// Hand-written examples that show how a comparison looks. They are not real scans.
 const BASELINE_SNAPSHOTS: DiffSnapshot[] = [
   {
     id: "baseline-ctrlb-ai",
-    label: "https://ctrlb.ai/ · Baseline Recon Snapshot",
+    label: "Sample data · Clean website A",
     kind: "url",
     verdict: "clean",
     confidence: 96,
@@ -50,7 +51,7 @@ const BASELINE_SNAPSHOTS: DiffSnapshot[] = [
   },
   {
     id: "baseline-cloudflare-com",
-    label: "https://cloudflare.com/ · Baseline Recon Snapshot",
+    label: "Sample data · Clean website B",
     kind: "url",
     verdict: "clean",
     confidence: 98,
@@ -76,7 +77,7 @@ const BASELINE_SNAPSHOTS: DiffSnapshot[] = [
   },
   {
     id: "baseline-phishing-kit",
-    label: "https://login-verify-auth-portal.example/ · Suspicious Recon Snapshot",
+    label: "Sample data · Suspicious website",
     kind: "url",
     verdict: "malicious",
     confidence: 92,
@@ -316,7 +317,7 @@ export function ScanDiffPanel() {
               <Input
                 value={leftDomainInput}
                 onChange={(e) => setLeftDomainInput(e.target.value)}
-                placeholder="Left domain (e.g. ctrlb.ai)"
+                placeholder="Left domain (e.g. example.com)"
                 className="font-mono text-xs h-9"
               />
             </div>

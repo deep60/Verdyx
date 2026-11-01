@@ -478,9 +478,11 @@ mod tests {
 
     #[test]
     fn test_cache_stats() {
-        let mut stats = CacheStats::default();
-        stats.hits = 80;
-        stats.misses = 20;
+        let stats = CacheStats {
+            hits: 80,
+            misses: 20,
+            ..Default::default()
+        };
 
         assert_eq!(stats.hit_rate(), 80.0);
         assert_eq!(stats.miss_rate(), 20.0);

@@ -25,10 +25,6 @@ const navItems = [
   { href: "/api", label: "API" },
 ];
 
-function Mark() {
-  return <span className="inline-block h-2 w-2 bg-mark" aria-hidden />;
-}
-
 export function Navigation() {
   const [location] = useLocation();
   const { user, isAuthenticated, logout, connectWallet } = useAuth();

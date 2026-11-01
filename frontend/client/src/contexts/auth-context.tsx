@@ -1,11 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  setAuthCookies, 
-  clearAuthCookies 
-} from "@/lib/cookie-auth";
+import { setAuthCookies, clearAuthCookies } from "@/lib/cookie-auth";
 
-interface User {
+export interface User {
   id: string;
   username: string;
   email: string;
@@ -15,6 +12,31 @@ interface User {
   isVerified: boolean;
   createdAt: string;
 }
+
+/**
+ * Removes data written by the old offline fallbacks: a browser-only account list
+ * that held plain-text passwords, made-up scan reports, and fake sessions.
+ */
+function purgeLegacyLocalData() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem("verdyx_local_users_v1");
+    localStorage.removeItem("verdyx_local_submission_bundles_v1");
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("verdyx_reset_"))
+      .forEach((key) => localStorage.removeItem(key));
+    if (localStorage.getItem("token")?.startsWith("local-jwt-")) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("refreshToken");
+      localStorage.removeItem("user");
+    }
+  } catch {
+    // Storage may be blocked; there is nothing to purge in that case.
+  }
+}
+
+const SERVICE_UNAVAILABLE_MESSAGE =
+  "Verdyx is temporarily unavailable. Please try again in a few minutes.";
 
 interface AuthContextType {
   user: User | null;
@@ -31,31 +53,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-/** Helper – returns the stored JWT (if any) */
 export function getAuthToken(): string | null {
   return localStorage.getItem("token");
 }
 
-/**
- * Unwrap the standard ApiResponse envelope.
- *
- * Backend returns:
- *   { success: bool, data: T | null, message: string | null, timestamp }
- *
- * On error the response status is non-2xx and `success` is false.
- */
-async function unwrapApiResponse<T>(response: Response): Promise<T> {
-  const body = await response.json();
-
-  if (!response.ok || !body.success) {
-    const msg = body.message || body.error || `Request failed (${response.status})`;
-    throw new Error(msg);
-  }
-
-  return body.data as T;
-}
-
-/** Shape of the auth response from /api/v1/auth/login and /register */
 interface AuthResponseData {
   user: User;
   accessToken: string;
@@ -63,13 +64,41 @@ interface AuthResponseData {
   expiresIn: number;
 }
 
+async function parseJsonSafe(response: Response): Promise<{
+  isJson: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: Record<string, any>;
+}> {
+  const raw = await response.text();
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return { isJson: true, body: parsed };
+    }
+  } catch {
+    // Non-JSON response (e.g. Cloudflare 502 HTML or static fallback)
+  }
+  return { isJson: false, body: {} };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window !== "undefined") {
+      purgeLegacyLocalData();
+      try {
+        const cached = localStorage.getItem("user");
+        if (cached) return JSON.parse(cached) as User;
+      } catch {
+        // Ignore
+      }
+    }
+    return null;
+  });
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
-    checkAuthStatus();
+    void checkAuthStatus();
   }, []);
 
   const checkAuthStatus = async () => {
@@ -80,7 +109,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Validate token and fetch current user profile
       const response = await fetch("/api/v1/auth/verify", {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -88,87 +116,99 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (response.ok) {
-        const userData = await unwrapApiResponse<User>(response);
-        setUser(userData);
-      } else {
-        // Token expired or invalid
+        const { isJson, body } = await parseJsonSafe(response);
+        if (isJson && body.success && body.data) {
+          setUser(body.data as User);
+        }
+      } else if (response.status === 401) {
         localStorage.removeItem("token");
         localStorage.removeItem("refreshToken");
         localStorage.removeItem("user");
+        setUser(null);
       }
-    } catch (error) {
-      console.error("Auth check failed:", error);
-      localStorage.removeItem("token");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("user");
+    } catch {
+      // Keep cached user if offline
     } finally {
       setIsLoading(false);
     }
   };
 
-  const login = async (identifier: string, password: string) => {
+  const persistSession = (authData: AuthResponseData) => {
+    setUser(authData.user);
+    localStorage.setItem("token", authData.accessToken);
+    localStorage.setItem("refreshToken", authData.refreshToken);
+    localStorage.setItem("user", JSON.stringify(authData.user));
+    setAuthCookies(
+      authData.accessToken,
+      authData.refreshToken,
+      authData.user,
+      authData.expiresIn
+    );
+  };
+
+  /** Calls an auth endpoint; throws a user-readable error for any failure. */
+  const requestAuth = async (path: string, payload: object): Promise<AuthResponseData> => {
+    let response: Response;
     try {
-      const response = await fetch("/api/v1/auth/login", {
+      response = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier, password }),
+        body: JSON.stringify(payload),
       });
+    } catch {
+      throw new Error(SERVICE_UNAVAILABLE_MESSAGE);
+    }
 
-      const authData = await unwrapApiResponse<AuthResponseData>(response);
+    const { isJson, body } = await parseJsonSafe(response);
+    if (response.ok && isJson && body.success && body.data) {
+      return body.data as AuthResponseData;
+    }
+    if (!isJson || response.status >= 500) {
+      throw new Error(SERVICE_UNAVAILABLE_MESSAGE);
+    }
+    throw new Error(body.message || body.error || "Request failed. Please try again.");
+  };
 
-      setUser(authData.user);
-      // Store in both localStorage (fallback) and cookies for better security
-      localStorage.setItem("token", authData.accessToken);
-      localStorage.setItem("refreshToken", authData.refreshToken);
-      localStorage.setItem("user", JSON.stringify(authData.user));
-      // Also set cookies
-      setAuthCookies(authData.accessToken, authData.refreshToken, authData.user, authData.expiresIn);
-
+  const login = async (identifier: string, password: string) => {
+    try {
+      const authData = await requestAuth("/api/v1/auth/login", {
+        identifier: identifier.trim(),
+        password,
+      });
+      persistSession(authData);
       toast({
         title: "Welcome back!",
         description: `Logged in as ${authData.user.username}`,
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Invalid credentials";
+    } catch (err) {
       toast({
         title: "Login failed",
-        description: message,
+        description: err instanceof Error ? err.message : "Invalid username/email or password",
         variant: "destructive",
       });
-      throw error;
+      throw err;
     }
   };
 
   const register = async (username: string, email: string, password: string) => {
     try {
-      const response = await fetch("/api/v1/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email, password }),
+      const authData = await requestAuth("/api/v1/auth/register", {
+        username: username.trim().replace(/\s+/g, "_"),
+        email: email.trim().toLowerCase(),
+        password,
       });
-
-      const authData = await unwrapApiResponse<AuthResponseData>(response);
-
-      setUser(authData.user);
-      // Store in both localStorage (fallback) and cookies for better security
-      localStorage.setItem("token", authData.accessToken);
-      localStorage.setItem("refreshToken", authData.refreshToken);
-      localStorage.setItem("user", JSON.stringify(authData.user));
-      // Also set cookies
-      setAuthCookies(authData.accessToken, authData.refreshToken, authData.user, authData.expiresIn);
-
+      persistSession(authData);
       toast({
         title: "Account created!",
-        description: "Welcome to Verdyx",
+        description: `Welcome to Verdyx, ${authData.user.username}`,
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Email may already be in use";
+    } catch (err) {
       toast({
         title: "Registration failed",
-        description: message,
+        description: err instanceof Error ? err.message : "Please check your details and try again.",
         variant: "destructive",
       });
-      throw error;
+      throw err;
     }
   };
 
@@ -183,8 +223,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         });
       }
-    } catch (error) {
-      console.error("Logout error:", error);
+    } catch {
+      // Ignore logout network error
     } finally {
       setUser(null);
       localStorage.removeItem("token");
@@ -212,64 +252,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const accounts = await window.ethereum.request({
         method: "eth_requestAccounts",
       });
-
       const walletAddress = accounts[0];
-
-      // Generate a unique nonce for this connection request (prevents replay attacks)
       const nonce = crypto.randomUUID();
-      const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes expiration
-      
-      // Sign a message to prove wallet ownership with expiration
+      const expiresAt = Date.now() + 5 * 60 * 1000;
+
       const message = JSON.stringify({
-        action: 'connect_wallet',
+        action: "connect_wallet",
         wallet: walletAddress,
         nonce,
         expiresAt,
         domain: window.location.hostname,
       });
-      
+
       const signature = await window.ethereum.request({
         method: "personal_sign",
         params: [message, walletAddress],
       });
 
-      // Update wallet address via API
       const token = getAuthToken();
-      if (token) {
-        const response = await fetch("/api/v1/auth/wallet/connect", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            wallet_address: walletAddress,
-            signature,
-            message,
-            nonce,
-            expiresAt,
-          }),
-        });
+      if (!token) throw new Error("Not signed in");
+      const response = await fetch("/api/v1/auth/wallet/connect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          wallet_address: walletAddress,
+          signature,
+          message,
+          nonce,
+          expiresAt,
+        }),
+      });
+      if (!response.ok) throw new Error("Wallet connection was rejected");
 
-        if (response.ok) {
-          const updatedUser = await unwrapApiResponse<User>(response);
-          setUser(updatedUser);
-          localStorage.setItem("user", JSON.stringify(updatedUser));
-          // Update cookie as well
-          setAuthCookies(
-            localStorage.getItem('token') || '',
-            localStorage.getItem('refreshToken') || '',
-            updatedUser,
-            86400
-          );
-        }
+      const { isJson, body } = await parseJsonSafe(response);
+      if (isJson && body.data) {
+        const updatedUser = body.data as User;
+        setUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
       }
 
       toast({
         title: "Wallet connected",
         description: `Connected: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}`,
       });
-    } catch (_error) {
+    } catch {
       toast({
         title: "Connection failed",
         description: "Could not connect to wallet",
@@ -281,27 +310,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const disconnectWallet = async () => {
     try {
       const token = getAuthToken();
-      if (token) {
-        const response = await fetch("/api/v1/auth/wallet/disconnect", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const updatedUser = await unwrapApiResponse<User>(response);
-          setUser(updatedUser);
-          localStorage.setItem("user", JSON.stringify(updatedUser));
-
-          toast({
-            title: "Wallet disconnected",
-            description: "Your wallet has been disconnected",
-          });
-        }
+      if (!token) throw new Error("Not signed in");
+      const response = await fetch("/api/v1/auth/wallet/disconnect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) throw new Error("Wallet disconnect was rejected");
+      if (user) {
+        const updatedUser: User = { ...user, walletAddress: null };
+        setUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
       }
-    } catch (_error) {
+      toast({
+        title: "Wallet disconnected",
+        description: "Your wallet has been disconnected",
+      });
+    } catch {
       toast({
         title: "Error",
         description: "Failed to disconnect wallet",
@@ -311,25 +338,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const updateProfile = async (input: { username: string; email: string }) => {
-    const token = getAuthToken();
-    if (!token) {
-      throw new Error("Not signed in");
-    }
+    if (!user) throw new Error("Not signed in");
     const response = await fetch("/api/users/me", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${getAuthToken() ?? ""}`,
       },
       body: JSON.stringify({ username: input.username, email: input.email }),
     });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `Profile update failed (${response.status})`);
-    }
+    if (!response.ok) throw new Error("Could not update your profile. Please try again.");
+
     const updated = await response.json();
     const next = {
-      ...(user as User),
+      ...user,
       username: updated.username ?? input.username,
       email: updated.email ?? input.email,
     };
@@ -338,18 +360,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const deleteAccount = async () => {
-    const token = getAuthToken();
-    if (!token) {
-      throw new Error("Not signed in");
-    }
+    // Only clear the session once the server confirms, so a failed request
+    // can't look like a deleted account.
     const response = await fetch("/api/users/me", {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${getAuthToken() ?? ""}` },
     });
-    if (!response.ok && response.status !== 204) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `Account deletion failed (${response.status})`);
-    }
+    if (!response.ok) throw new Error("Could not delete your account. Please try again.");
+
     setUser(null);
     localStorage.removeItem("token");
     localStorage.removeItem("refreshToken");
@@ -385,7 +403,6 @@ export function useAuth() {
   return context;
 }
 
-// Extend Window interface for TypeScript
 declare global {
   interface Window {
     ethereum?: {

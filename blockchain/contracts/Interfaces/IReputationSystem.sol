@@ -7,9 +7,9 @@ pragma solidity ^0.8.19;
  * @notice Manages reputation scores for security analysts and automated engines
  */
 
- interface IReputationSystem {
+interface IReputationSystem {
     // ============ Events ============
-    
+
     /**
      * @notice Emitted when an engine is registered
      * @param engineAddress The address of the registered engine
@@ -65,10 +65,7 @@ pragma solidity ^0.8.19;
      * @param engineAddress The engine affected by decay
      * @param decayAmount Amount of reputation decayed
      */
-    event ReputationDecayed(
-        address indexed engineAddress,
-        uint256 decayAmount
-    );
+    event ReputationDecayed(address indexed engineAddress, uint256 decayAmount);
 
     // ============ Structs ============
 
@@ -196,11 +193,11 @@ pragma solidity ^0.8.19;
      * @param engineAddress Address of the engine
      * @return engineInfo Complete engine information
      */
-    // function getEngineInfo(address engineAddress) 
-    //     external 
-    //     view 
+    // function getEngineInfo(address engineAddress)
+    //     external
+    //     view
     //     override
-    //     returns (EngineInfo memory) 
+    //     returns (EngineInfo memory)
     // {
     //     AnalystProfile storage profile = analysts[engineAddress];
     //     return EngineInfo({
@@ -252,10 +249,10 @@ pragma solidity ^0.8.19;
      */
     function getTopEngines(
         uint256 limit
-    ) external view returns (
-        address[] memory engines,
-        uint256[] memory reputations
-    );
+    )
+        external
+        view
+        returns (address[] memory engines, uint256[] memory reputations);
 
     /**
      * @notice Calculate required stake amount based on reputation
@@ -274,17 +271,20 @@ pragma solidity ^0.8.19;
      * @notice Get minimum reputation required to participate
      * @return minReputation Minimum reputation threshold
      */
-    function getMinimumReputation() external view returns (uint256 minReputation);
+    function getMinimumReputation()
+        external
+        view
+        returns (uint256 minReputation);
 
     /**
      * @notice Get reputation decay parameters
      * @return decayRate Rate of decay per time period
      * @return decayPeriod Time period for decay application
      */
-    function getDecayParameters() external view returns (
-        uint256 decayRate,
-        uint256 decayPeriod
-    );
+    function getDecayParameters()
+        external
+        view
+        returns (uint256 decayRate, uint256 decayPeriod);
 
     /**
      * @notice Get reputation multipliers for different engine types

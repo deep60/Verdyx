@@ -113,38 +113,8 @@ pub async fn register(
     }
 
     // Validate password strength
-    if payload.password.len() < 8 {
-        return Err(ApiError::Validation(
-            "Password must be at least 8 characters".to_string(),
-        ));
-    }
-
-    // Check for at least one uppercase letter
-    if !payload.password.chars().any(|c| c.is_uppercase()) {
-        return Err(ApiError::Validation(
-            "Password must contain at least one uppercase letter".to_string(),
-        ));
-    }
-
-    // Check for at least one lowercase letter
-    if !payload.password.chars().any(|c| c.is_lowercase()) {
-        return Err(ApiError::Validation(
-            "Password must contain at least one lowercase letter".to_string(),
-        ));
-    }
-
-    // Check for at least one digit
-    if !payload.password.chars().any(|c| c.is_numeric()) {
-        return Err(ApiError::Validation(
-            "Password must contain at least one number".to_string(),
-        ));
-    }
-
-    // Check for at least one special character
-    if !payload.password.chars().any(|c| !c.is_alphanumeric()) {
-        return Err(ApiError::Validation(
-            "Password must contain at least one special character".to_string(),
-        ));
+    if let Some(reason) = shared::password_policy::password_policy_error(&payload.password) {
+        return Err(ApiError::Validation(reason.to_string()));
     }
 
     // Validate username format (alphanumeric and underscores only)
@@ -386,7 +356,12 @@ pub async fn verify_email(
     if let Some(hm) = bearer_map(&headers) {
         if let Ok(resp) = state
             .proxy
-            .post("user-service", "/api/v1/auth/verify-email", payload.clone(), Some(hm))
+            .post(
+                "user-service",
+                "/api/v1/auth/verify-email",
+                payload.clone(),
+                Some(hm),
+            )
             .await
         {
             if resp.status().is_success() {
@@ -439,8 +414,9 @@ pub async fn forgot_password(
         .and_then(|e| e.as_str())
         .ok_or(StatusCode::BAD_REQUEST)?;
 
-    // Forward to user-service (source of truth for user accounts)
-    if let Ok(resp) = state
+    // user-service emails the link. Nothing token-related may be returned here:
+    // the caller only has to know an email address, not own it.
+    let resp = state
         .proxy
         .post(
             "user-service",
@@ -449,49 +425,15 @@ pub async fn forgot_password(
             None,
         )
         .await
-    {
-        if resp.status().is_success() {
-            let body: serde_json::Value = resp.json().await.unwrap_or_else(|_| serde_json::json!({}));
-            return Ok(Json(serde_json::json!({
-                "success": true,
-                "message": "If an account with that email exists, a password reset link has been sent",
-                "resetUrl": body.get("resetUrl").cloned().unwrap_or(serde_json::Value::Null),
-                "resetToken": body.get("resetToken").cloned().unwrap_or(serde_json::Value::Null),
-            })));
-        }
-    }
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
 
-    // Fallback to local gateway DB if user-service is unreachable
-    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = $1")
-        .bind(email)
-        .fetch_optional(state.db.pool())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let mut reset_url: Option<String> = None;
-    if let Some(user) = user {
-        let reset_token = Uuid::new_v4().to_string();
-        let _ = state
-            .redis
-            .set_raw_with_ttl(
-                format!("password_reset:{reset_token}"),
-                user.id.to_string(),
-                3600,
-            )
-            .await;
-
-        tracing::info!(
-            user_id = %user.id,
-            "Password reset link: /reset-password?token={}",
-            reset_token
-        );
-        reset_url = Some(format!("/reset-password?token={reset_token}"));
+    if resp.status().is_server_error() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
     Ok(Json(serde_json::json!({
         "success": true,
         "message": "If an account with that email exists, a password reset link has been sent",
-        "resetUrl": reset_url,
     })))
 }
 
@@ -510,12 +452,11 @@ pub async fn reset_password(
         .and_then(|p| p.as_str())
         .ok_or(StatusCode::BAD_REQUEST)?;
 
-    if new_password.len() < 8 {
+    if shared::password_policy::password_policy_error(new_password).is_some() {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // Forward to user-service first
-    if let Ok(resp) = state
+    let resp = state
         .proxy
         .post(
             "user-service",
@@ -527,39 +468,14 @@ pub async fn reset_password(
             None,
         )
         .await
-    {
-        if resp.status().is_success() {
-            return Ok(Json(serde_json::json!({
-                "success": true,
-                "message": "Password reset successfully"
-            })));
-        }
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+
+    if resp.status().is_server_error() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-
-    // Fallback to gateway Redis/DB
-    let user_id_str = state
-        .redis
-        .get_raw(format!("password_reset:{token}"))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::BAD_REQUEST)?;
-
-    let user_id = Uuid::parse_str(&user_id_str).map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    let password_hash =
-        hash_password(new_password).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&password_hash)
-        .bind(user_id)
-        .execute(state.db.pool())
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let _ = state
-        .redis
-        .delete_raw(format!("password_reset:{token}"))
-        .await;
+    if !resp.status().is_success() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -574,17 +490,18 @@ pub async fn generate_api_key(
     payload: Option<Json<serde_json::Value>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let token = extract_token_from_header(&headers).map_err(|_| StatusCode::UNAUTHORIZED)?;
-    let user_id = match crate::utils::crypto::validate_jwt(&token, &state.config.security.jwt_secret) {
-        Ok(claims) => Uuid::parse_str(&claims.sub).map_err(|_| StatusCode::UNAUTHORIZED)?,
-        Err(_) => {
-            let hm = bearer_map(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
-            let identity = fetch_identity(&state, hm)
-                .await
-                .map_err(|_| StatusCode::UNAUTHORIZED)?;
-            sync_user_to_gateway_db(&state, &identity).await;
-            identity.id
-        }
-    };
+    let user_id =
+        match crate::utils::crypto::validate_jwt(&token, &state.config.security.jwt_secret) {
+            Ok(claims) => Uuid::parse_str(&claims.sub).map_err(|_| StatusCode::UNAUTHORIZED)?,
+            Err(_) => {
+                let hm = bearer_map(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+                let identity = fetch_identity(&state, hm)
+                    .await
+                    .map_err(|_| StatusCode::UNAUTHORIZED)?;
+                sync_user_to_gateway_db(&state, &identity).await;
+                identity.id
+            }
+        };
 
     let key_name = payload
         .as_ref()
@@ -695,6 +612,9 @@ fn map_auth_status(code: u16) -> ApiError {
     match code {
         401 | 403 => ApiError::Unauthorized,
         409 => ApiError::BadRequest("User already exists".to_string()),
+        429 => ApiError::TooManyRequests(
+            "Too many failed attempts. Please try again in 15 minutes.".to_string(),
+        ),
         400..=499 => ApiError::Validation("Invalid request".to_string()),
         _ => ApiError::Internal("Authentication service error".to_string()),
     }
@@ -724,7 +644,11 @@ async fn forward_auth(
             user: to_user_response_with_rep(ua.user, rep),
             access_token: ua.access_token,
             refresh_token: ua.refresh_token,
-            expires_in: if ua.expires_in > 0 { ua.expires_in } else { 3600 },
+            expires_in: if ua.expires_in > 0 {
+                ua.expires_in
+            } else {
+                3600
+            },
         };
         Ok(Json(ApiResponse::success(auth_resp)))
     } else {
@@ -752,7 +676,9 @@ async fn identity_as_user_response(
     match fetch_identity(state, hm).await {
         Ok(u) => {
             let rep = sync_user_to_gateway_db(state, &u).await;
-            Ok(Json(ApiResponse::success(to_user_response_with_rep(u, rep))))
+            Ok(Json(ApiResponse::success(to_user_response_with_rep(
+                u, rep,
+            ))))
         }
         Err(code) => Err(map_auth_status(code)),
     }

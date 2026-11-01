@@ -22,13 +22,21 @@ async fn test_signature_matcher_loads_and_detects_eicar() {
         max_matches_per_file: 50,
     };
 
-    let matcher = SignatureMatcher::new(config).await.expect("load signatures");
-    assert!(matcher.signature_count() > 0, "should load at least 1 default signature");
+    let matcher = SignatureMatcher::new(config)
+        .await
+        .expect("load signatures");
+    assert!(
+        matcher.signature_count() > 0,
+        "should load at least 1 default signature"
+    );
 
     // Test with EICAR sample
     let eicar_bytes = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
     let matches = matcher.match_bytes(eicar_bytes).await.expect("match bytes");
-    assert!(!matches.is_empty(), "EICAR string must trigger a signature match");
+    assert!(
+        !matches.is_empty(),
+        "EICAR string must trigger a signature match"
+    );
     assert!(
         matches.iter().any(|m| m.threat_family == "EICAR-Test"),
         "match must report EICAR-Test family"
@@ -36,8 +44,14 @@ async fn test_signature_matcher_loads_and_detects_eicar() {
 
     // Test with clean sample
     let clean_bytes = b"Hello, this is a clean file without any malicious strings.";
-    let clean_matches = matcher.match_bytes(clean_bytes).await.expect("match clean bytes");
-    assert!(clean_matches.is_empty(), "Clean sample must produce 0 signature matches");
+    let clean_matches = matcher
+        .match_bytes(clean_bytes)
+        .await
+        .expect("match clean bytes");
+    assert!(
+        clean_matches.is_empty(),
+        "Clean sample must produce 0 signature matches"
+    );
 }
 
 #[tokio::test]
@@ -50,7 +64,10 @@ async fn test_heuristic_engine_detects_suspicious_patterns() {
         .analyze_content(clean_data, Path::new("clean.txt"))
         .await
         .expect("analyze clean");
-    assert!(clean_matches.is_empty(), "Clean data must produce no heuristic hits");
+    assert!(
+        clean_matches.is_empty(),
+        "Clean data must produce no heuristic hits"
+    );
 
     // Suspicious registry persistence command
     let suspicious_data = "reg.exe add HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run /v EvilService /t REG_SZ /d evil.exe";
@@ -161,5 +178,8 @@ fn test_consensus_explainability_and_unavailable_engine_handling() {
         result.consensus_explanation.contains("clamav"),
         "Explanation must explicitly detail unavailable engine influence"
     );
-    assert!(!result.verdict_history.is_empty(), "Verdict history must have an audit record");
+    assert!(
+        !result.verdict_history.is_empty(),
+        "Verdict history must have an audit record"
+    );
 }

@@ -36,7 +36,7 @@ impl RequestContext {
 
     pub fn log_completion(&self, status_code: u16) {
         let elapsed = self.elapsed_ms();
-        
+
         if status_code >= 500 {
             warn!(
                 request_id = %self.request_id,
@@ -113,7 +113,7 @@ mod tests {
         let ctx = RequestContext::new("/api/test".to_string(), "GET".to_string());
         assert!(!ctx.request_id.is_empty());
         assert!(ctx.user_id.is_none());
-        
+
         let user_id = Uuid::new_v4();
         let ctx_with_user = ctx.with_user(user_id);
         assert_eq!(ctx_with_user.user_id, Some(user_id));

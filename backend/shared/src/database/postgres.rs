@@ -1,5 +1,5 @@
 /// PostgreSQL-specific utilities and helpers
-use sqlx::postgres::{PgPool, PgQueryResult};
+use sqlx::postgres::PgPool;
 use sqlx::Row;
 
 use super::{DatabaseError, DatabaseResult};
@@ -31,14 +31,13 @@ pub async fn get_database_version(pool: &PgPool) -> DatabaseResult<Option<i64>> 
         return Ok(None);
     }
 
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT MAX(version) FROM _sqlx_migrations WHERE success = true"
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(DatabaseError::Connection)?;
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT MAX(version) FROM _sqlx_migrations WHERE success = true")
+            .fetch_optional(pool)
+            .await
+            .map_err(DatabaseError::Connection)?;
 
-    Ok(row.and_then(|r| Some(r.0)))
+    Ok(row.map(|r| r.0))
 }
 
 /// Get database statistics

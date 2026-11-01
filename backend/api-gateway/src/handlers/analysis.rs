@@ -158,19 +158,19 @@ pub async fn get_analysis_stats(
     .await
     .unwrap_or(0);
 
-    let pending_analyses: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM analyses WHERE status = 'pending'")
-        .fetch_one(state.db.pool())
-        .await
-        .unwrap_or(0);
+    let pending_analyses: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM analyses WHERE status = 'pending'")
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap_or(0);
 
     let pending = pending_subs + pending_analyses;
 
-    let completed_subs: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed'",
-    )
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
+    let completed_subs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed'")
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap_or(0);
 
     let completed_analyses: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM analyses WHERE status = 'completed'")
@@ -201,10 +201,11 @@ pub async fn get_analysis_stats(
     .await
     .unwrap_or(0);
 
-    let bounty_submissions_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM bounty_submissions")
-        .fetch_one(state.db.pool())
-        .await
-        .unwrap_or(0);
+    let bounty_submissions_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM bounty_submissions")
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap_or(0);
 
     let total_submissions = submissions_count + bounty_submissions_count;
 
@@ -222,12 +223,11 @@ pub async fn get_analysis_stats(
             .unwrap_or(0)
             .max(3); // Built-in ClamAV, YARA, and Heuristic engines are always active
 
-    let total_active_bounties: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM bounties WHERE bounty_status = 'active'",
-    )
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
+    let total_active_bounties: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM bounties WHERE bounty_status = 'active'")
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap_or(0);
 
     let avg_ms: Option<f64> = sqlx::query_scalar(
         "SELECT AVG(processing_time_ms)::float8 FROM analysis_results WHERE processing_time_ms IS NOT NULL AND processing_time_ms > 0",

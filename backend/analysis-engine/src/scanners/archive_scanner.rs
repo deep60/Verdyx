@@ -471,7 +471,10 @@ impl ArchiveScanner {
                 .by_index(i)
                 .map_err(|e| anyhow!("Failed to read file {i}: {e}"))?;
 
-            let filename = file.name().to_string();
+            let filename = file
+                .name()
+                .map_err(|e| anyhow!("Failed to read name of file {i}: {e}"))?
+                .to_string();
             let compressed_size = file.compressed_size();
             let uncompressed_size = file.size();
             let is_file_encrypted = false; // zip 0.6 doesn't expose encrypted() publicly
@@ -648,7 +651,7 @@ mod tests {
             let cursor = Cursor::new(&mut zip_data);
             let mut zip = zip::ZipWriter::new(cursor);
 
-            let options = zip::write::FileOptions::default()
+            let options = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Stored);
 
             zip.start_file("test.txt", options).unwrap();

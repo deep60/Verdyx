@@ -67,7 +67,7 @@ async-trait = "0.1"
 base64 = "0.22"
 
 # HTML sanitization
-ammonia = "3.3"
+ammonia = "4"
 
 # Rate limiting
 governor = "0.6"

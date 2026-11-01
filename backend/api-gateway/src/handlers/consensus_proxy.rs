@@ -18,8 +18,7 @@ use uuid::Uuid;
 use crate::middleware::auth::Claims;
 
 fn consensus_base_url() -> String {
-    std::env::var("CONSENSUS_SERVICE_URL")
-        .unwrap_or_else(|_| "http://localhost:8085".to_string())
+    std::env::var("CONSENSUS_SERVICE_URL").unwrap_or_else(|_| "http://localhost:8085".to_string())
 }
 
 async fn forward(
@@ -54,8 +53,8 @@ async fn forward(
 
     match req.send().await {
         Ok(resp) => {
-            let status = StatusCode::from_u16(resp.status().as_u16())
-                .unwrap_or(StatusCode::BAD_GATEWAY);
+            let status =
+                StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let bytes = resp.bytes().await.unwrap_or_default();
             Response::builder()
                 .status(status)
@@ -80,6 +79,7 @@ async fn forward(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn require_self(claims: &Claims, body: &Value) -> Result<(), Response<Body>> {
     let engine_id = body.get("engine_id").and_then(|v| v.as_str()).unwrap_or("");
     if engine_id != claims.sub.to_string() {

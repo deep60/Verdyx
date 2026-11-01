@@ -132,18 +132,30 @@ jobs:
             fi
           done
 
-  slsa-provenance:
-    name: Generate SLSA Provenance
+  slsa-subject:
+    name: Hash Source for SLSA Provenance
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      id-token: write
-      attestations: write
-      contents: read
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Generate SLSA Provenance
-        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v1.9.0
-        with:
-          provenance-name: verdyx-provenance
+      - name: Hash source archive
+        id: hash
+        run: |
+          git archive --format=tar.gz -o verdyx-source.tar.gz HEAD
+          echo "hashes=$(sha256sum verdyx-source.tar.gz | base64 -w0)" >> "$GITHUB_OUTPUT"
+
+  slsa-provenance:
+    name: Generate SLSA Provenance
+    needs: slsa-subject
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.slsa-subject.outputs.hashes }}
+      provenance-name: verdyx-provenance.intoto.jsonl

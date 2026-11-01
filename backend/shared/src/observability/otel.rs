@@ -7,13 +7,13 @@ use opentelemetry::{global, trace::TracerProvider as _, KeyValue};
 #[cfg(feature = "otel")]
 use opentelemetry_otlp::WithExportConfig;
 #[cfg(feature = "otel")]
-use opentelemetry_sdk::trace::{self, RandomIdGenerator, Sampler, Runtime};
+use opentelemetry_sdk::trace::{self, RandomIdGenerator, Runtime, Sampler};
 #[cfg(feature = "otel")]
 use opentelemetry_sdk::Resource;
 #[cfg(feature = "otel")]
 use tracing_opentelemetry::OpenTelemetryLayer;
 #[cfg(feature = "otel")]
-use tracing_subscriber::{layer::SubscriberExt, Registry, Layer, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer, Registry};
 
 use super::{ObservabilityError, ObservabilityResult};
 
@@ -40,8 +40,14 @@ impl Default for OtelConfig {
             sample_rate: 1.0,
             tls: false,
             attributes: vec![
-                ("deployment.environment".to_string(), std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string())),
-                ("service.version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+                (
+                    "deployment.environment".to_string(),
+                    std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()),
+                ),
+                (
+                    "service.version".to_string(),
+                    env!("CARGO_PKG_VERSION").to_string(),
+                ),
             ],
         }
     }
@@ -49,7 +55,8 @@ impl Default for OtelConfig {
 
 /// Global tracer provider storage
 #[cfg(feature = "otel")]
-static GLOBAL_TRACER_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::trace::TracerProvider> = std::sync::OnceLock::new();
+static GLOBAL_TRACER_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::trace::TracerProvider> =
+    std::sync::OnceLock::new();
 
 /// Initialize OpenTelemetry tracing
 #[cfg(feature = "otel")]
@@ -59,18 +66,18 @@ pub fn init_otel_tracing(config: OtelConfig) -> ObservabilityResult<()> {
         KeyValue::new("service.name", config.service_name.clone()),
         KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
     ];
-    
+
     for (k, v) in config.attributes {
         resource_attrs.push(KeyValue::new(k, v));
     }
-    
+
     let resource = Resource::new(resource_attrs);
 
     // Configure OTLP exporter
     let mut exporter_builder = opentelemetry_otlp::new_exporter()
         .tonic()
         .with_endpoint(config.otlp_endpoint);
-    
+
     if config.tls {
         // For TLS, you'd configure the tonic transport with TLS config
         // This is a simplified version - in production you'd load certs
@@ -82,14 +89,19 @@ pub fn init_otel_tracing(config: OtelConfig) -> ObservabilityResult<()> {
         .with_sampler(Sampler::TraceIdRatioBased(config.sample_rate))
         .with_id_generator(RandomIdGenerator::default())
         .with_batch_exporter(
-            exporter_builder.build().map_err(|e| ObservabilityError::Tracing(e.to_string()))?,
-            Runtime::TokioCurrentThread
+            exporter_builder
+                .build()
+                .map_err(|e| ObservabilityError::Tracing(e.to_string()))?,
+            Runtime::TokioCurrentThread,
         )
         .build();
 
     // Store the tracer provider globally for later use
-    GLOBAL_TRACER_PROVIDER.set(tracer_provider.clone())
-        .map_err(|_| ObservabilityError::Tracing("Tracer provider already initialized".to_string()))?;
+    GLOBAL_TRACER_PROVIDER
+        .set(tracer_provider.clone())
+        .map_err(|_| {
+            ObservabilityError::Tracing("Tracer provider already initialized".to_string())
+        })?;
 
     // Create the OpenTelemetry layer for tracing-subscriber
     let tracer = tracer_provider.tracer(config.service_name.clone());
@@ -101,7 +113,7 @@ pub fn init_otel_tracing(config: OtelConfig) -> ObservabilityResult<()> {
     // Install the layer - note: this requires the caller to add it to their subscriber
     // We return the layer so the caller can compose it with their logging layer
     // For now, we'll just initialize the global provider
-    
+
     tracing::info!(
         service = %config.service_name,
         endpoint = %config.otlp_endpoint,
@@ -122,9 +134,10 @@ pub fn init_combined_subscriber(
     init_otel_tracing(otel_config.clone())?;
 
     // Get the SDK tracer provider from the global storage
-    let sdk_provider = GLOBAL_TRACER_PROVIDER.get()
-        .ok_or_else(|| ObservabilityError::Tracing("Tracer provider not initialized".to_string()))?;
-    
+    let sdk_provider = GLOBAL_TRACER_PROVIDER.get().ok_or_else(|| {
+        ObservabilityError::Tracing("Tracer provider not initialized".to_string())
+    })?;
+
     let tracer = sdk_provider.tracer(otel_config.service_name.clone());
     let otel_layer = OpenTelemetryLayer::new(tracer);
 
@@ -133,30 +146,24 @@ pub fn init_combined_subscriber(
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_config.level.as_str()));
 
     let fmt_layer = match log_config.format {
-        super::logging::LogFormat::Pretty => {
-            tracing_subscriber::fmt::layer()
-                .with_target(true)
-                .with_thread_ids(log_config.include_thread_ids)
-                .with_line_number(log_config.include_line_numbers)
-                .pretty()
-                .boxed()
-        }
-        super::logging::LogFormat::Json => {
-            tracing_subscriber::fmt::layer()
-                .json()
-                .with_target(true)
-                .with_current_span(true)
-                .with_thread_ids(log_config.include_thread_ids)
-                .with_line_number(log_config.include_line_numbers)
-                .boxed()
-        }
-        super::logging::LogFormat::Compact => {
-            tracing_subscriber::fmt::layer()
-                .compact()
-                .with_target(true)
-                .with_thread_ids(log_config.include_thread_ids)
-                .boxed()
-        }
+        super::logging::LogFormat::Pretty => tracing_subscriber::fmt::layer()
+            .with_target(true)
+            .with_thread_ids(log_config.include_thread_ids)
+            .with_line_number(log_config.include_line_numbers)
+            .pretty()
+            .boxed(),
+        super::logging::LogFormat::Json => tracing_subscriber::fmt::layer()
+            .json()
+            .with_target(true)
+            .with_current_span(true)
+            .with_thread_ids(log_config.include_thread_ids)
+            .with_line_number(log_config.include_line_numbers)
+            .boxed(),
+        super::logging::LogFormat::Compact => tracing_subscriber::fmt::layer()
+            .compact()
+            .with_target(true)
+            .with_thread_ids(log_config.include_thread_ids)
+            .boxed(),
     };
 
     // Combine all layers
@@ -191,37 +198,40 @@ pub fn shutdown_otel() {
 pub fn current_trace_context() -> Vec<(String, String)> {
     use opentelemetry::trace::TraceContextExt;
     use tracing_opentelemetry::OpenTelemetrySpanExt;
-    
+
     let span = tracing::Span::current();
     let otel_ctx = span.context();
     let span_ref = otel_ctx.span();
     let span_ctx = span_ref.span_context();
     let trace_id = span_ctx.trace_id();
     let span_id = span_ctx.span_id();
-    
-    vec![
-        ("traceparent".to_string(), format!("00-{:032x}-{:016x}-01", trace_id, span_id)),
-    ]
+
+    vec![(
+        "traceparent".to_string(),
+        format!("00-{:032x}-{:016x}-01", trace_id, span_id),
+    )]
 }
 
 /// Extract trace context from headers (for incoming requests)
 #[cfg(feature = "otel")]
-pub fn extract_trace_context(headers: &std::collections::HashMap<String, String>) -> Option<opentelemetry::Context> {
-    use opentelemetry::trace::TraceContextExt;
+pub fn extract_trace_context(
+    headers: &std::collections::HashMap<String, String>,
+) -> Option<opentelemetry::Context> {
     use opentelemetry::propagation::Extractor;
-    
+    use opentelemetry::trace::TraceContextExt;
+
     struct HeaderExtractor<'a>(&'a std::collections::HashMap<String, String>);
-    
+
     impl Extractor for HeaderExtractor<'_> {
         fn get(&self, key: &str) -> Option<&str> {
             self.0.get(key).map(|s| s.as_str())
         }
-        
+
         fn keys(&self) -> Vec<&str> {
             self.0.keys().map(|s| s.as_str()).collect()
         }
     }
-    
+
     let extractor = HeaderExtractor(headers);
     let propagator = opentelemetry::global::text_map_propagator();
     Some(propagator.extract(&extractor))

@@ -1,5 +1,4 @@
 import { useLocation } from "wouter";
-import { createAutonomousLocalSubmission } from "@/lib/local-analysis-engine";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,42 +26,32 @@ export function FileSubmissionForm() {
 
   const submitMutation = useMutation({
     mutationFn: async (body: FormData) => {
+      const headers: Record<string, string> = {};
+      const token = localStorage.getItem("token");
+      if (token) headers.Authorization = `Bearer ${token}`;
+      let response: Response;
       try {
-        const headers: Record<string, string> = {};
-        const token = localStorage.getItem("token");
-        if (token) headers.Authorization = `Bearer ${token}`;
-        const response = await fetch("/api/submissions/file", {
+        response = await fetch("/api/submissions/file", {
           method: "POST",
           headers,
           body,
           credentials: "include",
         });
-        if (response.ok) {
-          return await response.json();
-        }
       } catch {
-        // Fall back to autonomous local 8-engine execution below
+        throw new Error("Verdyx is temporarily unavailable, so this was not analyzed. Please try again.");
       }
-      const bundle = await createAutonomousLocalSubmission({
-        submissionMode,
-        file,
-        targetUrl,
-        emailSource,
-        analysisType,
-        bountyAmount,
-        priority,
-        description,
-      });
-      return bundle.submission;
+      if (!response.ok) {
+        throw new Error(
+          response.status >= 500
+            ? "Verdyx is temporarily unavailable, so this was not analyzed. Please try again."
+            : `Submission rejected (${response.status}). Please check it and try again.`
+        );
+      }
+      return await response.json();
     },
     onSuccess: (data) => {
       toast({
-        title:
-          submissionMode === "url"
-            ? "URL analyzed across 8 engines & 36+ OSINT modules"
-            : submissionMode === "email"
-              ? "Email analyzed for SPF/DKIM/DMARC & phishing"
-              : "File analyzed across 8 security engines",
+        title: "Submitted for analysis",
         description: `Opening report: ${data.id}`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/submissions"] });

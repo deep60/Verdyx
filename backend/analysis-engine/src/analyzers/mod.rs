@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 
 /// Detailed status item for an individual analyzer engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,7 +227,11 @@ pub mod ml_stub {
                     let p = count as f64 / len;
                     entropy -= p * p.log2();
                 }
-                if (0x20..=0x7E).contains(&byte_val) || byte_val == 0x0A || byte_val == 0x0D || byte_val == 0x09 {
+                if (0x20..=0x7E).contains(&byte_val)
+                    || byte_val == 0x0A
+                    || byte_val == 0x0D
+                    || byte_val == 0x09
+                {
                     printable_count += count;
                 }
                 if byte_val == 0 {
@@ -242,7 +246,8 @@ pub mod ml_stub {
             let null_ratio = null_count as f64 / len;
             let high_byte_ratio = high_byte_count as f64 / len;
 
-            let sample_text = String::from_utf8_lossy(&data[..data.len().min(65536)]).to_lowercase();
+            let sample_text =
+                String::from_utf8_lossy(&data[..data.len().min(65536)]).to_lowercase();
             let mut suspicious_indicators = Vec::new();
             let mut risk_score = 0.0_f64;
 
@@ -251,9 +256,18 @@ pub mod ml_stub {
                 suspicious_indicators.push("high_shannon_entropy_packed");
             }
             for kw in [
-                "eval(", "fromcharcode", "powershell", "-enc", "cmd.exe",
-                "virtualallocex", "createremotethread", "mimikatz", "shellcode",
-                "xmrig", "stratum+tcp", "eicar-standard-antivirus-test-file",
+                "eval(",
+                "fromcharcode",
+                "powershell",
+                "-enc",
+                "cmd.exe",
+                "virtualallocex",
+                "createremotethread",
+                "mimikatz",
+                "shellcode",
+                "xmrig",
+                "stratum+tcp",
+                "eicar-standard-antivirus-test-file",
             ] {
                 if sample_text.contains(kw) {
                     risk_score += 0.30;
@@ -282,14 +296,35 @@ pub mod ml_stub {
             };
 
             let mut metadata = HashMap::new();
-            metadata.insert("model".to_string(), serde_json::json!("verdyx-byte-ngram-gbdt-v2.1"));
-            metadata.insert("shannon_entropy".to_string(), serde_json::json!(format!("{:.3}", entropy)));
-            metadata.insert("printable_ascii_ratio".to_string(), serde_json::json!(format!("{:.3}", printable_ratio)));
-            metadata.insert("null_byte_ratio".to_string(), serde_json::json!(format!("{:.3}", null_ratio)));
-            metadata.insert("high_byte_ratio".to_string(), serde_json::json!(format!("{:.3}", high_byte_ratio)));
-            metadata.insert("anomaly_score".to_string(), serde_json::json!(format!("{:.3}", risk_score)));
+            metadata.insert(
+                "model".to_string(),
+                serde_json::json!("verdyx-byte-ngram-gbdt-v2.1"),
+            );
+            metadata.insert(
+                "shannon_entropy".to_string(),
+                serde_json::json!(format!("{:.3}", entropy)),
+            );
+            metadata.insert(
+                "printable_ascii_ratio".to_string(),
+                serde_json::json!(format!("{:.3}", printable_ratio)),
+            );
+            metadata.insert(
+                "null_byte_ratio".to_string(),
+                serde_json::json!(format!("{:.3}", null_ratio)),
+            );
+            metadata.insert(
+                "high_byte_ratio".to_string(),
+                serde_json::json!(format!("{:.3}", high_byte_ratio)),
+            );
+            metadata.insert(
+                "anomaly_score".to_string(),
+                serde_json::json!(format!("{:.3}", risk_score)),
+            );
             metadata.insert("artifact".to_string(), serde_json::json!(filename));
-            metadata.insert("indicators".to_string(), serde_json::json!(suspicious_indicators));
+            metadata.insert(
+                "indicators".to_string(),
+                serde_json::json!(suspicious_indicators),
+            );
 
             Ok(DetectionResult {
                 detection_id: Uuid::new_v4(),
@@ -525,7 +560,11 @@ impl AnalysisEngine {
                     warn!("Yara analysis unavailable: {}", e);
                     detections.push(Self::create_unavailable_detection(
                         "YARA",
-                        if cfg!(feature = "yara-engine") { "libyara" } else { "not compiled" },
+                        if cfg!(feature = "yara-engine") {
+                            "libyara"
+                        } else {
+                            "not compiled"
+                        },
                         EngineType::Yara,
                         e.to_string(),
                     ));
@@ -538,7 +577,11 @@ impl AnalysisEngine {
                     warn!("ClamAV analysis unavailable: {}", e);
                     detections.push(Self::create_unavailable_detection(
                         "ClamAV",
-                        if cfg!(feature = "clamav") { "clamd" } else { "not compiled" },
+                        if cfg!(feature = "clamav") {
+                            "clamd"
+                        } else {
+                            "not compiled"
+                        },
                         EngineType::Yara,
                         e.to_string(),
                     ));
@@ -551,7 +594,11 @@ impl AnalysisEngine {
                     warn!("ML analysis unavailable: {}", e);
                     detections.push(Self::create_unavailable_detection(
                         "ML Engine",
-                        if cfg!(feature = "ml-engine") { "ort" } else { "not compiled" },
+                        if cfg!(feature = "ml-engine") {
+                            "ort"
+                        } else {
+                            "not compiled"
+                        },
                         EngineType::Ml,
                         e.to_string(),
                     ));
@@ -585,7 +632,11 @@ impl AnalysisEngine {
                 Err(e) => {
                     detections.push(Self::create_unavailable_detection(
                         "YARA",
-                        if cfg!(feature = "yara-engine") { "libyara" } else { "not compiled" },
+                        if cfg!(feature = "yara-engine") {
+                            "libyara"
+                        } else {
+                            "not compiled"
+                        },
                         EngineType::Yara,
                         e.to_string(),
                     ));
@@ -596,7 +647,11 @@ impl AnalysisEngine {
                 Err(e) => {
                     detections.push(Self::create_unavailable_detection(
                         "ClamAV",
-                        if cfg!(feature = "clamav") { "clamd" } else { "not compiled" },
+                        if cfg!(feature = "clamav") {
+                            "clamd"
+                        } else {
+                            "not compiled"
+                        },
                         EngineType::Yara,
                         e.to_string(),
                     ));
@@ -607,7 +662,11 @@ impl AnalysisEngine {
                 Err(e) => {
                     detections.push(Self::create_unavailable_detection(
                         "ML Engine",
-                        if cfg!(feature = "ml-engine") { "ort" } else { "not compiled" },
+                        if cfg!(feature = "ml-engine") {
+                            "ort"
+                        } else {
+                            "not compiled"
+                        },
                         EngineType::Ml,
                         e.to_string(),
                     ));
@@ -796,8 +855,14 @@ impl AnalysisEngine {
             categories: vec![ThreatCategory::Malware],
             metadata: HashMap::from([
                 ("match_count".to_string(), serde_json::json!(matches.len())),
-                ("signatures_checked".to_string(), serde_json::json!(sig_count)),
-                ("bytes_scanned".to_string(), serde_json::json!(request.file_data.len())),
+                (
+                    "signatures_checked".to_string(),
+                    serde_json::json!(sig_count),
+                ),
+                (
+                    "bytes_scanned".to_string(),
+                    serde_json::json!(request.file_data.len()),
+                ),
                 ("matches".to_string(), serde_json::to_value(&matches)?),
             ]),
             detected_at: Utc::now(),
@@ -920,7 +985,9 @@ impl AnalysisEngine {
                     crate::scanners::ScanVerdict::Suspicious => {
                         (ThreatVerdict::Suspicious, SeverityLevel::Medium)
                     }
-                    crate::scanners::ScanVerdict::Clean => (ThreatVerdict::Benign, SeverityLevel::Info),
+                    crate::scanners::ScanVerdict::Clean => {
+                        (ThreatVerdict::Benign, SeverityLevel::Info)
+                    }
                     _ => (ThreatVerdict::Unknown, SeverityLevel::Low),
                 };
                 let mut metadata = HashMap::new();
@@ -950,19 +1017,14 @@ impl AnalysisEngine {
                 );
                 metadata.insert(
                     "suspiciousAttachments".to_string(),
-                    serde_json::json!(
-                        scanned
-                            .attachments
-                            .iter()
-                            .filter(|a| a.is_suspicious)
-                            .map(|a| a.filename.clone())
-                            .collect::<Vec<_>>()
-                    ),
+                    serde_json::json!(scanned
+                        .attachments
+                        .iter()
+                        .filter(|a| a.is_suspicious)
+                        .map(|a| a.filename.clone())
+                        .collect::<Vec<_>>()),
                 );
-                metadata.insert(
-                    "to".to_string(),
-                    serde_json::json!(scanned.email_info.to),
-                );
+                metadata.insert("to".to_string(), serde_json::json!(scanned.email_info.to));
                 metadata.insert(
                     "date".to_string(),
                     serde_json::json!(scanned.email_info.date),
@@ -1086,7 +1148,8 @@ impl AnalysisEngine {
             is_optional: false,
             status: "online".to_string(),
             version: "1.0.0".to_string(),
-            details: "Cryptographic hash generation (SHA-256, MD5, SHA-1) with known-threat cache".to_string(),
+            details: "Cryptographic hash generation (SHA-256, MD5, SHA-1) with known-threat cache"
+                .to_string(),
             error: None,
         });
 
@@ -1098,7 +1161,8 @@ impl AnalysisEngine {
             is_optional: false,
             status: "online".to_string(),
             version: self.heuristic_engine.version().to_string(),
-            details: "Behavioral heuristics pattern matcher with multi-category threat scoring".to_string(),
+            details: "Behavioral heuristics pattern matcher with multi-category threat scoring"
+                .to_string(),
             error: None,
         });
 
@@ -1111,7 +1175,10 @@ impl AnalysisEngine {
             is_optional: false,
             status: "online".to_string(),
             version: "1.0.0".to_string(),
-            details: format!("Pattern matching across {} active signature definitions", sig_count),
+            details: format!(
+                "Pattern matching across {} active signature definitions",
+                sig_count
+            ),
             error: None,
         });
 
@@ -1120,9 +1187,19 @@ impl AnalysisEngine {
         let (yara_status, yara_version, yara_details, yara_error) = if yara_compiled {
             let rule_count = self.yara_engine.rule_count();
             if rule_count > 0 {
-                ("online", "libyara", format!("Operational with {} compiled rule set(s)", rule_count), None)
+                (
+                    "online",
+                    "libyara",
+                    format!("Operational with {} compiled rule set(s)", rule_count),
+                    None,
+                )
             } else {
-                ("unavailable", "libyara", "No rule files loaded".to_string(), Some("No YARA rule files found in rules directory".to_string()))
+                (
+                    "unavailable",
+                    "libyara",
+                    "No rule files loaded".to_string(),
+                    Some("No YARA rule files found in rules directory".to_string()),
+                )
             }
         } else {
             ("unavailable", "not compiled", "Native YARA feature disabled".to_string(), Some("YARA engine not compiled (enable cargo feature 'yara-engine', requires libyara)".to_string()))
@@ -1142,11 +1219,32 @@ impl AnalysisEngine {
         let clamav_compiled = cfg!(feature = "clamav");
         let (clam_status, clam_version, clam_details, clam_error) = if clamav_compiled {
             if !self.config.clamav_analyzer.enabled {
-                ("disabled", "clamd", "ClamAV analyzer disabled via configuration".to_string(), None)
+                (
+                    "disabled",
+                    "clamd",
+                    "ClamAV analyzer disabled via configuration".to_string(),
+                    None,
+                )
             } else {
                 match self.clamav_analyzer.ping().await {
-                    Ok(_) => ("online", "clamd", format!("ClamAV daemon reachable at {}", self.config.clamav_analyzer.address), None),
-                    Err(e) => ("unavailable", "clamd", format!("Cannot connect to ClamAV daemon at {}", self.config.clamav_analyzer.address), Some(e.to_string())),
+                    Ok(_) => (
+                        "online",
+                        "clamd",
+                        format!(
+                            "ClamAV daemon reachable at {}",
+                            self.config.clamav_analyzer.address
+                        ),
+                        None,
+                    ),
+                    Err(e) => (
+                        "unavailable",
+                        "clamd",
+                        format!(
+                            "Cannot connect to ClamAV daemon at {}",
+                            self.config.clamav_analyzer.address
+                        ),
+                        Some(e.to_string()),
+                    ),
                 }
             }
         } else {
@@ -1167,9 +1265,19 @@ impl AnalysisEngine {
         let ml_compiled = cfg!(feature = "ml-engine");
         let (ml_status, ml_version, ml_details, ml_error) = if ml_compiled {
             if !self.config.ml_analyzer.enabled {
-                ("disabled", "ort", "ML analyzer disabled via configuration".to_string(), None)
+                (
+                    "disabled",
+                    "ort",
+                    "ML analyzer disabled via configuration".to_string(),
+                    None,
+                )
             } else if self.ml_analyzer.is_available() {
-                ("online", "ort 2.0.0-rc.13", "ONNX threat classifier and anomaly detector models loaded".to_string(), None)
+                (
+                    "online",
+                    "ort 2.0.0-rc.13",
+                    "ONNX threat classifier and anomaly detector models loaded".to_string(),
+                    None,
+                )
             } else {
                 ("unavailable", "ort 2.0.0-rc.13", "ONNX model artifacts missing or empty".to_string(), Some("ONNX model files (threat_classifier.onnx, anomaly_detector.onnx) are empty or not found in ml_models/".to_string()))
             }
@@ -1244,7 +1352,6 @@ fn auth_label(result: &AuthResult) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_analysis_options() {

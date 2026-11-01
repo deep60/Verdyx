@@ -1101,7 +1101,10 @@ impl HashAnalyzer {
 
         let mut metadata = HashMap::new();
         metadata.insert("checked_hash".to_string(), serde_json::json!(lower_hash));
-        metadata.insert("feed".to_string(), serde_json::json!("verdyx-local-threat-intel-v2"));
+        metadata.insert(
+            "feed".to_string(),
+            serde_json::json!("verdyx-local-threat-intel-v2"),
+        );
 
         if is_known_bad {
             Ok(HashReputation {
@@ -1580,7 +1583,6 @@ impl HashAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_test;
 
     #[tokio::test]
     async fn test_enhanced_hash_validation() {

@@ -87,7 +87,7 @@ automatically.
 
 - **Deploying by hand**, without Git:
   ```sh
-  cd frontend && npm run build
+  cd frontend && npm run build:pages
   npx wrangler pages deploy dist/public --project-name=verdyx
   ```
   Note this uploads static assets only — `functions/` is included only when

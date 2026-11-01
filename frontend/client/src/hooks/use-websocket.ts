@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { webSocketUrl } from "@/lib/api-origin";
 
 interface WebSocketMessage {
   type: string;
@@ -30,9 +31,7 @@ export function useWebSocket(onMessage?: (message: WebSocketMessage) => void) {
     shouldReconnect.current = true;
 
     const connect = () => {
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
-      const socket = new WebSocket(wsUrl);
+      const socket = new WebSocket(webSocketUrl());
       ws.current = socket;
 
       socket.onopen = () => {

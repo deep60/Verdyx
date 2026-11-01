@@ -88,8 +88,7 @@ impl ConsensusService {
         // the system still reported itself as using commit-reveal.
         if self.config.commit_reveal.enabled {
             return Err(ConsensusError::ValidationError(
-                "commit-reveal voting is enabled; use the commit and reveal endpoints"
-                    .to_string(),
+                "commit-reveal voting is enabled; use the commit and reveal endpoints".to_string(),
             ));
         }
 

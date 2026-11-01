@@ -7,13 +7,12 @@ pragma solidity ^0.8.19;
  * @notice Provides pure functions for reputation-related computations
  */
 library ReputationLib {
-
     // ============ CONSTANTS ============
 
-    uint256 constant PERCENTAGE_BASE = 100;
-    uint256 constant BASIS_POINTS_BASE = 10000;
-    uint256 constant MAX_REPUTATION = 1000;
-    uint256 constant MIN_REPUTATION = 0;
+    uint256 internal constant PERCENTAGE_BASE = 100;
+    uint256 internal constant BASIS_POINTS_BASE = 10000;
+    uint256 internal constant MAX_REPUTATION = 1000;
+    uint256 internal constant MIN_REPUTATION = 0;
 
     // ============ STRUCTS ============
 
@@ -30,9 +29,9 @@ library ReputationLib {
      * @dev Reputation calculation parameters
      */
     struct ReputationParams {
-        uint256 accuracyWeight;      // Percentage (0-100)
+        uint256 accuracyWeight; // Percentage (0-100)
         uint256 participationWeight; // Percentage (0-100)
-        uint256 consistencyWeight;   // Percentage (0-100)
+        uint256 consistencyWeight; // Percentage (0-100)
     }
 
     // ============ REPUTATION CALCULATION ============
@@ -48,14 +47,17 @@ library ReputationLib {
         ReputationParams memory params
     ) internal pure returns (uint256) {
         require(
-            params.accuracyWeight + params.participationWeight + params.consistencyWeight == 100,
+            params.accuracyWeight +
+                params.participationWeight +
+                params.consistencyWeight ==
+                100,
             "Weights must sum to 100"
         );
 
-        uint256 weightedScore =
-            (components.accuracy * params.accuracyWeight +
-             components.participation * params.participationWeight +
-             components.consistency * params.consistencyWeight) / PERCENTAGE_BASE;
+        uint256 weightedScore = (components.accuracy * params.accuracyWeight +
+            components.participation * params.participationWeight +
+            components.consistency * params.consistencyWeight) /
+            PERCENTAGE_BASE;
 
         return capReputation(weightedScore);
     }
@@ -185,7 +187,9 @@ library ReputationLib {
      * @param reputation Current reputation score
      * @return tier Tier level (0-4)
      */
-    function getReputationTier(uint256 reputation) internal pure returns (uint256 tier) {
+    function getReputationTier(
+        uint256 reputation
+    ) internal pure returns (uint256 tier) {
         if (reputation >= 800) return 4; // Expert
         if (reputation >= 600) return 3; // Advanced
         if (reputation >= 400) return 2; // Intermediate
@@ -198,7 +202,9 @@ library ReputationLib {
      * @param tier Reputation tier (0-4)
      * @return multiplier Multiplier in basis points
      */
-    function getTierMultiplier(uint256 tier) internal pure returns (uint256 multiplier) {
+    function getTierMultiplier(
+        uint256 tier
+    ) internal pure returns (uint256 multiplier) {
         if (tier == 4) return 15000; // 150% for Expert
         if (tier == 3) return 12500; // 125% for Advanced
         if (tier == 2) return 11000; // 110% for Intermediate
@@ -220,8 +226,8 @@ library ReputationLib {
         if (tier == 4) return (baseStake * 70) / 100; // 30% reduction
         if (tier == 3) return (baseStake * 80) / 100; // 20% reduction
         if (tier == 2) return (baseStake * 90) / 100; // 10% reduction
-        if (tier == 1) return baseStake;               // No reduction
-        return (baseStake * 110) / 100;                // 10% increase for novice
+        if (tier == 1) return baseStake; // No reduction
+        return (baseStake * 110) / 100; // 10% increase for novice
     }
 
     // ============ ANALYTICS ============
@@ -268,8 +274,10 @@ library ReputationLib {
     ) internal pure returns (uint256) {
         if (truePositives == 0) return 0;
 
-        uint256 precision = (truePositives * BASIS_POINTS_BASE) / (truePositives + falsePositives);
-        uint256 recall = (truePositives * BASIS_POINTS_BASE) / (truePositives + falseNegatives);
+        uint256 precision = (truePositives * BASIS_POINTS_BASE) /
+            (truePositives + falsePositives);
+        uint256 recall = (truePositives * BASIS_POINTS_BASE) /
+            (truePositives + falseNegatives);
 
         if (precision + recall == 0) return 0;
 
@@ -282,11 +290,13 @@ library ReputationLib {
      * @param consecutiveCorrect Number of consecutive correct predictions
      * @return Bonus multiplier in basis points
      */
-    function calculateStreakBonus(uint256 consecutiveCorrect) internal pure returns (uint256) {
+    function calculateStreakBonus(
+        uint256 consecutiveCorrect
+    ) internal pure returns (uint256) {
         if (consecutiveCorrect >= 20) return 12000; // 120%
         if (consecutiveCorrect >= 15) return 11500; // 115%
         if (consecutiveCorrect >= 10) return 11000; // 110%
-        if (consecutiveCorrect >= 5) return 10500;  // 105%
+        if (consecutiveCorrect >= 5) return 10500; // 105%
         return 10000; // 100% (no bonus)
     }
 

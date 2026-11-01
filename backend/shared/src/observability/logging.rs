@@ -1,7 +1,7 @@
 //! Structured logging setup for all services
 
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use super::{ObservabilityError, ObservabilityResult};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// Log level configuration
 #[derive(Debug, Clone, Copy)]
@@ -60,8 +60,8 @@ impl Default for LogConfig {
 /// Initialize logging for the service
 pub fn init_logging(config: LogConfig) -> ObservabilityResult<()> {
     // Create filter from environment or config
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(config.level.as_str()));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(config.level.as_str()));
 
     match config.format {
         LogFormat::Pretty => {
@@ -72,7 +72,7 @@ pub fn init_logging(config: LogConfig) -> ObservabilityResult<()> {
                         .with_target(true)
                         .with_thread_ids(config.include_thread_ids)
                         .with_line_number(config.include_line_numbers)
-                        .pretty()
+                        .pretty(),
                 )
                 .try_init()
                 .map_err(|e| ObservabilityError::Logging(e.to_string()))?;
@@ -86,7 +86,7 @@ pub fn init_logging(config: LogConfig) -> ObservabilityResult<()> {
                         .with_target(true)
                         .with_current_span(true)
                         .with_thread_ids(config.include_thread_ids)
-                        .with_line_number(config.include_line_numbers)
+                        .with_line_number(config.include_line_numbers),
                 )
                 .try_init()
                 .map_err(|e| ObservabilityError::Logging(e.to_string()))?;
@@ -98,7 +98,7 @@ pub fn init_logging(config: LogConfig) -> ObservabilityResult<()> {
                     fmt::layer()
                         .compact()
                         .with_target(true)
-                        .with_thread_ids(config.include_thread_ids)
+                        .with_thread_ids(config.include_thread_ids),
                 )
                 .try_init()
                 .map_err(|e| ObservabilityError::Logging(e.to_string()))?;

@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let redis_url =
         std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
-    tracing::info!("Connecting to Redis at {}...", redis_url);
+    tracing::info!("Connecting to Redis...");
     let redis_client = match redis::Client::open(redis_url) {
         Ok(client) => client,
         Err(e) => {

@@ -13,11 +13,11 @@ use axum::{
     Json,
 };
 #[cfg(feature = "validation")]
-use validator::{Validate, ValidationErrors};
-#[cfg(feature = "validation")]
 use serde::de::DeserializeOwned;
 #[cfg(feature = "validation")]
 use std::marker::PhantomData;
+#[cfg(feature = "validation")]
+use validator::{Validate, ValidationErrors};
 
 use crate::{AppError, AppResult};
 
@@ -34,25 +34,26 @@ pub struct ValidationErrorDetail {
 #[cfg(feature = "validation")]
 pub fn format_validation_errors(errors: &ValidationErrors) -> Vec<ValidationErrorDetail> {
     let mut details = Vec::new();
-    
+
     for (field, errs) in errors.field_errors() {
         for err in errs {
             details.push(ValidationErrorDetail {
                 field: field.to_string(),
                 code: err.code.to_string(),
-                message: err.message
+                message: err
+                    .message
                     .as_ref()
                     .map(|m| m.to_string())
                     .unwrap_or_else(|| format!("Validation failed for field '{}'", field)),
             });
         }
     }
-    
+
     details
 }
 
 /// Extract validated JSON from request
-/// 
+///
 /// This middleware validates the request body against the type's Validate impl.
 /// If validation fails, returns 400 with structured error details.
 #[cfg(feature = "validation")]
@@ -69,11 +70,11 @@ where
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    
+
     if !content_type.starts_with("application/json") {
         return Ok(next.run(request).await);
     }
-    
+
     // Buffer the body so we can validate it
     let (parts, body) = request.into_parts();
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
@@ -83,7 +84,7 @@ where
             return Err(err.to_api_error(None).into_response());
         }
     };
-    
+
     // Parse and validate
     let validated: T = match serde_json::from_slice(&bytes) {
         Ok(v) => v,
@@ -92,21 +93,21 @@ where
             return Err(err.to_api_error(None).into_response());
         }
     };
-    
+
     if let Err(validation_errors) = validated.validate() {
         let details = format_validation_errors(&validation_errors);
         let err = AppError::ValidationErrors(details);
         return Err(err.to_api_error(None).into_response());
     }
-    
+
     // Reconstruct request with validated body
     let request = Request::from_parts(parts, Body::from(bytes));
-    
+
     // Store validated data in extensions for handlers to use
     // Note: In practice, you'd use a custom extractor instead
     let mut request = request;
     request.extensions_mut().insert(ValidatedPayload(validated));
-    
+
     Ok(next.run(request).await)
 }
 
@@ -122,7 +123,7 @@ where
     T: Send + Sync + 'static,
 {
     type Rejection = Response;
-    
+
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         _state: &(),
@@ -132,9 +133,11 @@ where
             .get::<ValidatedPayload<T>>()
             .cloned()
             .ok_or_else(|| {
-                AppError::Internal(anyhow::anyhow!("Validated payload not found in request extensions"))
-                    .to_api_error(None)
-                    .into_response()
+                AppError::Internal(anyhow::anyhow!(
+                    "Validated payload not found in request extensions"
+                ))
+                .to_api_error(None)
+                .into_response()
             })
     }
 }
@@ -157,13 +160,13 @@ where
             return Err(err.to_api_error(None).into_response());
         }
     };
-    
+
     if let Err(validation_errors) = parsed.validate() {
         let details = format_validation_errors(&validation_errors);
         let err = AppError::ValidationErrors(details);
         return Err(err.to_api_error(None).into_response());
     }
-    
+
     request.extensions_mut().insert(ValidatedQuery(parsed));
     Ok(next.run(request).await)
 }
@@ -180,7 +183,7 @@ where
     T: Send + Sync + 'static,
 {
     type Rejection = Response;
-    
+
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         _state: &(),
@@ -190,9 +193,11 @@ where
             .get::<ValidatedQuery<T>>()
             .cloned()
             .ok_or_else(|| {
-                AppError::Internal(anyhow::anyhow!("Validated query not found in request extensions"))
-                    .to_api_error(None)
-                    .into_response()
+                AppError::Internal(anyhow::anyhow!(
+                    "Validated query not found in request extensions"
+                ))
+                .to_api_error(None)
+                .into_response()
             })
     }
 }
@@ -218,17 +223,13 @@ where
 macro_rules! validated_route {
     ($method:ident, $path:expr, $handler:expr, $body_ty:ty) => {{
         use axum::routing::$method;
-        use $crate::validation::validation_middleware;
         use tower::ServiceBuilder;
-        
+        use $crate::validation::validation_middleware;
+
         axum::routing::$method(
             $path,
-            axum::middleware::from_fn_with_state(
-                (),
-                validation_middleware::<$body_ty>
-            ).layer(
-                axum::routing::post($handler)
-            )
+            axum::middleware::from_fn_with_state((), validation_middleware::<$body_ty>)
+                .layer(axum::routing::post($handler)),
         )
     }};
 }
@@ -237,21 +238,21 @@ macro_rules! validated_route {
 #[cfg(feature = "validation")]
 mod tests {
     use super::*;
-    use validator::Validate;
     use serde::{Deserialize, Serialize};
-    
+    use validator::Validate;
+
     #[derive(Debug, Validate, Deserialize, Serialize)]
     struct TestInput {
         #[validate(length(min = 3, max = 50))]
         name: String,
-        
+
         #[validate(email)]
         email: String,
-        
+
         #[validate(range(min = 18, max = 120))]
         age: u8,
     }
-    
+
     #[test]
     fn test_format_validation_errors() {
         let input = TestInput {
@@ -259,10 +260,10 @@ mod tests {
             email: "invalid".to_string(),
             age: 10,
         };
-        
+
         let errors = input.validate().unwrap_err();
         let formatted = format_validation_errors(&errors);
-        
+
         assert_eq!(formatted.len(), 3);
         assert!(formatted.iter().any(|e| e.field == "name"));
         assert!(formatted.iter().any(|e| e.field == "email"));

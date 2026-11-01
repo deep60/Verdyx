@@ -61,12 +61,15 @@ rand = "0.10"
 # Ethereum/Web3
 ethers = { version = "2.0", features = ["abigen"] }
 
+# Transactional email (password reset links)
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "hostname"] }
+
 # HTTP client
 reqwest = { version = "0.11", features = ["json"] }
 
 # Storage (S3/MinIO) for avatar uploads
-aws-sdk-s3 = "1.0"
-aws-config = "1.0"
+aws-sdk-s3 = { version = "1.0", default-features = false, features = ["default-https-client", "rt-tokio", "sigv4a"] }
+aws-config = { version = "1.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 
 # Async trait support
 async-trait = "0.1"

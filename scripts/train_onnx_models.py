@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Train and export Verdyx ONNX models (`threat_classifier.onnx` and `anomaly_detector.onnx`)
+Build and export Verdyx ONNX models from hand-set weights (no training data is used) (`threat_classifier.onnx` and `anomaly_detector.onnx`)
 matching the exact 259-float feature vector contract in
 `backend/analysis-engine/src/analyzers/ml_analyzer.rs`:
 

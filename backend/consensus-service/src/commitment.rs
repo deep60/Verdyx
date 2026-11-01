@@ -114,9 +114,17 @@ mod tests {
 
     #[test]
     fn commitment_is_lowercase_hex_sha256() {
-        let c = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), "a-long-enough-salt");
+        let c = commit(
+            bounty(),
+            "alice",
+            &Verdict::Malicious,
+            d("0.9"),
+            "a-long-enough-salt",
+        );
         assert_eq!(c.len(), 64);
-        assert!(c.chars().all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase()));
+        assert!(c
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase()));
         assert!(is_well_formed(&c));
     }
 
@@ -124,7 +132,14 @@ mod tests {
     fn a_correct_reveal_verifies() {
         let salt = "correct-horse-battery";
         let c = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), salt);
-        assert!(verify(&c, bounty(), "alice", &Verdict::Malicious, d("0.9"), salt));
+        assert!(verify(
+            &c,
+            bounty(),
+            "alice",
+            &Verdict::Malicious,
+            d("0.9"),
+            salt
+        ));
     }
 
     /// The whole point: changing your mind after committing must not verify.
@@ -132,20 +147,47 @@ mod tests {
     fn a_changed_verdict_does_not_verify() {
         let salt = "correct-horse-battery";
         let c = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), salt);
-        assert!(!verify(&c, bounty(), "alice", &Verdict::Benign, d("0.9"), salt));
+        assert!(!verify(
+            &c,
+            bounty(),
+            "alice",
+            &Verdict::Benign,
+            d("0.9"),
+            salt
+        ));
     }
 
     #[test]
     fn a_changed_confidence_does_not_verify() {
         let salt = "correct-horse-battery";
         let c = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), salt);
-        assert!(!verify(&c, bounty(), "alice", &Verdict::Malicious, d("0.5"), salt));
+        assert!(!verify(
+            &c,
+            bounty(),
+            "alice",
+            &Verdict::Malicious,
+            d("0.5"),
+            salt
+        ));
     }
 
     #[test]
     fn a_wrong_salt_does_not_verify() {
-        let c = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), "the-real-salt");
-        assert!(!verify(&c, bounty(), "alice", &Verdict::Malicious, d("0.9"), "a-guessed-salt"));
+        let c = commit(
+            bounty(),
+            "alice",
+            &Verdict::Malicious,
+            d("0.9"),
+            "the-real-salt",
+        );
+        assert!(!verify(
+            &c,
+            bounty(),
+            "alice",
+            &Verdict::Malicious,
+            d("0.9"),
+            "a-guessed-salt"
+        ));
     }
 
     /// Binding to the voter: Bob must not be able to submit Alice's commitment
@@ -156,7 +198,10 @@ mod tests {
         let salt = "shared-salt-somehow";
         let alice = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), salt);
         let bob = commit(bounty(), "bob", &Verdict::Malicious, d("0.9"), salt);
-        assert_ne!(alice, bob, "two voters must not produce the same commitment");
+        assert_ne!(
+            alice, bob,
+            "two voters must not produce the same commitment"
+        );
         assert!(
             !verify(&alice, bounty(), "bob", &Verdict::Malicious, d("0.9"), salt),
             "Alice's commitment must not verify for Bob"
@@ -169,7 +214,14 @@ mod tests {
         let other = Uuid::parse_str("99999999-8888-7777-6666-555555555555").unwrap();
         let salt = "correct-horse-battery";
         let c = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), salt);
-        assert!(!verify(&c, other, "alice", &Verdict::Malicious, d("0.9"), salt));
+        assert!(!verify(
+            &c,
+            other,
+            "alice",
+            &Verdict::Malicious,
+            d("0.9"),
+            salt
+        ));
     }
 
     /// A voter must not be locked out of their own reveal because their client
@@ -201,7 +253,14 @@ mod tests {
     fn engine_id_whitespace_is_ignored() {
         let salt = "correct-horse-battery";
         let c = commit(bounty(), "alice", &Verdict::Malicious, d("0.9"), salt);
-        assert!(verify(&c, bounty(), "  alice  ", &Verdict::Malicious, d("0.9"), salt));
+        assert!(verify(
+            &c,
+            bounty(),
+            "  alice  ",
+            &Verdict::Malicious,
+            d("0.9"),
+            salt
+        ));
     }
 
     /// Distinct verdicts must never collide.

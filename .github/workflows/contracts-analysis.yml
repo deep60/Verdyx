@@ -108,7 +108,15 @@ jobs:
         run: forge test --fuzz-runs 10000 -vv
 
       - name: Run invariant tests
-        run: forge test --match-contract Invariant --invariant-runs 1000 --invariant-depth 50 -vv
+        env:
+          FOUNDRY_INVARIANT_RUNS: 1000
+          FOUNDRY_INVARIANT_DEPTH: 50
+        run: |
+          if ! grep -rqE 'contract [A-Za-z0-9_]*Invariant' test 2>/dev/null; then
+            echo "::warning::No invariant tests exist yet, so none were run."
+            exit 0
+          fi
+          forge test --match-contract Invariant -vv
 
       - name: Run gas report
         run: forge test --gas-report
@@ -199,5 +207,5 @@ jobs:
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: main
-          head: HEAD
+          base: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          head: ${{ github.sha }}

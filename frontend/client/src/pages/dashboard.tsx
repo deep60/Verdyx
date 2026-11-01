@@ -1,7 +1,8 @@
 import { SWITCH_DASHBOARD_TAB_EVENT } from "@/components/command-palette";
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Navigation } from "@/components/navigation";
-import { DashboardStats, RecentAnalyses } from "@/components/analysis-dashboard";
+import { DASHBOARD_REFRESH_MS, DashboardStats, RecentAnalyses } from "@/components/analysis-dashboard";
 import { FileSubmissionForm } from "@/components/file-submission-form";
 import { PlatformAnalytics } from "@/components/platform-analytics";
 import { WebsiteIntelligencePanel } from "@/components/website-intelligence-panel";
@@ -24,11 +25,48 @@ import {
   Terminal,
   Zap,
   CheckCircle2,
+  AlertCircle,
   Binary,
   ArrowLeftRight,
 } from "lucide-react";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { SEO } from "@/components/seo";
+import { verdyxFetch } from "@/lib/csrf";
+
+function ApiHealthBadge() {
+  const { data, isError, isPending } = useQuery({
+    queryKey: ["/api/v1/health"],
+    queryFn: async () => {
+      const res = await verdyxFetch("/api/v1/health");
+      if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+      return (await res.json()) as { status: "healthy" | "degraded" | "unhealthy" };
+    },
+    refetchInterval: 30_000,
+    retry: false,
+  });
+
+  if (isPending) {
+    return (
+      <Badge variant="outline" className="font-mono text-xs">
+        Checking API...
+      </Badge>
+    );
+  }
+  if (isError || data.status === "unhealthy") {
+    return (
+      <Badge variant="outline" className="font-mono text-xs border-destructive/40 text-destructive">
+        <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+        API unavailable
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="font-mono text-xs border-accent/40 text-accent">
+      <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+      {data.status === "healthy" ? "API, database and Redis healthy" : "API online, blockchain RPC unavailable"}
+    </Badge>
+  );
+}
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState(() => {
@@ -51,6 +89,10 @@ export default function Dashboard() {
     return () => window.removeEventListener(SWITCH_DASHBOARD_TAB_EVENT, onSwitchTab);
   }, []);
   const { isConnected } = useWebSocket();
+  const { isError: statsUnavailable } = useQuery({
+    queryKey: ["/api/analysis/stats"],
+    refetchInterval: DASHBOARD_REFRESH_MS,
+  });
   const [activeLogIdx, setActiveLogIdx] = useState(0);
 
   const liveAgentLogs = [
@@ -58,28 +100,28 @@ export default function Dashboard() {
       ts: "00:00.012",
       node: "gateway-edge-01",
       action: "INGEST_ARTIFACT",
-      detail: "SHA-256 & BLAKE2b digests computed · TLS 1.3 verified",
+      detail: "Upload validated and submission saved",
       color: "text-muted-foreground",
     },
     {
       ts: "00:00.048",
       node: "redis-queue-zset",
       action: "ENQUEUE_PRIORITY",
-      detail: "Dispatched job to 8 autonomous sandbox workers + OSINT recon",
+      detail: "Job queued for the analysis engine",
       color: "text-primary",
     },
     {
       ts: "00:00.195",
       node: "engine-clamav-yara",
       action: "SIGNATURE_SWEEP",
-      detail: "libyara 4.5 + clamd socket evaluated 128+ malware rule sets",
+      detail: "YARA rules and ClamAV signatures checked",
       color: "text-accent",
     },
     {
       ts: "00:00.340",
-      node: "engine-ml-gbdt",
-      action: "ENTROPY_VECTOR",
-      detail: "256-bin byte histogram & n-gram perplexity scored (96.4% conf)",
+      node: "engine-ml-onnx",
+      action: "ML_SCORE",
+      detail: "Byte features scored by the ONNX model",
       color: "text-warning",
     },
     {
@@ -92,8 +134,8 @@ export default function Dashboard() {
     {
       ts: "00:00.890",
       node: "consensus-quorum",
-      action: "BAYESIAN_FINALIZE",
-      detail: "Stake-weighted quorum reached · Broadcast over /ws pubsub",
+      action: "VERDICT_FINALIZE",
+      detail: "Engine votes combined · Broadcast over /ws pubsub",
       color: "text-success",
     },
   ];
@@ -108,11 +150,10 @@ export default function Dashboard() {
   const pipelineStages = [
     {
       step: "01",
-      title: "API Gateway & Cryptographic Hashing",
+      title: "API Gateway & Validation",
       service: "verdyx-api-gateway · Rust/Axum",
-      latency: "4ms",
       detail:
-        "Validates multipart binaries or URLs, computes SHA-256, MD5, and BLAKE2b digests, and persists submission metadata.",
+        "Validates uploaded files or URLs and saves the submission details.",
       icon: Upload,
       accent: "border-border",
     },
@@ -120,7 +161,6 @@ export default function Dashboard() {
       step: "02",
       title: "Redis Priority ZSET Scheduler",
       service: "verdyx-redis · In-Flight Guard",
-      latency: "1.2ms",
       detail:
         "Schedules jobs into a priority-weighted sorted set with automatic crash recovery and Pub/Sub event fan-out.",
       icon: Layers,
@@ -128,11 +168,10 @@ export default function Dashboard() {
     },
     {
       step: "03",
-      title: "8-Engine Parallel Sandbox Matrix",
+      title: "8-Engine Parallel Analysis",
       service: "verdyx-analysis-engine · tokio::join!",
-      latency: "180ms",
       detail:
-        "Executes ClamAV, YARA, Goblin PE/ELF Static Parser, Byte-Entropy GBDT ML, Heuristic, Signature & Hash Threat Intel concurrently.",
+        "Runs ClamAV, YARA, Goblin PE/ELF static parsing, ONNX ML, heuristics, signatures, and hash and threat-intel lookups concurrently.",
       icon: Cpu,
       accent: "border-border",
     },
@@ -140,7 +179,6 @@ export default function Dashboard() {
       step: "04",
       title: "36-Module Website OSINT Recon",
       service: "web_intel · DoH + Shodan + RDAP + CT",
-      latency: "640ms",
       detail:
         "Queries Cloudflare DoH, Shodan InternetDB open ports & CVEs, RDAP WHOIS, Certificate Transparency subdomains, and HTTP security.",
       icon: Globe,
@@ -148,11 +186,10 @@ export default function Dashboard() {
     },
     {
       step: "05",
-      title: "Stake-Weighted Bayesian Consensus",
+      title: "Weighted Consensus",
       service: "verdyx-consensus-service",
-      latency: "18ms",
       detail:
-        "Combines automated engine detections with analyst community votes weighted by historical accuracy and staked ETH.",
+        "Combines automated engine detections and analyst votes, weighted by reputation and confidence.",
       icon: ShieldCheck,
       accent: "border-border",
     },
@@ -160,7 +197,6 @@ export default function Dashboard() {
       step: "06",
       title: "PostgreSQL & Live WebSocket Stream",
       service: "postgres + /ws pubsub relay",
-      latency: "6ms",
       detail:
         "Persists per-engine telemetry to verdyx_gateway and pushes real-time completion frames to connected browsers.",
       icon: Database,
@@ -172,7 +208,7 @@ export default function Dashboard() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <SEO
         title="Analysis Dashboard — Verdyx Command Center"
-        description="Submit files or URLs for 8-engine malware analysis, inspect 36+ website OSINT modules, and monitor real-time backend telemetry."
+        description="Submit files or URLs for 8-engine malware analysis, inspect 36+ website OSINT modules, and see how the backend pipeline works."
       />
       <Navigation />
 
@@ -191,9 +227,15 @@ export default function Dashboard() {
 
             <div className="inline-flex items-center gap-2.5 self-start border border-border bg-card px-3 py-1.5 font-mono text-xs sm:self-auto">
               <span
-                className={`h-2 w-2 ${isConnected ? "bg-success" : "bg-warning"}`}
+                className={`h-2 w-2 ${statsUnavailable ? "bg-destructive" : isConnected ? "bg-success" : "bg-warning"}`}
               />
-              <span>{isConnected ? "Live Stream Connected" : "Auto-Polling Active"}</span>
+              <span>
+                {statsUnavailable
+                  ? "Live Data Unavailable"
+                  : isConnected
+                    ? "Live Stream Connected"
+                    : "Refreshing Every 30s"}
+              </span>
             </div>
           </div>
 
@@ -260,18 +302,18 @@ export default function Dashboard() {
                 <div className="lg:col-span-7 space-y-6">
                   <RecentAnalyses />
 
-                  {/* Live Backend Worker Telemetry Stream */}
+                  {/* Illustrative walkthrough of the pipeline. Not connected to live data. */}
                   <Card>
                     <CardHeader className="pb-3 flex flex-row items-center justify-between">
                       <div>
                         <div className="flex items-center gap-2">
                           <Terminal className="h-4 w-4 text-accent" />
                           <CardTitle className="text-base font-display">
-                            Live Backend Worker Telemetry
+                            How a Scan Moves Through Verdyx
                           </CardTitle>
                         </div>
                         <CardDescription className="text-xs font-mono mt-0.5">
-                          api-gateway → redis-zset → analysis-engine (8 workers) → consensus
+                          Example pipeline, not live data
                         </CardDescription>
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -329,15 +371,13 @@ export default function Dashboard() {
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <span className="text-xs font-mono uppercase tracking-widest text-accent">
-                    MICROSERVICE TELEMETRY · HOW VERDYX WORKS IN THE BACKEND
+                    HOW VERDYX WORKS IN THE BACKEND
                   </span>
                   <h2 className="text-2xl sm:text-3xl font-extrabold font-display tracking-tight mt-1">
                     The path a file takes
                   </h2>
                 </div>
-                <Badge variant="outline" className="font-mono text-xs border-accent/40 text-accent">
-                  <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />9 Rust Microservices Online
-                </Badge>
+                <ApiHealthBadge />
               </div>
 
               <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
@@ -357,9 +397,6 @@ export default function Dashboard() {
                             STAGE {st.step}
                           </span>
                         </div>
-                        <Badge variant="secondary" className="font-mono text-[11px]">
-                          ~{st.latency}
-                        </Badge>
                       </div>
                       <h3 className="text-lg font-bold font-display">{st.title}</h3>
                       <div className="font-mono text-xs text-accent flex items-center gap-1">

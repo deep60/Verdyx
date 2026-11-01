@@ -662,10 +662,10 @@ export default function AnalysisDetails() {
                       <div className="w-2.5 h-2.5 bg-warning rounded-full" />
                       <div>
                         <div className="font-semibold">
-                          2. Parallel Multi-Engine Sandbox Execution ({analyses.length} Engines)
+                          2. Parallel Multi-Engine Analysis ({analyses.length} Engines)
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          ClamAV, YARA, Goblin Static, Byte-Entropy GBDT ML, Heuristic, Signature &amp; Hash Threat Intel
+                          ClamAV, YARA, Goblin Static, ONNX ML, Heuristic, Signature &amp; Hash Threat Intel
                         </div>
                       </div>
                     </div>

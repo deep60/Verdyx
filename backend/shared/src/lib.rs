@@ -2,6 +2,8 @@
 // features are wired up. This crate-level allow keeps `clippy -D warnings`
 // green without deleting code we are about to use. Remove before GA.
 #![allow(dead_code)]
+// The legacy `VerdyxError`/`Result` stay available for callers while they migrate.
+#![allow(deprecated)]
 
 //! Shared utilities and types for Verdyx backend services
 
@@ -15,8 +17,6 @@ pub use tracing;
 pub use uuid;
 
 // Export modules
-#[cfg(feature = "blockchain")]
-pub mod blockchain;
 #[cfg(feature = "crypto")]
 pub mod crypto;
 pub mod database;
@@ -24,25 +24,29 @@ pub mod env;
 pub mod error;
 pub mod messaging;
 pub mod observability;
+pub mod password_policy;
 pub mod service_metrics;
 pub mod types;
 
+#[cfg(feature = "circuit-breaker")]
+pub mod circuit_breaker;
+#[cfg(feature = "idempotency")]
+pub mod idempotency;
 #[cfg(feature = "axum-mw")]
 pub mod metrics_mw;
 #[cfg(feature = "validation")]
 pub mod validation;
-#[cfg(feature = "idempotency")]
-pub mod idempotency;
-#[cfg(feature = "circuit-breaker")]
-pub mod circuit_breaker;
 
 pub use service_metrics::MetricsRegistry;
 
 // Re-export key error types
-pub use error::{AppError, AppResult, ErrorCode, ApiError, ValidationError, BlockchainError, IntoAppError};
+pub use error::{
+    ApiError, AppError, AppResult, BlockchainError, ErrorCode, IntoAppError, ValidationError,
+};
 
 // Legacy error type (deprecated - use AppError instead)
 #[deprecated(since = "0.2.0", note = "Use AppError instead")]
+#[allow(deprecated)]
 #[derive(Debug, thiserror::Error)]
 pub enum VerdyxError {
     #[error("Database error: {0}")]
@@ -62,4 +66,5 @@ pub enum VerdyxError {
 }
 
 #[deprecated(since = "0.2.0", note = "Use AppResult instead")]
+#[allow(deprecated)]
 pub type Result<T> = std::result::Result<T, VerdyxError>;

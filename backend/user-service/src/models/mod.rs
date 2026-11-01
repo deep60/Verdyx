@@ -28,6 +28,9 @@ pub enum UserError {
 
     #[error("Invalid token")]
     InvalidToken,
+
+    #[error("Too many failed attempts")]
+    TooManyAttempts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

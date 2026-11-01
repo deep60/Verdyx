@@ -9,27 +9,26 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * @notice Extends standard ERC20 with threat analysis staking mechanisms
  */
 interface IThreatToken is IERC20 {
-
     // ============ STRUCTS ============
 
     /**
      * @dev Stake information for an analysis engine
      */
     struct Stake {
-        uint256 amount;          // Amount of tokens staked
-        uint256 lockTime;        // Timestamp when stake can be withdrawn
-        bool active;             // Whether stake is currently active
-        address engine;          // Address of the staking engine
-        bytes32 analysisId;      // Unique identifier for the analysis
+        uint256 amount; // Amount of tokens staked
+        uint256 lockTime; // Timestamp when stake can be withdrawn
+        bool active; // Whether stake is currently active
+        address engine; // Address of the staking engine
+        bytes32 analysisId; // Unique identifier for the analysis
     }
 
     /**
      * @dev Reward pool for a specific analysis
      */
     struct RewardPoolInfo {
-        uint256 totalPool;       // Total reward pool size
-        uint256 distributed;     // Amount already distributed
-        bool finalized;          // Whether rewards have been finalized
+        uint256 totalPool; // Total reward pool size
+        uint256 distributed; // Amount already distributed
+        bool finalized; // Whether rewards have been finalized
     }
 
     // ============ EVENTS ============
@@ -76,26 +75,17 @@ interface IThreatToken is IERC20 {
     /**
      * @dev Emitted when an engine is authorized or deauthorized
      */
-    event EngineAuthorized(
-        address indexed engine,
-        bool authorized
-    );
+    event EngineAuthorized(address indexed engine, bool authorized);
 
     /**
      * @dev Emitted when reputation is updated
      */
-    event ReputationUpdated(
-        address indexed engine,
-        uint256 newReputation
-    );
+    event ReputationUpdated(address indexed engine, uint256 newReputation);
 
     /**
      * @dev Emitted when new tokens are minted
      */
-    event TokensMinted(
-        address indexed to,
-        uint256 amount
-    );
+    event TokensMinted(address indexed to, uint256 amount);
 
     // ============ STAKING FUNCTIONS ============
 
@@ -171,7 +161,9 @@ interface IThreatToken is IERC20 {
      * @param engine Address of the engine
      * @return Array of stake information
      */
-    function getEngineStakes(address engine) external view returns (Stake[] memory);
+    function getEngineStakes(
+        address engine
+    ) external view returns (Stake[] memory);
 
     /**
      * @dev Get reward information for an analysis
@@ -179,7 +171,10 @@ interface IThreatToken is IERC20 {
      * @param engine Engine address
      * @return Reward amount for the engine
      */
-    function getAnalysisReward(bytes32 analysisId, address engine) external view returns (uint256);
+    function getAnalysisReward(
+        bytes32 analysisId,
+        address engine
+    ) external view returns (uint256);
 
     /**
      * @dev Get total staked amount for an engine

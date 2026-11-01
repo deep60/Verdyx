@@ -775,12 +775,11 @@ mod tests {
     fn malformed_contract_address_degrades_instead_of_failing() {
         for raw in [
             "not-an-address",
-            "0x123",                                          // too short
-            "0xZZZZ15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34",     // non-hex
-            "742b15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34extra",  // too long
+            "0x123",                                         // too short
+            "0xZZZZ15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34",    // non-hex
+            "742b15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34extra", // too long
         ] {
-            let addr =
-                BlockchainService::parse_contract_address("REPUTATION_SYSTEM_ADDRESS", raw);
+            let addr = BlockchainService::parse_contract_address("REPUTATION_SYSTEM_ADDRESS", raw);
             assert!(
                 addr.is_zero(),
                 "a malformed address must fall back to zero, got {addr:?} for {raw:?}"
@@ -795,7 +794,10 @@ mod tests {
             "BOUNTY_MANAGER_ADDRESS",
             "  0x742b15C2d1f7a9fE9a8d2F1B22d7e3aF95c30B34\n",
         );
-        assert!(!addr.is_zero(), "a padded but valid address must still parse");
+        assert!(
+            !addr.is_zero(),
+            "a padded but valid address must still parse"
+        );
     }
 
     /// The documented "chain disabled" sentinel must be accepted quietly

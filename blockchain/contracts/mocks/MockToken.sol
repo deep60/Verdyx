@@ -9,7 +9,6 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  * @notice This contract is for testing only and should never be deployed to production
  */
 contract MockToken is ERC20 {
-
     uint8 private _decimals;
 
     /**
@@ -45,7 +44,10 @@ contract MockToken is ERC20 {
      * @param recipients Array of addresses to mint to
      * @param amounts Array of amounts to mint
      */
-    function batchMint(address[] calldata recipients, uint256[] calldata amounts) external {
+    function batchMint(
+        address[] calldata recipients,
+        uint256[] calldata amounts
+    ) external {
         require(recipients.length == amounts.length, "Length mismatch");
         for (uint256 i = 0; i < recipients.length; i++) {
             _mint(recipients[i], amounts[i]);

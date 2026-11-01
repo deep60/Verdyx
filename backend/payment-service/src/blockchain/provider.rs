@@ -57,6 +57,44 @@ fn coerce_to_ws_url(url: &str) -> Result<String> {
     }
 }
 
+/// Get current gas price with multiplier
+pub async fn get_gas_price(
+    provider: &Provider<Ws>,
+    multiplier: f64,
+    max_gwei: u64,
+) -> Result<U256> {
+    let base_gas_price = provider.get_gas_price().await?;
+    let adjusted = (base_gas_price.as_u128() as f64 * multiplier) as u128;
+    let max_price = U256::from(max_gwei) * U256::from(1_000_000_000u64);
+
+    Ok(U256::from(adjusted).min(max_price))
+}
+
+/// Wait for transaction confirmation
+pub async fn wait_for_confirmations(
+    provider: &Provider<Ws>,
+    tx_hash: H256,
+    confirmations: usize,
+) -> Result<Option<TransactionReceipt>> {
+    info!(
+        "Waiting for {} confirmations for tx {}",
+        confirmations, tx_hash
+    );
+
+    let receipt = provider.get_transaction_receipt(tx_hash).await?;
+
+    if let Some(ref receipt) = receipt {
+        let current_block = provider.get_block_number().await?;
+        let tx_block = receipt.block_number.unwrap_or_default();
+
+        if current_block.as_u64() >= tx_block.as_u64() + confirmations as u64 {
+            return Ok(Some(receipt.clone()));
+        }
+    }
+
+    Ok(None)
+}
+
 #[cfg(test)]
 mod url_coercion_tests {
     use super::coerce_to_ws_url;
@@ -94,42 +132,4 @@ mod url_coercion_tests {
         assert!(coerce_to_ws_url("ftp://example.com").is_err());
         assert!(coerce_to_ws_url("just-a-host").is_err());
     }
-}
-
-/// Get current gas price with multiplier
-pub async fn get_gas_price(
-    provider: &Provider<Ws>,
-    multiplier: f64,
-    max_gwei: u64,
-) -> Result<U256> {
-    let base_gas_price = provider.get_gas_price().await?;
-    let adjusted = (base_gas_price.as_u128() as f64 * multiplier) as u128;
-    let max_price = U256::from(max_gwei) * U256::from(1_000_000_000u64);
-
-    Ok(U256::from(adjusted).min(max_price))
-}
-
-/// Wait for transaction confirmation
-pub async fn wait_for_confirmations(
-    provider: &Provider<Ws>,
-    tx_hash: H256,
-    confirmations: usize,
-) -> Result<Option<TransactionReceipt>> {
-    info!(
-        "Waiting for {} confirmations for tx {}",
-        confirmations, tx_hash
-    );
-
-    let receipt = provider.get_transaction_receipt(tx_hash).await?;
-
-    if let Some(ref receipt) = receipt {
-        let current_block = provider.get_block_number().await?;
-        let tx_block = receipt.block_number.unwrap_or_default();
-
-        if current_block.as_u64() >= tx_block.as_u64() + confirmations as u64 {
-            return Ok(Some(receipt.clone()));
-        }
-    }
-
-    Ok(None)
 }

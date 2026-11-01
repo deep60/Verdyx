@@ -885,8 +885,6 @@ impl DynamicThreatIndicators {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_dynamic_analyzer_creation() {

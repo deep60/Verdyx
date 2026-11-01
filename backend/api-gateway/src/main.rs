@@ -17,7 +17,6 @@ use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-
 mod config;
 mod handlers;
 mod middleware;
@@ -51,6 +50,8 @@ pub struct AppState {
     /// `MetricsCollector` so the gateway emits the same `verdyx_*` schema as
     /// every other service for the root `/metrics` scrape.
     pub prom_metrics: shared::MetricsRegistry,
+    /// Shared so `/api` and `/api/v1` can't be used to double the limit.
+    pub auth_rate_limit: Arc<middleware::rate_limiter::AuthRateLimit>,
 }
 
 // Session information for active users
@@ -256,8 +257,21 @@ async fn main() -> Result<()> {
             .context("Failed to initialize proxy service")?,
     );
 
+    let auth_rate_limit = Arc::new(middleware::rate_limiter::AuthRateLimit::from_env());
+    {
+        let auth_rate_limit = auth_rate_limit.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                auth_rate_limit.cleanup().await;
+            }
+        });
+    }
+
     // Create application state
     let state = AppState {
+        auth_rate_limit,
         db: Arc::new(db),
         redis: Arc::new(redis),
         blockchain: Arc::new(blockchain),
@@ -326,10 +340,13 @@ async fn main() -> Result<()> {
     info!("🔍 Health check available at http://{}/api/v1/health", addr);
 
     // Start server with graceful shutdown
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("Server error")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("Server error")?;
 
     info!("Verdyx API Gateway shut down gracefully");
     Ok(())

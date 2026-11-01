@@ -1,8 +1,8 @@
 //! Application metrics collection and reporting
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
 
 /// Simple metrics collector
 pub struct MetricsCollector {
@@ -101,16 +101,16 @@ pub mod metric_names {
     pub const HTTP_REQUESTS_TOTAL: &str = "http_requests_total";
     pub const HTTP_REQUESTS_DURATION_MS: &str = "http_requests_duration_ms";
     pub const HTTP_REQUESTS_ERROR: &str = "http_requests_error";
-    
+
     // Database metrics
     pub const DB_QUERIES_TOTAL: &str = "db_queries_total";
     pub const DB_QUERIES_DURATION_MS: &str = "db_queries_duration_ms";
     pub const DB_CONNECTIONS_ACTIVE: &str = "db_connections_active";
-    
+
     // Cache metrics
     pub const CACHE_HITS: &str = "cache_hits";
     pub const CACHE_MISSES: &str = "cache_misses";
-    
+
     // Business metrics
     pub const USERS_TOTAL: &str = "users_total";
     pub const BOUNTIES_TOTAL: &str = "bounties_total";
@@ -125,10 +125,10 @@ mod tests {
     #[test]
     fn test_counter() {
         let metrics = MetricsCollector::new();
-        
+
         metrics.increment_counter("test_counter", 1);
         assert_eq!(metrics.get_counter("test_counter"), Some(1));
-        
+
         metrics.increment_counter("test_counter", 5);
         assert_eq!(metrics.get_counter("test_counter"), Some(6));
     }
@@ -136,10 +136,10 @@ mod tests {
     #[test]
     fn test_gauge() {
         let metrics = MetricsCollector::new();
-        
+
         metrics.set_gauge("test_gauge", 100);
         assert_eq!(metrics.get_gauge("test_gauge"), Some(100));
-        
+
         metrics.set_gauge("test_gauge", 50);
         assert_eq!(metrics.get_gauge("test_gauge"), Some(50));
     }
@@ -147,10 +147,10 @@ mod tests {
     #[test]
     fn test_snapshot() {
         let metrics = MetricsCollector::new();
-        
+
         metrics.increment_counter("counter1", 10);
         metrics.set_gauge("gauge1", 42);
-        
+
         let snapshot = metrics.snapshot();
         assert_eq!(snapshot.counters.get("counter1"), Some(&10));
         assert_eq!(snapshot.gauges.get("gauge1"), Some(&42));

@@ -1,4 +1,3 @@
-import { getLocalBundles } from "@/lib/local-analysis-engine";
 import { useState, useMemo } from "react";
 import { Navigation } from "@/components/navigation";
 import { EngineCard } from "@/components/engine-card";
@@ -68,16 +67,13 @@ export default function Marketplace() {
 
   const {
     data: rawSubmissions,
+    isError: submissionsError,
     isLoading: submissionsLoading,
     refetch: refetchSubmissions,
   } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
   });
-  const submissions: ApiSubmission[] =
-    Array.isArray(rawSubmissions) && rawSubmissions.length > 0
-      ? rawSubmissions
-      : (getLocalBundles().map((b) => b.submission) as unknown as ApiSubmission[]);
-  const submissionsError = false;
+  const submissions: ApiSubmission[] = Array.isArray(rawSubmissions) ? rawSubmissions : [];
 
   const { data: stats } = useQuery<ApiStats>({
     queryKey: ["/api/analysis/stats"],

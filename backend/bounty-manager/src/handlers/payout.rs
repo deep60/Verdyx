@@ -488,12 +488,20 @@ pub async fn distribute_rewards(
 
         // Persist the payout: the real tx hash + Processed once settled on-chain,
         // otherwise PendingOnChain with no hash yet.
-        let db_status = if settled { "Processed" } else { "PendingOnChain" };
+        let db_status = if settled {
+            "Processed"
+        } else {
+            "PendingOnChain"
+        };
         PayoutModel::update_status(
             &state.db,
             payout.id,
             db_status,
-            if settled { Some(tx_hash.as_str()) } else { None },
+            if settled {
+                Some(tx_hash.as_str())
+            } else {
+                None
+            },
         )
         .await
         .map_err(|e| {
@@ -505,7 +513,11 @@ pub async fn distribute_rewards(
         if let Err(e) =
             ReputationModel::increment_submission(&state.db, &payout.recipient, is_correct).await
         {
-            tracing::error!("Failed to update reputation for {}: {}", payout.recipient, e);
+            tracing::error!(
+                "Failed to update reputation for {}: {}",
+                payout.recipient,
+                e
+            );
         }
 
         // Update submission status to Correct

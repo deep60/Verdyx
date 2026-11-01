@@ -29,13 +29,15 @@ pub async fn get_applied_migrations(pool: &PgPool) -> DatabaseResult<Vec<Migrati
 
     Ok(migrations
         .into_iter()
-        .map(|(version, description, installed_on, execution_time, success)| MigrationInfo {
-            version,
-            description,
-            installed_on,
-            execution_time,
-            success,
-        })
+        .map(
+            |(version, description, installed_on, execution_time, success)| MigrationInfo {
+                version,
+                description,
+                installed_on,
+                execution_time,
+                success,
+            },
+        )
         .collect())
 }
 
@@ -43,8 +45,8 @@ pub async fn get_applied_migrations(pool: &PgPool) -> DatabaseResult<Vec<Migrati
 pub async fn get_pending_migrations_count(pool: &PgPool) -> DatabaseResult<usize> {
     // This is a simplified check - actual pending migrations would need
     // to compare with available migration files
-    let applied = get_applied_migrations(pool).await?;
-    
+    let _applied = get_applied_migrations(pool).await?;
+
     // For now, just return 0 as we're using sqlx's built-in migration system
     Ok(0)
 }
@@ -96,7 +98,7 @@ pub async fn run_migrations(pool: &PgPool) -> DatabaseResult<usize> {
 }
 
 /// Rollback last migration (if supported)
-pub async fn rollback_last_migration(pool: &PgPool) -> DatabaseResult<()> {
+pub async fn rollback_last_migration(_pool: &PgPool) -> DatabaseResult<()> {
     warn!("Migration rollback requested");
 
     // Note: SQLx doesn't support automatic rollbacks
@@ -113,12 +115,11 @@ pub async fn get_latest_migration_version(pool: &PgPool) -> DatabaseResult<Optio
         return Ok(None);
     }
 
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT MAX(version) FROM _sqlx_migrations WHERE success = true",
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(DatabaseError::Connection)?;
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT MAX(version) FROM _sqlx_migrations WHERE success = true")
+            .fetch_optional(pool)
+            .await
+            .map_err(DatabaseError::Connection)?;
 
     Ok(row.map(|r| r.0))
 }

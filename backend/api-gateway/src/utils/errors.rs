@@ -15,6 +15,7 @@ pub enum ApiError {
     Internal(String),
     Database(sqlx::Error),
     Conflict(String),
+    TooManyRequests(String),
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
@@ -33,6 +34,7 @@ impl IntoResponse for ApiError {
                 format!("Database error: {e}"),
             ),
             ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            ApiError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg),
         };
 
         let error_response = json!({

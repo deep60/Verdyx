@@ -1,32 +1,22 @@
 pub mod connection_pool;
+pub mod migrations;
 pub mod postgres;
 #[cfg(feature = "redis")]
 pub mod redis;
-pub mod migrations;
 
 pub use connection_pool::{
-    DatabaseManager,
-    DbPool,
-    DbConnection,
-    DatabaseStats,
-    create_connection_pool,
-    get_connection,
-    test_connection,
-    migrate_database,
-    with_transaction,
-    health_check,
-    close_connections,
+    close_connections, create_connection_pool, get_connection, health_check, migrate_database,
+    test_connection, with_transaction, DatabaseManager, DatabaseStats, DbConnection, DbPool,
 };
 
 // Re-export common database types for convenience
-pub use sqlx::{
-    Row,
-    Error as SqlxError,
-    postgres::{PgPool, PgRow, PgConnection},
-    types::Uuid,
-};
 pub use chrono::{DateTime, Utc};
 pub use rust_decimal::Decimal;
+pub use sqlx::{
+    postgres::{PgConnection, PgPool, PgRow},
+    types::Uuid,
+    Error as SqlxError, Row,
+};
 
 // Database configuration structure
 #[derive(Debug, Clone)]
@@ -88,8 +78,7 @@ impl DatabaseConfig {
                 .unwrap_or_else(|_| "600".to_string())
                 .parse()
                 .unwrap_or(600),
-            ssl_mode: std::env::var("DATABASE_SSL_MODE")
-                .unwrap_or_else(|_| "prefer".to_string()),
+            ssl_mode: std::env::var("DATABASE_SSL_MODE").unwrap_or_else(|_| "prefer".to_string()),
         })
     }
 
@@ -97,12 +86,7 @@ impl DatabaseConfig {
     pub fn database_url(&self) -> String {
         format!(
             "postgresql://{}:{}@{}:{}/{}?sslmode={}",
-            self.username,
-            self.password,
-            self.host,
-            self.port,
-            self.database_name,
-            self.ssl_mode
+            self.username, self.password, self.host, self.port, self.database_name, self.ssl_mode
         )
     }
 }
@@ -112,16 +96,16 @@ impl DatabaseConfig {
 pub enum DatabaseError {
     #[error("Connection error: {0}")]
     Connection(#[from] sqlx::Error),
-    
+
     #[error("Migration error: {0}")]
     Migration(String),
-    
+
     #[error("Configuration error: {0}")]
     Config(String),
-    
+
     #[error("Query error: {0}")]
     Query(String),
-    
+
     #[error("Transaction error: {0}")]
     Transaction(String),
 }

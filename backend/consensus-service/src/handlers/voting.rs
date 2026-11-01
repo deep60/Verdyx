@@ -103,7 +103,11 @@ pub async fn reveal_vote(
         Err(e) => return e,
     };
 
-    match state.consensus_service.reveal_vote(bounty_id, &payload).await {
+    match state
+        .consensus_service
+        .reveal_vote(bounty_id, &payload)
+        .await
+    {
         Ok(()) => (
             StatusCode::OK,
             Json(json!({

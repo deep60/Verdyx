@@ -1,7 +1,7 @@
 //! Digital signature utilities for authentication and verification
 
 use super::{CryptoError, CryptoResult};
-use ed25519_dalek::{Signer, Verifier, SigningKey, VerifyingKey, Signature};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::rngs::OsRng;
 
 /// Generate a new Ed25519 keypair
@@ -27,8 +27,10 @@ pub fn verify_signature(
         .map_err(|e| CryptoError::Verification(format!("Invalid signature hex: {}", e)))?;
 
     let signature = Signature::from_bytes(
-        signature_bytes.as_slice().try_into()
-            .map_err(|_| CryptoError::Verification("Invalid signature length".to_string()))?
+        signature_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| CryptoError::Verification("Invalid signature length".to_string()))?,
     );
 
     match verifying_key.verify(message, &signature) {
@@ -99,7 +101,7 @@ mod tests {
     fn test_keypair_generation() {
         let (signing_key, verifying_key) = generate_keypair();
         let message = b"test message";
-        
+
         let signature = sign_message(&signing_key, message);
         assert!(verify_signature(&verifying_key, message, &signature).unwrap());
     }
@@ -108,7 +110,7 @@ mod tests {
     fn test_signature_verification_fails_wrong_message() {
         let (signing_key, verifying_key) = generate_keypair();
         let signature = sign_message(&signing_key, b"original message");
-        
+
         assert!(!verify_signature(&verifying_key, b"different message", &signature).unwrap());
     }
 
@@ -117,10 +119,10 @@ mod tests {
         let (signing_key, verifying_key) = generate_keypair();
         let private_hex = hex::encode(signing_key.to_bytes());
         let public_hex = hex::encode(verifying_key.to_bytes());
-        
+
         let message = b"test";
         let signature = sign_with_hex_key(&private_hex, message).unwrap();
-        
+
         assert!(verify_with_hex_key(&public_hex, message, &signature).unwrap());
     }
 }

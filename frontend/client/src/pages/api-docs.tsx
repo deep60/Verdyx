@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Key, Copy, Check, Play, Terminal, Globe, Shield, Webhook } from "lucide-react";
+import { Key, Copy, Check, Play, Terminal, Globe, Webhook } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { SEO } from "@/components/seo";
 import { apiRequest } from "@/lib/queryClient";
@@ -197,14 +197,15 @@ export default function ApiDocs() {
 
   const runPlayground = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!playPath.trim()) return;
+    const targetPath = playPath.trim();
+    if (!targetPath) return;
     setPlayRunning(true);
     const t0 = performance.now();
     try {
       const headers: Record<string, string> = { Accept: "application/json" };
       const token = localStorage.getItem("token");
       if (token) headers.Authorization = `Bearer ${token}`;
-      const res = await fetch(playPath.trim(), {
+      const res = await fetch(targetPath, {
         method: "GET",
         headers,
         credentials: "include",
@@ -335,8 +336,8 @@ requests.post(f"{BASE}/voting/bounty/{bounty_id}/commit", headers=HEADERS, json=
                     </CardHeader>
                     <CardContent>
                       <div className="rounded-xl bg-background border border-border/80 p-4">
-                        <pre className="text-xs font-mono text-muted-foreground overflow-x-auto">
-                          <code className="whitespace-pre-wrap">{codeExample}</code>
+                        <pre className="text-xs font-mono text-[#141513] overflow-x-auto">
+                          <code className="whitespace-pre-wrap text-[#141513]">{codeExample}</code>
                         </pre>
                       </div>
 
@@ -453,10 +454,10 @@ requests.post(f"{BASE}/voting/bounty/{bounty_id}/commit", headers=HEADERS, json=
                   </form>
 
                   <div className="rounded-xl bg-background border border-border/80 p-4 space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/50 pb-2 text-xs font-mono">
+                    <div className="flex items-center justify-between border-b border-border/50 pb-2 text-xs font-mono text-[#141513]">
                       <div className="flex items-center gap-2">
-                        <Globe className="h-3.5 w-3.5 text-primary" />
-                        <span>Response Payload</span>
+                        <Globe className="h-3.5 w-3.5 text-[#141513]" />
+                        <span className="font-semibold text-[#141513]">Response Payload</span>
                       </div>
                       <div className="flex items-center gap-2">
                         {playStatus !== null && (
@@ -467,12 +468,14 @@ requests.post(f"{BASE}/voting/bounty/{bounty_id}/commit", headers=HEADERS, json=
                           </Badge>
                         )}
                         {playLatency !== null && (
-                          <Badge variant="outline">{playLatency} ms</Badge>
+                          <Badge variant="outline" className="text-[#141513]">
+                            {playLatency} ms
+                          </Badge>
                         )}
                       </div>
                     </div>
-                    <pre className="text-xs font-mono text-emerald-300/90 max-h-[420px] overflow-auto whitespace-pre-wrap">
-                      <code>{playOutput}</code>
+                    <pre className="text-xs font-mono font-medium text-[#141513] max-h-[420px] overflow-auto whitespace-pre-wrap">
+                      <code className="text-[#141513]">{playOutput}</code>
                     </pre>
                   </div>
                 </CardContent>

@@ -51,6 +51,7 @@ impl NotificationManager {
 
         // Get user preferences
         let prefs = self.get_user_preferences(payload.user_id).await?;
+        let mut email_failure = None;
 
         // Send through each enabled channel
         for channel in &payload.channels {
@@ -58,8 +59,13 @@ impl NotificationManager {
                 shared::messaging::event_types::NotificationChannel::Email
                     if prefs.email_enabled =>
                 {
-                    if let Some(email) = &prefs.email_address {
-                        let _ = self.email_channel.send(payload, email).await;
+                    match email_recipient(&prefs, &payload.event) {
+                        Some(email) => {
+                            if let Err(e) = self.email_channel.send(payload, email).await {
+                                email_failure = Some(e);
+                            }
+                        }
+                        None => info!("No email address for user {}", payload.user_id),
                     }
                 }
                 shared::messaging::event_types::NotificationChannel::Push if prefs.push_enabled => {
@@ -87,7 +93,10 @@ impl NotificationManager {
             }
         }
 
-        Ok(())
+        match email_failure {
+            Some(e) => Err(anyhow::anyhow!("email delivery failed: {e}")),
+            None => Ok(()),
+        }
     }
 
     async fn get_user_preferences(&self, user_id: Uuid) -> Result<NotificationPreferences> {
@@ -182,25 +191,19 @@ impl NotificationManager {
 
     async fn process_event(&self, channel: &str, payload: &str) -> Result<()> {
         use shared::messaging::event_types::{
-            NotificationChannel, NotificationPayload, NotificationPriority, PaymentProcessedEvent,
-            UserRegisteredEvent, VerdyxEvent,
+            NotificationChannel, NotificationPayload, NotificationPriority, VerdyxEvent,
         };
 
-        // Deserialize the event based on channel
-        let event: VerdyxEvent = match channel {
-            "events:user_registered" => {
-                let user_event: UserRegisteredEvent = serde_json::from_str(payload)?;
-                VerdyxEvent::UserRegistered(user_event)
-            }
-            "events:payment_processed" => {
-                let payment_event: PaymentProcessedEvent = serde_json::from_str(payload)?;
-                VerdyxEvent::PaymentProcessed(payment_event)
-            }
-            _ => {
-                info!("Ignoring unhandled channel: {}", channel);
-                return Ok(());
-            }
-        };
+        if !matches!(
+            channel,
+            "events:user_registered" | "events:payment_processed"
+        ) {
+            info!("Ignoring unhandled channel: {}", channel);
+            return Ok(());
+        }
+
+        // Publishers send the whole tagged VerdyxEvent ({event_type, data}).
+        let event: VerdyxEvent = serde_json::from_str(payload)?;
 
         // Extract user_id from event
         let user_id = match &event {
@@ -311,5 +314,59 @@ impl NotificationManager {
 
     pub fn get_websocket_channel(&self) -> Arc<WebSocketChannel> {
         self.websocket_channel.clone()
+    }
+}
+
+/// New users have no preferences row yet, so their welcome email goes to the
+/// address they registered with. A saved address always wins.
+fn email_recipient<'a>(
+    prefs: &'a NotificationPreferences,
+    event: &'a shared::messaging::event_types::VerdyxEvent,
+) -> Option<&'a str> {
+    use shared::messaging::event_types::VerdyxEvent;
+
+    prefs.email_address.as_deref().or(match event {
+        VerdyxEvent::UserRegistered(e) => Some(e.email.as_str()),
+        _ => None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shared::messaging::event_types::{UserRegisteredEvent, VerdyxEvent};
+
+    fn registered() -> VerdyxEvent {
+        VerdyxEvent::UserRegistered(UserRegisteredEvent {
+            user_id: Uuid::new_v4(),
+            username: "alice".to_string(),
+            email: "alice@example.com".to_string(),
+            ethereum_address: String::new(),
+            registered_at: chrono::Utc::now(),
+        })
+    }
+
+    #[test]
+    fn parses_events_in_the_format_publishers_send() {
+        let wire = serde_json::to_string(&registered()).unwrap();
+        let parsed: VerdyxEvent = serde_json::from_str(&wire).unwrap();
+        assert!(matches!(parsed, VerdyxEvent::UserRegistered(_)));
+    }
+
+    #[test]
+    fn welcome_email_uses_registered_address_without_saved_preferences() {
+        let event = registered();
+        let prefs = NotificationPreferences::default();
+        assert_eq!(email_recipient(&prefs, &event), Some("alice@example.com"));
+    }
+
+    #[test]
+    fn saved_email_address_takes_priority() {
+        let event = registered();
+        let prefs = NotificationPreferences {
+            email_address: Some("saved@example.com".to_string()),
+            ..NotificationPreferences::default()
+        };
+        assert_eq!(email_recipient(&prefs, &event), Some("saved@example.com"));
     }
 }

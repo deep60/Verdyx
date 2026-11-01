@@ -316,7 +316,12 @@ async fn shutdown_signal() {
 }
 
 async fn health_check(State(state): State<AppState>) -> Json<HealthResponse> {
-    let detailed_engines = state.analysis_engine.lock().await.get_engine_status_report().await;
+    let detailed_engines = state
+        .analysis_engine
+        .lock()
+        .await
+        .get_engine_status_report()
+        .await;
     Json(HealthResponse {
         status: "healthy".to_string(),
         service: "analysis-engine".to_string(),
@@ -564,8 +569,15 @@ async fn get_detailed_analysis(
     }
 }
 
-async fn engines_status(State(state): State<AppState>) -> Json<crate::analyzers::DetailedEngineReport> {
-    let report = state.analysis_engine.lock().await.get_engine_status_report().await;
+async fn engines_status(
+    State(state): State<AppState>,
+) -> Json<crate::analyzers::DetailedEngineReport> {
+    let report = state
+        .analysis_engine
+        .lock()
+        .await
+        .get_engine_status_report()
+        .await;
     Json(report)
 }
 
