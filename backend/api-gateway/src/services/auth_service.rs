@@ -330,4 +330,69 @@ mod tests {
         let invalid_header = "abc123xyz";
         assert_eq!(AuthService::extract_bearer_token(invalid_header), None);
     }
+
+    const JWT_TEST_SECRET: &str = "test_secret_key_for_testing_only";
+
+    // Minted by this code while it was on jsonwebtoken 9.3.1, signed with
+    // JWT_TEST_SECRET and expiring in 2126. Do not regenerate them: they prove that
+    // tokens issued before the upgrade to 10.x stay valid.
+    const ACCESS_TOKEN_9_3: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJmZWZjYmM5NC1kYmFhLTQ3YTYtOWNhNS0wZDIwNWRlMjhhMGIiLCJlbWFpbCI6InNlcnZpY2VAZXhhbXBsZS5jb20iLCJyb2xlIjoidXNlciIsImV4cCI6NDk0NzE0NDkxNCwiaWF0IjoxNzkzNTQ0OTE0LCJuYmYiOjE3OTM1NDQ5MTQsImp0aSI6IjMyN2JkNzM0LTIzODAtNGMyMC05YmQyLWRjNWY3MDNlZjA4YyIsImlzX2FkbWluIjpmYWxzZSwidXNlcm5hbWUiOiIiLCJ0b2tlbl90eXBlIjoiYWNjZXNzIn0.HlLOmZwzn8dJq-jLN9Dr2qc7oqbAOLcSk7oJhZDl61Y"; // gitleaks:allow
+
+    fn sign(claims: &serde_json::Value, secret: &str) -> String {
+        encode(
+            &Header::default(),
+            claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    fn valid_claims() -> serde_json::Value {
+        serde_json::json!({
+            "sub": Uuid::new_v4().to_string(),
+            "email": "u@example.com",
+            "exp": (Utc::now() + Duration::hours(1)).timestamp(),
+        })
+    }
+
+    #[test]
+    fn test_accepts_access_token_issued_before_upgrade() {
+        let service = AuthService::new(JWT_TEST_SECRET.to_string());
+        let claims = service.validate_access_token(ACCESS_TOKEN_9_3).unwrap();
+        assert_eq!(claims.email, "service@example.com");
+        assert_eq!(claims.role, "user");
+    }
+
+    #[test]
+    fn test_rejects_invalid_access_tokens() {
+        let service = AuthService::new(JWT_TEST_SECRET.to_string());
+        assert!(service
+            .validate_access_token(&sign(&valid_claims(), JWT_TEST_SECRET))
+            .is_ok());
+
+        let mut wrong_type = valid_claims();
+        wrong_type["exp"] = "99999999999".into();
+        assert!(service
+            .validate_access_token(&sign(&wrong_type, JWT_TEST_SECRET))
+            .is_err());
+
+        let mut wrong_type_nbf = valid_claims();
+        wrong_type_nbf["nbf"] = "99999999999".into();
+        assert!(service
+            .validate_access_token(&sign(&wrong_type_nbf, JWT_TEST_SECRET))
+            .is_err());
+
+        let mut expired = valid_claims();
+        expired["exp"] = (Utc::now() - Duration::hours(1)).timestamp().into();
+        assert!(service
+            .validate_access_token(&sign(&expired, JWT_TEST_SECRET))
+            .is_err());
+
+        assert!(service
+            .validate_access_token(&sign(
+                &valid_claims(),
+                "another_secret_key_of_the_same_size"
+            ))
+            .is_err());
+    }
 }

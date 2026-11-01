@@ -493,4 +493,80 @@ mod tests {
         assert_eq!(CryptoUtils::bytes_to_human_readable(1536), "1.50 KB");
         assert_eq!(CryptoUtils::bytes_to_human_readable(1048576), "1.00 MB");
     }
+
+    const JWT_TEST_SECRET: &str = "test_secret_key_for_testing_only";
+
+    // Minted by the `JwtClaims` encoding on jsonwebtoken 9.3.1, signed with
+    // JWT_TEST_SECRET and expiring in 2126. Do not regenerate them: they prove that
+    // tokens issued before the upgrade to 10.x stay valid.
+    const JWT_TOKEN_9_3: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExMTExMS0xMTExLTQxMTEtODExMS0xMTExMTExMTExMTEiLCJleHAiOjQ5NDcxNDQ5MTQsImlhdCI6MTc5MzU0NDkxNCwidXNlcl9pZCI6IjExMTExMTExLTExMTEtNDExMS04MTExLTExMTExMTExMTExMSIsIndhbGxldF9hZGRyZXNzIjpudWxsfQ.OTRqMYvdbQUxRrjEIz8bCU1eyzA0nNge-jscYf4f14A"; // gitleaks:allow
+
+    fn sign_jwt(claims: &serde_json::Value, secret: &str) -> String {
+        encode(
+            &Header::default(),
+            claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    fn valid_jwt_claims() -> serde_json::Value {
+        serde_json::json!({
+            "sub": "user-1",
+            "exp": (Utc::now() + Duration::hours(1)).timestamp(),
+            "iat": Utc::now().timestamp(),
+            "user_id": "user-1",
+            "wallet_address": null,
+        })
+    }
+
+    #[test]
+    fn test_validate_jwt_accepts_token_issued_before_upgrade() {
+        let claims = validate_jwt(JWT_TOKEN_9_3, JWT_TEST_SECRET).unwrap();
+        assert_eq!(claims.sub, "11111111-1111-4111-8111-111111111111");
+        assert_eq!(claims.user_id, claims.sub);
+    }
+
+    #[test]
+    fn test_validate_jwt_accepts_freshly_generated_token() {
+        let token = generate_jwt("user-1", None, JWT_TEST_SECRET).unwrap();
+        assert_eq!(validate_jwt(&token, JWT_TEST_SECRET).unwrap().sub, "user-1");
+    }
+
+    #[test]
+    fn test_validate_jwt_rejects_claims_of_wrong_type() {
+        assert!(validate_jwt(
+            &sign_jwt(&valid_jwt_claims(), JWT_TEST_SECRET),
+            JWT_TEST_SECRET
+        )
+        .is_ok());
+
+        for (claim, bad_value) in [
+            ("exp", serde_json::json!("99999999999")),
+            ("exp", serde_json::json!(null)),
+            ("iat", serde_json::json!("now")),
+            ("sub", serde_json::json!(1)),
+            ("user_id", serde_json::json!(1)),
+        ] {
+            let mut claims = valid_jwt_claims();
+            claims[claim] = bad_value.clone();
+            assert!(
+                validate_jwt(&sign_jwt(&claims, JWT_TEST_SECRET), JWT_TEST_SECRET).is_err(),
+                "accepted {claim} = {bad_value}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_jwt_rejects_expired_token() {
+        let mut claims = valid_jwt_claims();
+        claims["exp"] = (Utc::now() - Duration::hours(1)).timestamp().into();
+        assert!(validate_jwt(&sign_jwt(&claims, JWT_TEST_SECRET), JWT_TEST_SECRET).is_err());
+    }
+
+    #[test]
+    fn test_validate_jwt_rejects_token_signed_with_another_key() {
+        let token = sign_jwt(&valid_jwt_claims(), "another_secret_key_of_the_same_size");
+        assert!(validate_jwt(&token, JWT_TEST_SECRET).is_err());
+    }
 }
