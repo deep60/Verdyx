@@ -49,7 +49,7 @@ hex = "0.4"
 # OpenTelemetry (pinned to avoid version conflicts)
 # tracing-opentelemetry 0.28+ supports opentelemetry 0.27+
 opentelemetry = "0.27"
-opentelemetry_sdk = "0.27"
+opentelemetry_sdk = "0.32"
 opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic"] }
 opentelemetry-http = "0.27"
 tracing-opentelemetry = "0.28"
