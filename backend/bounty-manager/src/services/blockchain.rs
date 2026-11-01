@@ -1,26 +1,27 @@
 // backend/bounty-manager/src/services/blockchain.rs
 
-use anyhow::Result;
-use ethers::{
-    abi::Abi,
-    contract::Contract,
-    middleware::SignerMiddleware,
-    providers::{Http, Middleware, Provider},
-    signers::{LocalWallet, Signer},
-    types::{Address, H256, U256},
+use alloy::{
+    contract::{ContractInstance, Interface},
+    dyn_abi::DynSolValue,
+    json_abi::JsonAbi,
+    primitives::{Address, TxHash, U256},
+    providers::{DynProvider, Provider, RootProvider},
+    rpc::types::TransactionReceipt,
+    signers::local::PrivateKeySigner,
 };
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-type BlockchainClient = SignerMiddleware<Provider<Http>, LocalWallet>;
+type BlockchainClient = DynProvider;
 
 #[derive(Debug, Clone)]
 pub struct BlockchainService {
-    client: Arc<BlockchainClient>,
-    bounty_manager: Contract<BlockchainClient>,
-    threat_token: Contract<BlockchainClient>,
+    client: BlockchainClient,
+    signer_address: Address,
+    bounty_manager: ContractInstance<BlockchainClient>,
+    threat_token: ContractInstance<BlockchainClient>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,19 +80,20 @@ impl BlockchainService {
         chain_id: u64,
         bounty_manager_address: &str,
         threat_token_address: &str,
-        bounty_manager_abi: Abi,
-        threat_token_abi: Abi,
+        bounty_manager_abi: JsonAbi,
+        threat_token_abi: JsonAbi,
     ) -> Result<Self, BlockchainError> {
-        let provider = Provider::<Http>::try_from(rpc_url)
-            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?
-            .interval(Duration::from_millis(1000));
+        let url = rpc_url
+            .parse::<alloy::transports::http::reqwest::Url>()
+            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
+        let provider = RootProvider::new_http(url).erased();
 
-        let wallet: LocalWallet = private_key
-            .parse::<LocalWallet>()
-            .map_err(|e| BlockchainError::ConnectionError(format!("Invalid private key: {e}")))?
-            .with_chain_id(chain_id);
+        let signer = private_key
+            .parse::<PrivateKeySigner>()
+            .map_err(|e| BlockchainError::ConnectionError(format!("Invalid private key: {e}")))?;
+        let signer_address = signer.address();
 
-        let client = Arc::new(SignerMiddleware::new(provider, wallet));
+        let client = shared::evm::with_signer(provider, signer, chain_id);
 
         let bm_addr: Address = bounty_manager_address
             .parse()
@@ -101,14 +103,59 @@ impl BlockchainService {
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(threat_token_address.to_string()))?;
 
-        let bounty_manager = Contract::new(bm_addr, bounty_manager_abi, Arc::clone(&client));
-        let threat_token = Contract::new(tt_addr, threat_token_abi, Arc::clone(&client));
+        let bounty_manager =
+            ContractInstance::new(bm_addr, client.clone(), Interface::new(bounty_manager_abi));
+        let threat_token =
+            ContractInstance::new(tt_addr, client.clone(), Interface::new(threat_token_abi));
 
         Ok(Self {
             client,
+            signer_address,
             bounty_manager,
             threat_token,
         })
+    }
+
+    /// Send a contract call and wait for it to be mined.
+    async fn send_and_wait(
+        &self,
+        contract: &ContractInstance<BlockchainClient>,
+        function: &str,
+        args: &[DynSolValue],
+    ) -> Result<(TxHash, Option<TransactionReceipt>), BlockchainError> {
+        let pending_tx = contract
+            .function(function, args)
+            .map_err(|e| BlockchainError::ContractError(e.to_string()))?
+            .send()
+            .await
+            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
+
+        let tx_hash = *pending_tx.tx_hash();
+
+        let receipt = shared::evm::wait_for_receipt(&self.client, tx_hash, 1)
+            .await
+            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
+
+        Ok((tx_hash, receipt))
+    }
+
+    /// Read a contract's single `uint256` return value.
+    async fn read_uint(
+        &self,
+        contract: &ContractInstance<BlockchainClient>,
+        function: &str,
+        args: &[DynSolValue],
+    ) -> Result<U256, BlockchainError> {
+        contract
+            .function(function, args)
+            .map_err(|e| BlockchainError::ContractError(e.to_string()))?
+            .call()
+            .await
+            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?
+            .first()
+            .and_then(DynSolValue::as_uint)
+            .map(|(value, _)| value)
+            .ok_or_else(|| BlockchainError::ContractError(format!("{function} returned no uint")))
     }
 
     /// Approve and stake tokens for a bounty analysis submission
@@ -122,29 +169,23 @@ impl BlockchainService {
         let amount_u256 = U256::from(amount);
 
         // Approve BountyManager to spend tokens
-        let bm_address = self.bounty_manager.address();
-        let tx = self
-            .threat_token
-            .method::<_, bool>("approve", (bm_address, amount_u256))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?;
+        let bm_address = *self.bounty_manager.address();
+        let (tx_hash, receipt) = self
+            .send_and_wait(
+                &self.threat_token,
+                "approve",
+                &[
+                    DynSolValue::Address(bm_address),
+                    DynSolValue::Uint(amount_u256, 256),
+                ],
+            )
+            .await?;
 
-        let pending_tx = tx
-            .send()
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let tx_hash = pending_tx.tx_hash();
-
-        // Wait for receipt
-        let receipt = pending_tx
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let block_number = receipt.and_then(|r| r.block_number.map(|n| n.as_u64()));
+        let block_number = receipt.and_then(|r| r.block_number);
 
         Ok(StakeTransaction {
             transaction_hash: format!("{tx_hash:?}"),
-            from_address: format!("{:?}", self.client.address()),
+            from_address: format!("{:?}", self.signer_address),
             amount,
             bounty_id,
             block_number,
@@ -165,23 +206,18 @@ impl BlockchainService {
 
         let amount_u256 = U256::from(amount);
 
-        let tx = self
-            .threat_token
-            .method::<_, bool>("transfer", (to, amount_u256))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?;
+        let (tx_hash, receipt) = self
+            .send_and_wait(
+                &self.threat_token,
+                "transfer",
+                &[
+                    DynSolValue::Address(to),
+                    DynSolValue::Uint(amount_u256, 256),
+                ],
+            )
+            .await?;
 
-        let pending_tx = tx
-            .send()
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let tx_hash = pending_tx.tx_hash();
-
-        let receipt = pending_tx
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let block_number = receipt.and_then(|r| r.block_number.map(|n| n.as_u64()));
+        let block_number = receipt.and_then(|r| r.block_number);
 
         Ok(PayoutTransaction {
             transaction_hash: format!("{tx_hash:?}"),
@@ -202,24 +238,16 @@ impl BlockchainService {
     pub async fn resolve_bounty(&self, on_chain_bounty_id: u64) -> Result<String, BlockchainError> {
         let bounty_id = U256::from(on_chain_bounty_id);
 
-        let tx = self
-            .bounty_manager
-            .method::<_, ()>("resolveBounty", bounty_id)
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?;
+        // Waits for the receipt so callers know the resolution actually mined.
+        let (tx_hash, _) = self
+            .send_and_wait(
+                &self.bounty_manager,
+                "resolveBounty",
+                &[DynSolValue::Uint(bounty_id, 256)],
+            )
+            .await?;
 
-        let pending_tx = tx
-            .send()
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let tx_hash = format!("{:?}", pending_tx.tx_hash());
-
-        // Wait for the receipt so callers know the resolution actually mined.
-        pending_tx
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        Ok(tx_hash)
+        Ok(format!("{tx_hash:?}"))
     }
 
     /// Read the amount an address can claim via `BountyManager.withdraw()`.
@@ -231,20 +259,20 @@ impl BlockchainService {
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(address.to_string()))?;
 
-        let amount: U256 = self
-            .bounty_manager
-            .method("pendingWithdrawals", (addr,))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?
-            .call()
-            .await
-            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
+        let amount = self
+            .read_uint(
+                &self.bounty_manager,
+                "pendingWithdrawals",
+                &[DynSolValue::Address(addr)],
+            )
+            .await?;
 
-        Ok(amount.as_u64())
+        u64::try_from(amount).map_err(|e| BlockchainError::ContractError(e.to_string()))
     }
 
     /// Verify a transaction by checking its receipt
     pub async fn verify_transaction(&self, tx_hash: &str) -> Result<bool, BlockchainError> {
-        let hash: H256 = tx_hash
+        let hash: TxHash = tx_hash
             .parse()
             .map_err(|_| BlockchainError::ContractError("Invalid transaction hash".to_string()))?;
 
@@ -255,7 +283,7 @@ impl BlockchainService {
             .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
 
         match receipt {
-            Some(r) => Ok(r.status == Some(1.into())),
+            Some(r) => Ok(r.status()),
             None => Ok(false), // Transaction not yet mined
         }
     }
@@ -265,7 +293,7 @@ impl BlockchainService {
         &self,
         tx_hash: &str,
     ) -> Result<TransactionStatus, BlockchainError> {
-        let hash: H256 = tx_hash
+        let hash: TxHash = tx_hash
             .parse()
             .map_err(|_| BlockchainError::ContractError("Invalid transaction hash".to_string()))?;
 
@@ -277,7 +305,7 @@ impl BlockchainService {
 
         match receipt {
             Some(r) => {
-                if r.status == Some(1.into()) {
+                if r.status() {
                     Ok(TransactionStatus::Confirmed)
                 } else {
                     Ok(TransactionStatus::Failed)
@@ -293,15 +321,15 @@ impl BlockchainService {
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(address.to_string()))?;
 
-        let balance: U256 = self
-            .threat_token
-            .method("balanceOf", (addr,))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?
-            .call()
-            .await
-            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
+        let balance = self
+            .read_uint(
+                &self.threat_token,
+                "balanceOf",
+                &[DynSolValue::Address(addr)],
+            )
+            .await?;
 
-        Ok(balance.as_u64())
+        u64::try_from(balance).map_err(|e| BlockchainError::ContractError(e.to_string()))
     }
 
     /// Expose the client for use by sync services

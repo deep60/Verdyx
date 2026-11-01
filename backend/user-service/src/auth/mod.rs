@@ -1,9 +1,9 @@
+use alloy_primitives::Signature;
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 use chrono::{Duration, Utc};
-use ethers::core::types::Signature;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -140,7 +140,7 @@ impl AuthService {
 
         // Recover the address from the signature
         let recovered_address = sig
-            .recover(message)
+            .recover_address_from_msg(message)
             .map_err(|e| UserError::ValidationError(format!("Failed to recover address: {e}")))?;
 
         // Compare with expected address (case-insensitive)
@@ -211,6 +211,35 @@ mod tests {
             access_token_expiry_hours: 24,
             refresh_token_expiry_days: 30,
         }
+    }
+
+    #[test]
+    fn verifies_a_browser_wallet_signature() {
+        // Signed with ethers.js v6 `wallet.signMessage` by dev account #0.
+        let signer = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+        let message = "Sign in to Verdyx\nNonce: 8f2c1a";
+        let signature = "0x6f11b9e8543e3252353a7e5d9c9a30984658d0c7d57734c2d36f00c35e1a82784dfa678e3b5d134cfb329e1639f79844471b9b60c364b3a383428e8665395ceb1c";
+        let auth_service = AuthService::new(get_test_jwt_config());
+
+        assert!(auth_service
+            .verify_wallet_signature(message, signature, signer)
+            .unwrap());
+        assert!(auth_service
+            .verify_wallet_signature(message, signature, &signer.to_lowercase())
+            .unwrap());
+        assert!(!auth_service
+            .verify_wallet_signature("tampered", signature, signer)
+            .unwrap());
+        assert!(!auth_service
+            .verify_wallet_signature(
+                message,
+                signature,
+                "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+            )
+            .unwrap());
+        assert!(auth_service
+            .verify_wallet_signature(message, "0x1234", signer)
+            .is_err());
     }
 
     #[test]

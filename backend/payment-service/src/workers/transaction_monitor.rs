@@ -25,7 +25,7 @@ pub async fn start(service: Arc<PaymentService>) -> Result<()> {
                 for tx in txs {
                     match service.get_tx_receipt(&tx.tx_hash).await {
                         Ok(Some(receipt)) => {
-                            let status = if receipt.status == Some(1.into()) {
+                            let status = if receipt.status() {
                                 "confirmed"
                             } else {
                                 "failed"
@@ -34,7 +34,7 @@ pub async fn start(service: Arc<PaymentService>) -> Result<()> {
                                 "UPDATE payment_transactions SET status = $1, block_number = $2, confirmed_at = NOW() WHERE id = $3"
                             )
                             .bind(status)
-                            .bind(receipt.block_number.map(|n| n.as_u64() as i64))
+                            .bind(receipt.block_number.map(|n| n as i64))
                             .bind(tx.id)
                             .execute(service.db_pool())
                             .await;

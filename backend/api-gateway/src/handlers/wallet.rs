@@ -94,7 +94,7 @@ pub async fn get_balance(
             .flatten()
             .unwrap_or_default();
 
-    let on_chain_balance = if let Ok(addr) = wallet_address.parse::<ethers::types::Address>() {
+    let on_chain_balance = if let Ok(addr) = wallet_address.parse::<alloy::primitives::Address>() {
         if !addr.is_zero() {
             state
                 .blockchain
@@ -159,7 +159,7 @@ pub async fn get_balance_by_address(
     State(state): State<AppState>,
     Path(address): Path<String>,
 ) -> Result<Json<WalletBalance>, StatusCode> {
-    let balance_str = if let Ok(addr) = address.parse::<ethers::types::Address>() {
+    let balance_str = if let Ok(addr) = address.parse::<alloy::primitives::Address>() {
         if !addr.is_zero() {
             state
                 .blockchain
@@ -272,13 +272,15 @@ pub async fn connect_wallet(
     // Verify signature: recover address from message + signature
     let signature = payload
         .signature
-        .parse::<ethers::types::Signature>()
+        .parse::<alloy::primitives::Signature>()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    let recovered = signature.recover(payload.message.as_str()).map_err(|e| {
-        tracing::warn!("Signature recovery failed: {}", e);
-        StatusCode::BAD_REQUEST
-    })?;
+    let recovered = signature
+        .recover_address_from_msg(payload.message.as_str())
+        .map_err(|e| {
+            tracing::warn!("Signature recovery failed: {}", e);
+            StatusCode::BAD_REQUEST
+        })?;
 
     let recovered_addr = format!("{recovered:?}");
 
@@ -348,7 +350,7 @@ pub async fn withdraw(
 
     let _addr = payload
         .to_address
-        .parse::<ethers::types::Address>()
+        .parse::<alloy::primitives::Address>()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     let payout_id = Uuid::new_v4();

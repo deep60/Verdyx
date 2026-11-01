@@ -1,7 +1,11 @@
 // backend/bounty-manager/src/services/blockchain_sync.rs
 
+use alloy::primitives::{Address, B256, U256};
+use alloy::providers::Provider;
+use alloy::rpc::types::Filter;
+use alloy::sol;
+use alloy::sol_types::SolEvent;
 use chrono::Utc;
-use ethers::providers::Middleware;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -146,13 +150,10 @@ impl BlockchainSyncService {
 
     /// Get events from a specific block
     async fn get_block_events(&self, block_number: u64) -> Result<Vec<BlockchainEvent>, SyncError> {
-        use ethers::abi::{decode as abi_decode, ParamType};
-        use ethers::types::{Address, BlockNumber, Filter, U256};
-
         let client = self.blockchain.get_client();
         let filter = Filter::new()
-            .from_block(BlockNumber::Number(block_number.into()))
-            .to_block(BlockNumber::Number(block_number.into()));
+            .from_block(block_number)
+            .to_block(block_number);
 
         let logs = client
             .get_logs(&filter)
@@ -162,143 +163,73 @@ impl BlockchainSyncService {
         let events: Vec<BlockchainEvent> = logs
             .iter()
             .filter_map(|log| {
-                let event_type = classify_event_topic(log.topics.first()?)?;
+                let event_type = classify_event_topic(log.topics().first()?)?;
                 let tx_hash = log
                     .transaction_hash
                     .map(|h| format!("{h:?}"))
                     .unwrap_or_default();
+                let log_data = &log.data().data;
+                // Stored as a hex quantity, the JSON-RPC form of a log index.
+                let log_index = log.log_index.map(U256::from);
+                let address = format!("{:?}", log.address());
 
                 // ── Decode indexed topics ──
                 // topic[0] = event signature hash
                 // topic[1..] = indexed params (uint256 → U256, address → Address)
                 let bounty_id = log
-                    .topics
+                    .topics()
                     .get(1)
-                    .map(|t| U256::from(t.as_bytes()))
-                    .map(|id| id.to_string());
+                    .map(|t| U256::from_be_bytes(t.0).to_string());
 
                 // For events with 2 indexed params: topic[2] is address (creator/analyst)
-                let indexed_address = log.topics.get(2).map(|t| {
-                    // Address is stored right-padded in 32 bytes; take last 20 bytes
-                    let bytes = t.as_bytes();
-                    let addr = Address::from_slice(&bytes[12..]);
-                    format!("{addr:?}")
-                });
+                let indexed_address = log
+                    .topics()
+                    .get(2)
+                    .map(|t| format!("{:?}", Address::from_word(*t)));
 
                 // ── Decode non-indexed data from log.data ──
                 let data = match event_type {
                     // BountyCreated: data = (string artifactHash, uint256 reward, uint256 deadline)
                     BlockchainEventType::BountyCreated => {
-                        let decoded = abi_decode(
-                            &[
-                                ParamType::String,
-                                ParamType::Uint(256),
-                                ParamType::Uint(256),
-                            ],
-                            &log.data,
-                        )
-                        .ok();
-
-                        let artifact_hash = decoded
-                            .as_ref()
-                            .and_then(|d| d.first())
-                            .and_then(|t| t.clone().into_string());
-                        let reward = decoded
-                            .as_ref()
-                            .and_then(|d| d.get(1))
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.to_string());
-                        let deadline = decoded
-                            .as_ref()
-                            .and_then(|d| d.get(2))
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.to_string());
+                        let decoded = BountyCreated::abi_decode_data(log_data).ok();
 
                         serde_json::json!({
                             "bounty_id": bounty_id,
                             "creator": indexed_address,
-                            "artifact_hash": artifact_hash,
-                            "reward": reward,
-                            "deadline": deadline,
-                            "log_index": log.log_index,
-                            "address": format!("{:?}", log.address),
+                            "artifact_hash": decoded.as_ref().map(|d| &d.0),
+                            "reward": decoded.as_ref().map(|d| d.1.to_string()),
+                            "deadline": decoded.as_ref().map(|d| d.2.to_string()),
+                            "log_index": log_index,
+                            "address": address,
                         })
                     }
 
                     // AnalysisSubmitted: data = (uint8 verdict, uint256 stake, uint256 confidence)
                     BlockchainEventType::SubmissionStaked => {
-                        let decoded = abi_decode(
-                            &[
-                                ParamType::Uint(8),
-                                ParamType::Uint(256),
-                                ParamType::Uint(256),
-                            ],
-                            &log.data,
-                        )
-                        .ok();
-
-                        let verdict = decoded
-                            .as_ref()
-                            .and_then(|d| d.first())
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.as_u64());
-                        let stake = decoded
-                            .as_ref()
-                            .and_then(|d| d.get(1))
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.to_string());
-                        let confidence = decoded
-                            .as_ref()
-                            .and_then(|d| d.get(2))
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.to_string());
+                        let decoded = AnalysisSubmitted::abi_decode_data(log_data).ok();
 
                         serde_json::json!({
                             "bounty_id": bounty_id,
                             "analyst": indexed_address,
-                            "verdict": verdict,
-                            "stake_amount": stake,
-                            "confidence": confidence,
-                            "log_index": log.log_index,
-                            "address": format!("{:?}", log.address),
+                            "verdict": decoded.as_ref().map(|d| d.0),
+                            "stake_amount": decoded.as_ref().map(|d| d.1.to_string()),
+                            "confidence": decoded.as_ref().map(|d| d.2.to_string()),
+                            "log_index": log_index,
+                            "address": address,
                         })
                     }
 
                     // ConsensusReached: data = (uint8 consensus, uint256 confidenceScore, uint256 totalAnalyses)
                     BlockchainEventType::ConsensusReached => {
-                        let decoded = abi_decode(
-                            &[
-                                ParamType::Uint(8),
-                                ParamType::Uint(256),
-                                ParamType::Uint(256),
-                            ],
-                            &log.data,
-                        )
-                        .ok();
-
-                        let consensus = decoded
-                            .as_ref()
-                            .and_then(|d| d.first())
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.as_u64());
-                        let confidence_score = decoded
-                            .as_ref()
-                            .and_then(|d| d.get(1))
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.to_string());
-                        let total_analyses = decoded
-                            .as_ref()
-                            .and_then(|d| d.get(2))
-                            .and_then(|t| t.clone().into_uint())
-                            .map(|u| u.to_string());
+                        let decoded = ConsensusReached::abi_decode_data(log_data).ok();
 
                         serde_json::json!({
                             "bounty_id": bounty_id,
-                            "consensus_verdict": consensus,
-                            "confidence_score": confidence_score,
-                            "total_analyses": total_analyses,
-                            "log_index": log.log_index,
-                            "address": format!("{:?}", log.address),
+                            "consensus_verdict": decoded.as_ref().map(|d| d.0),
+                            "confidence_score": decoded.as_ref().map(|d| d.1.to_string()),
+                            "total_analyses": decoded.as_ref().map(|d| d.2.to_string()),
+                            "log_index": log_index,
+                            "address": address,
                         })
                     }
 
@@ -306,12 +237,12 @@ impl BlockchainSyncService {
                     // Dynamic arrays — complex ABI decoding
                     BlockchainEventType::PayoutDistributed => {
                         // For dynamic arrays, just store raw hex and decode later
-                        let raw_hex: String = log.data.iter().map(|b| format!("{b:02x}")).collect();
+                        let raw_hex: String = log_data.iter().map(|b| format!("{b:02x}")).collect();
                         serde_json::json!({
                             "bounty_id": bounty_id,
                             "raw_data": format!("0x{}", raw_hex),
-                            "log_index": log.log_index,
-                            "address": format!("{:?}", log.address),
+                            "log_index": log_index,
+                            "address": address,
                         })
                     }
 
@@ -319,8 +250,8 @@ impl BlockchainSyncService {
                     _ => {
                         serde_json::json!({
                             "bounty_id": bounty_id,
-                            "log_index": log.log_index,
-                            "address": format!("{:?}", log.address),
+                            "log_index": log_index,
+                            "address": address,
                         })
                     }
                 };
@@ -860,11 +791,10 @@ impl BlockchainSyncService {
     /// Get current block number from blockchain
     async fn get_current_block_number(&self) -> Result<u64, SyncError> {
         let client = self.blockchain.get_client();
-        let block_number = client
+        client
             .get_block_number()
             .await
-            .map_err(|e| SyncError::BlockchainError(format!("Failed to get block number: {e}")))?;
-        Ok(block_number.as_u64())
+            .map_err(|e| SyncError::BlockchainError(format!("Failed to get block number: {e}")))
     }
 
     /// Get last synced block from database
@@ -978,35 +908,45 @@ impl From<uuid::Error> for SyncError {
     }
 }
 
+// Canonical event signatures from BountyManager.sol. ThreatVerdict is a uint8.
+sol! {
+    event BountyCreated(
+        uint256 indexed bountyId,
+        address indexed creator,
+        string artifactHash,
+        uint256 reward,
+        uint256 deadline
+    );
+    event AnalysisSubmitted(
+        uint256 indexed bountyId,
+        address indexed engine,
+        uint8 verdict,
+        uint256 stake,
+        uint256 confidence
+    );
+    event ConsensusReached(
+        uint256 indexed bountyId,
+        uint8 consensus,
+        uint256 confidenceScore,
+        uint256 totalAnalyses
+    );
+    event RewardsDistributed(
+        uint256 indexed bountyId,
+        address[] winners,
+        uint256[] rewards,
+        uint256[] stakes
+    );
+}
+
 /// Classify a Solidity event log topic to a BlockchainEventType
 /// Topic[0] = keccak256(event_signature)
-fn classify_event_topic(topic: &ethers::types::H256) -> Option<BlockchainEventType> {
-    use ethers::utils::keccak256;
-
-    // Canonical ABI signatures from BountyManager.sol
-    // Note: ThreatVerdict = uint8, array types use brackets
-    let bounty_created = ethers::types::H256::from(keccak256(
-        "BountyCreated(uint256,address,string,uint256,uint256)",
-    ));
-    let analysis_submitted = ethers::types::H256::from(keccak256(
-        "AnalysisSubmitted(uint256,address,uint8,uint256,uint256)",
-    ));
-    let consensus_reached =
-        ethers::types::H256::from(keccak256("ConsensusReached(uint256,uint8,uint256,uint256)"));
-    let rewards_distributed = ethers::types::H256::from(keccak256(
-        "RewardsDistributed(uint256,address[],uint256[],uint256[])",
-    ));
-
-    if *topic == bounty_created {
-        Some(BlockchainEventType::BountyCreated)
-    } else if *topic == analysis_submitted {
-        Some(BlockchainEventType::SubmissionStaked)
-    } else if *topic == consensus_reached {
-        Some(BlockchainEventType::ConsensusReached)
-    } else if *topic == rewards_distributed {
-        Some(BlockchainEventType::PayoutDistributed)
-    } else {
-        None // Unknown event
+fn classify_event_topic(topic: &B256) -> Option<BlockchainEventType> {
+    match *topic {
+        BountyCreated::SIGNATURE_HASH => Some(BlockchainEventType::BountyCreated),
+        AnalysisSubmitted::SIGNATURE_HASH => Some(BlockchainEventType::SubmissionStaked),
+        ConsensusReached::SIGNATURE_HASH => Some(BlockchainEventType::ConsensusReached),
+        RewardsDistributed::SIGNATURE_HASH => Some(BlockchainEventType::PayoutDistributed),
+        _ => None, // Unknown event
     }
 }
 
@@ -1026,5 +966,194 @@ mod tests {
 
         assert_eq!(status.blocks_behind, 50);
         assert!(status.is_syncing);
+    }
+
+    /// Emit each event from the real contracts and read it back through the
+    /// service, and through the database handler when `DATABASE_URL` is set.
+    /// See `shared::evm_testing` for how to run it.
+    #[tokio::test]
+    #[ignore = "needs a local chain and compiled contracts"]
+    async fn local_chain_bounty_event_round_trip() {
+        use shared::evm_testing::{artifacts_dir, LocalChain, ADMIN_KEY, TOKEN};
+
+        let chain = LocalChain::deploy().await;
+        let abi = |name: &str| {
+            crate::load_abi(artifacts_dir().join(name).to_str().unwrap()).expect("ABI loads")
+        };
+        let service = BlockchainService::new(
+            &chain.rpc_url,
+            ADMIN_KEY,
+            chain.chain_id,
+            &format!("{:?}", chain.bounty_manager),
+            &format!("{:?}", chain.token),
+            abi("BountyManager.sol/BountyManager.json"),
+            abi("ThreatToken.sol/ThreatToken.json"),
+        )
+        .await
+        .expect("service builds");
+        assert!(service.health_check().await);
+
+        let database_url = std::env::var("DATABASE_URL").ok();
+        let db = PgPool::connect_lazy(
+            database_url
+                .as_deref()
+                .unwrap_or("postgres://unused@127.0.0.1/unused"),
+        )
+        .unwrap();
+        let service = Arc::new(service);
+        let sync = BlockchainSyncService::new(db.clone(), service.clone());
+
+        let creator = format!("{:?}", chain.admin_address);
+        let analyst = format!("{:?}", chain.analyst_address);
+        let artifact_hash = format!("Qm{}", Uuid::new_v4().simple());
+        let bounty_row = Uuid::new_v4();
+        let reward = TOKEN * U256::from(100);
+
+        // ── BountyCreated ──
+        let created = chain.create_bounty(&artifact_hash, reward).await;
+        let events = sync
+            .get_block_events(created.block_number.unwrap())
+            .await
+            .unwrap();
+        let event = events
+            .iter()
+            .find(|e| matches!(e.event_type, BlockchainEventType::BountyCreated))
+            .expect("BountyCreated was decoded");
+        let bounty_id = event.data["bounty_id"].as_str().unwrap().to_string();
+        assert_eq!(event.data["creator"], creator);
+        assert_eq!(event.data["artifact_hash"], artifact_hash);
+        assert_eq!(event.data["reward"], reward.to_string());
+        assert!(event.data["deadline"]
+            .as_str()
+            .unwrap()
+            .parse::<u64>()
+            .is_ok());
+        assert!(event.data["log_index"].as_str().unwrap().starts_with("0x"));
+        assert_eq!(event.data["address"], format!("{:?}", chain.bounty_manager));
+        assert_eq!(
+            event.transaction_hash,
+            format!("{:?}", created.transaction_hash)
+        );
+
+        if database_url.is_some() {
+            sqlx::query(
+                "INSERT INTO bounties (id, creator, title, description, artifact_type, \
+                 artifact_hash, reward_amount, currency, min_stake, deadline, status) \
+                 VALUES ($1, $2, 'chain test', 'chain test', 'file', $3, 1, 'THREAT', 1, \
+                 NOW() + INTERVAL '1 day', 'Pending')",
+            )
+            .bind(bounty_row)
+            .bind(&creator)
+            .bind(&artifact_hash)
+            .execute(&db)
+            .await
+            .unwrap();
+
+            sync.process_event(event).await.unwrap();
+
+            let (status, on_chain_id): (String, Option<String>) = sqlx::query_as(
+                "SELECT status, metadata->>'on_chain_id' FROM bounties WHERE id = $1",
+            )
+            .bind(bounty_row)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+            assert_eq!(status, "Active", "the event must activate the DB bounty");
+            assert_eq!(on_chain_id.as_deref(), Some(bounty_id.as_str()));
+        }
+
+        // ── AnalysisSubmitted ──
+        let stake = TOKEN * U256::from(25);
+        let on_chain_id: U256 = bounty_id.parse().unwrap();
+        let submitted = chain.submit_analysis(on_chain_id, 2, 90, stake).await;
+        let events = sync
+            .get_block_events(submitted.block_number.unwrap())
+            .await
+            .unwrap();
+        let event = events
+            .iter()
+            .find(|e| matches!(e.event_type, BlockchainEventType::SubmissionStaked))
+            .expect("AnalysisSubmitted was decoded");
+        assert_eq!(event.data["bounty_id"], bounty_id);
+        assert_eq!(event.data["analyst"], analyst);
+        assert_eq!(event.data["verdict"], 2);
+        assert_eq!(event.data["stake_amount"], stake.to_string());
+        assert_eq!(event.data["confidence"], "90");
+
+        // ── ConsensusReached and RewardsDistributed, from the service's own resolve ──
+        chain.advance_time(3 * 3600).await;
+        let tx_hash = service.resolve_bounty(on_chain_id.to()).await.unwrap();
+        assert!(service.verify_transaction(&tx_hash).await.unwrap());
+        assert!(matches!(
+            service.get_transaction_status(&tx_hash).await.unwrap(),
+            crate::services::blockchain::TransactionStatus::Confirmed
+        ));
+
+        let block = sync.get_current_block_number().await.unwrap();
+        let events = sync.get_block_events(block).await.unwrap();
+        let consensus = events
+            .iter()
+            .find(|e| matches!(e.event_type, BlockchainEventType::ConsensusReached))
+            .expect("ConsensusReached was decoded");
+        assert_eq!(consensus.data["bounty_id"], bounty_id);
+        assert_eq!(consensus.data["consensus_verdict"], 2);
+        assert_eq!(consensus.data["total_analyses"], "1");
+        let payout = events
+            .iter()
+            .find(|e| matches!(e.event_type, BlockchainEventType::PayoutDistributed))
+            .expect("RewardsDistributed was decoded");
+        assert!(payout.data["raw_data"].as_str().unwrap().len() > 2);
+
+        // ── Signed token calls and reads ──
+        let recipient = format!("{:?}", chain.recipient_address);
+        let bounty_uuid = Uuid::new_v4();
+        let stake_tx = service
+            .create_stake_transaction(&creator, bounty_uuid, 1_000)
+            .await
+            .unwrap();
+        assert_eq!(stake_tx.from_address, creator);
+        assert!(stake_tx.block_number.is_some());
+        let before = service.get_balance(&recipient).await.unwrap_or(0);
+        let payout_tx = service
+            .create_payout_transaction(&recipient, bounty_uuid, 1_000)
+            .await
+            .unwrap();
+        assert!(payout_tx.block_number.is_some());
+        assert_eq!(
+            service.get_balance(&recipient).await.unwrap(),
+            before + 1_000
+        );
+
+        assert_eq!(service.get_pending_withdrawal(&recipient).await.unwrap(), 0);
+        // Wei amounts above u64::MAX are reported rather than a panic.
+        assert!(service.get_balance(&creator).await.is_err());
+
+        if database_url.is_some() {
+            sqlx::query("DELETE FROM bounties WHERE id = $1")
+                .bind(bounty_row)
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn event_signatures_match_the_contract() {
+        assert_eq!(
+            BountyCreated::SIGNATURE,
+            "BountyCreated(uint256,address,string,uint256,uint256)"
+        );
+        assert_eq!(
+            AnalysisSubmitted::SIGNATURE,
+            "AnalysisSubmitted(uint256,address,uint8,uint256,uint256)"
+        );
+        assert_eq!(
+            ConsensusReached::SIGNATURE,
+            "ConsensusReached(uint256,uint8,uint256,uint256)"
+        );
+        assert_eq!(
+            RewardsDistributed::SIGNATURE,
+            "RewardsDistributed(uint256,address[],uint256[],uint256[])"
+        );
     }
 }

@@ -360,7 +360,7 @@ async fn init_blockchain_service() -> Option<Arc<services::blockchain::Blockchai
 
 /// Load a contract ABI from a JSON file. Accepts either a bare ABI array or a
 /// Hardhat/Truffle artifact object containing an `"abi"` field.
-fn load_abi(path: &str) -> Option<ethers::abi::Abi> {
+fn load_abi(path: &str) -> Option<alloy::json_abi::JsonAbi> {
     let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
@@ -370,14 +370,14 @@ fn load_abi(path: &str) -> Option<ethers::abi::Abi> {
     };
 
     // Try a bare ABI array first.
-    if let Ok(abi) = serde_json::from_str::<ethers::abi::Abi>(&contents) {
+    if let Ok(abi) = serde_json::from_str::<alloy::json_abi::JsonAbi>(&contents) {
         return Some(abi);
     }
 
     // Fall back to an artifact object with an `abi` field.
     match serde_json::from_str::<serde_json::Value>(&contents) {
         Ok(v) => match v.get("abi") {
-            Some(abi_val) => serde_json::from_value::<ethers::abi::Abi>(abi_val.clone())
+            Some(abi_val) => serde_json::from_value::<alloy::json_abi::JsonAbi>(abi_val.clone())
                 .map_err(|e| warn!("ABI field in {} is invalid: {}", path, e))
                 .ok(),
             None => {

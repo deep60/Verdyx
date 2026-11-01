@@ -123,7 +123,7 @@ pub async fn get_transaction_status(
 ) -> (StatusCode, Json<Value>) {
     match state.payment_service.get_tx_receipt(&tx_hash).await {
         Ok(Some(receipt)) => {
-            let status = if receipt.status == Some(1.into()) {
+            let status = if receipt.status() {
                 "confirmed"
             } else {
                 "failed"
@@ -133,8 +133,8 @@ pub async fn get_transaction_status(
                 Json(json!({
                     "tx_hash": tx_hash,
                     "status": status,
-                    "block_number": receipt.block_number.map(|n| n.as_u64()),
-                    "gas_used": receipt.gas_used.map(|g| format!("{g}"))
+                    "block_number": receipt.block_number,
+                    "gas_used": receipt.gas_used.to_string()
                 })),
             )
         }

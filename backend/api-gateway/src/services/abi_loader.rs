@@ -3,8 +3,8 @@
 //! This module loads Application Binary Interfaces (ABIs) from JSON files
 //! to enable interaction with deployed smart contracts.
 
+use alloy::json_abi::JsonAbi as Abi;
 use anyhow::{Context, Result};
-use ethers::abi::Abi;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
