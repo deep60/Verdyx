@@ -1,3 +1,4 @@
+use alloy::primitives::Signature;
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -6,7 +7,6 @@ use axum::{
     Router,
 };
 use chrono::{DateTime, Duration, Utc};
-use ethers::core::types::Signature;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -337,7 +337,7 @@ fn verify_wallet_signature(address: &str, signature: &str, message: &str) -> boo
 
     // Recover the signer address from the signature
     // This uses EIP-191 personal_sign recovery (prefix "\x19Ethereum Signed Message:\n")
-    let recovered = match sig.recover(message) {
+    let recovered = match sig.recover_address_from_msg(message) {
         Ok(addr) => addr,
         Err(_) => return false,
     };
@@ -681,5 +681,63 @@ async fn identity_as_user_response(
             ))))
         }
         Err(code) => Err(map_auth_status(code)),
+    }
+}
+
+#[cfg(test)]
+mod wallet_signature_tests {
+    use super::verify_wallet_signature;
+
+    /// Signed with ethers.js v6 `wallet.signMessage` by dev account #0.
+    const SIGNER: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+    const MESSAGE: &str = "Sign in to Verdyx\nNonce: 8f2c1a";
+    const SIGNATURE: &str = "0x6f11b9e8543e3252353a7e5d9c9a30984658d0c7d57734c2d36f00c35e1a82784dfa678e3b5d134cfb329e1639f79844471b9b60c364b3a383428e8665395ceb1c";
+
+    #[test]
+    fn accepts_a_browser_wallet_signature() {
+        assert!(verify_wallet_signature(SIGNER, SIGNATURE, MESSAGE));
+        assert!(verify_wallet_signature(
+            &SIGNER.to_lowercase(),
+            SIGNATURE,
+            MESSAGE
+        ));
+    }
+
+    #[test]
+    fn accepts_every_recovery_id_form_wallets_emit() {
+        // v of 27/28 (above), and the 0/1 form some hardware wallets return.
+        let raw_v = format!("{}01", &SIGNATURE[..SIGNATURE.len() - 2]);
+        assert!(verify_wallet_signature(SIGNER, &raw_v, MESSAGE));
+        assert!(verify_wallet_signature(
+            SIGNER,
+            SIGNATURE.trim_start_matches("0x"),
+            MESSAGE
+        ));
+    }
+
+    #[test]
+    fn rejects_the_wrong_signer_message_or_format() {
+        let other = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+        assert!(!verify_wallet_signature(other, SIGNATURE, MESSAGE));
+        assert!(!verify_wallet_signature(SIGNER, SIGNATURE, "tampered"));
+        assert!(!verify_wallet_signature(SIGNER, "0x1234", MESSAGE));
+        assert!(!verify_wallet_signature(SIGNER, "not hex", MESSAGE));
+        let bad_v = format!("{}05", &SIGNATURE[..SIGNATURE.len() - 2]);
+        assert!(!verify_wallet_signature(SIGNER, &bad_v, MESSAGE));
+    }
+
+    /// A signature made by the node's own `personal_sign`, the RPC a browser
+    /// wallet exposes. See `shared::evm_testing` for how to run it.
+    #[tokio::test]
+    #[ignore = "needs a local chain and compiled contracts"]
+    async fn local_chain_personal_sign_verifies() {
+        use shared::evm_testing::{personal_sign, LocalChain};
+
+        let chain = LocalChain::deploy().await;
+        let signer = format!("{:?}", chain.analyst_address);
+        let signature = personal_sign(&chain, chain.analyst_address, MESSAGE).await;
+
+        assert!(verify_wallet_signature(&signer, &signature, MESSAGE));
+        assert!(!verify_wallet_signature(SIGNER, &signature, MESSAGE));
     }
 }

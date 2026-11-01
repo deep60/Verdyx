@@ -124,11 +124,11 @@ pub async fn create_bounty(
 
     // Submit on-chain createBounty
     let reward_amount =
-        ethers::types::U256::from_dec_str(&bounty.reward_amount).unwrap_or_default();
+        alloy::primitives::U256::from_str_radix(&bounty.reward_amount, 10).unwrap_or_default();
     let deadline_ts = bounty
         .deadline
-        .map(|d| ethers::types::U256::from(d.timestamp() as u64))
-        .unwrap_or(ethers::types::U256::from(
+        .map(|d| alloy::primitives::U256::from(d.timestamp() as u64))
+        .unwrap_or(alloy::primitives::U256::from(
             (chrono::Utc::now() + chrono::Duration::hours(24)).timestamp() as u64,
         ));
 
@@ -168,7 +168,7 @@ pub async fn create_bounty(
     match state.blockchain.create_bounty(bc_params).await {
         Ok((tx_hash, on_chain_id)) => {
             let hash_str = format!("{tx_hash:?}");
-            let chain_id = on_chain_id.as_u64() as i64;
+            let chain_id = on_chain_id.to::<u64>() as i64;
             if let Err(e) = state
                 .db
                 .update_bounty_on_chain_id(bounty.id, &hash_str, chain_id)
@@ -233,7 +233,7 @@ pub async fn submit_analysis(
     Json(request): Json<SubmitAnalysisRequest>,
 ) -> Result<Json<SubmissionResponse>, StatusCode> {
     use crate::services::blockchain::SubmitAnalysisParams;
-    use ethers::types::U256;
+    use alloy::primitives::U256;
 
     // Look up the real on-chain bounty ID from DB
     let on_chain_id = state
@@ -294,7 +294,7 @@ pub async fn finalize_bounty(
     _claims: crate::middleware::auth::Claims,
     Path(bounty_id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    use ethers::types::U256;
+    use alloy::primitives::U256;
 
     let chain_id = state
         .db

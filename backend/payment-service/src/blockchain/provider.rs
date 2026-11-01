@@ -1,11 +1,12 @@
+use alloy::primitives::{TxHash, U256};
+use alloy::providers::{DynProvider, Provider, ProviderBuilder, WsConnect};
+use alloy::rpc::types::TransactionReceipt;
 use anyhow::Result;
-use ethers::prelude::*;
-use std::sync::Arc;
 use tracing::info;
 
 use crate::config::BlockchainConfig;
 
-pub type BlockchainProvider = Arc<Provider<Ws>>;
+pub type BlockchainProvider = DynProvider;
 
 /// Create blockchain provider.
 ///
@@ -22,14 +23,18 @@ pub async fn create_provider(config: &BlockchainConfig) -> Result<BlockchainProv
     let ws_url = coerce_to_ws_url(raw_url)?;
     info!(target_url = %ws_url, "Connecting to blockchain over WebSocket");
 
-    let provider = Provider::<Ws>::connect(&ws_url).await?;
+    let provider = ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .connect_ws(WsConnect::new(ws_url))
+        .await?
+        .erased();
 
     // Verify connection by fetching chain id (also catches handshake failures
     // that would otherwise surface only on first request).
-    let chain_id = provider.get_chainid().await?;
+    let chain_id = provider.get_chain_id().await?;
     info!("Connected to blockchain with chain ID: {}", chain_id);
 
-    if chain_id.as_u64() != config.chain_id {
+    if chain_id != config.chain_id {
         return Err(anyhow::anyhow!(
             "Chain ID mismatch: expected {}, got {}",
             config.chain_id,
@@ -37,7 +42,7 @@ pub async fn create_provider(config: &BlockchainConfig) -> Result<BlockchainProv
         ));
     }
 
-    Ok(Arc::new(provider))
+    Ok(provider)
 }
 
 /// Coerce an http(s) RPC URL into the equivalent ws(s) URL. Leaves ws(s) URLs
@@ -59,12 +64,12 @@ fn coerce_to_ws_url(url: &str) -> Result<String> {
 
 /// Get current gas price with multiplier
 pub async fn get_gas_price(
-    provider: &Provider<Ws>,
+    provider: &BlockchainProvider,
     multiplier: f64,
     max_gwei: u64,
 ) -> Result<U256> {
     let base_gas_price = provider.get_gas_price().await?;
-    let adjusted = (base_gas_price.as_u128() as f64 * multiplier) as u128;
+    let adjusted = (base_gas_price as f64 * multiplier) as u128;
     let max_price = U256::from(max_gwei) * U256::from(1_000_000_000u64);
 
     Ok(U256::from(adjusted).min(max_price))
@@ -72,8 +77,8 @@ pub async fn get_gas_price(
 
 /// Wait for transaction confirmation
 pub async fn wait_for_confirmations(
-    provider: &Provider<Ws>,
-    tx_hash: H256,
+    provider: &BlockchainProvider,
+    tx_hash: TxHash,
     confirmations: usize,
 ) -> Result<Option<TransactionReceipt>> {
     info!(
@@ -87,7 +92,7 @@ pub async fn wait_for_confirmations(
         let current_block = provider.get_block_number().await?;
         let tx_block = receipt.block_number.unwrap_or_default();
 
-        if current_block.as_u64() >= tx_block.as_u64() + confirmations as u64 {
+        if current_block >= tx_block + confirmations as u64 {
             return Ok(Some(receipt.clone()));
         }
     }

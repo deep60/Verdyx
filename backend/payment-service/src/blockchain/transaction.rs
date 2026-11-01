@@ -1,7 +1,12 @@
 // Transaction building and execution
+use alloy::network::TransactionBuilder as _;
+use alloy::primitives::{Address, Bytes, TxHash, U256};
+use alloy::providers::Provider;
+use alloy::rpc::types::{TransactionReceipt, TransactionRequest};
 use anyhow::Result;
-use ethers::prelude::*;
 use tracing::info;
+
+use super::provider::BlockchainProvider;
 
 pub struct TransactionBuilder {
     pub from: Address,
@@ -18,7 +23,7 @@ impl TransactionBuilder {
         Self {
             from,
             to,
-            value: U256::zero(),
+            value: U256::ZERO,
             data: None,
             gas_limit: None,
             gas_price: None,
@@ -47,23 +52,26 @@ impl TransactionBuilder {
     }
 
     pub fn build(self) -> TransactionRequest {
-        TransactionRequest::new()
-            .from(self.from)
-            .to(self.to)
-            .value(self.value)
-            .data(self.data.unwrap_or_default())
+        TransactionRequest::default()
+            .with_from(self.from)
+            .with_to(self.to)
+            .with_value(self.value)
+            .with_input(self.data.unwrap_or_default())
     }
 }
 
-pub async fn send_transaction(provider: &Provider<Ws>, tx: TransactionRequest) -> Result<H256> {
+pub async fn send_transaction(
+    provider: &BlockchainProvider,
+    tx: TransactionRequest,
+) -> Result<TxHash> {
     info!("Sending transaction...");
-    let pending_tx = provider.send_transaction(tx, None).await?;
-    Ok(pending_tx.tx_hash())
+    let pending_tx = provider.send_transaction(tx).await?;
+    Ok(*pending_tx.tx_hash())
 }
 
 pub async fn wait_for_confirmation(
-    provider: &Provider<Ws>,
-    tx_hash: H256,
+    provider: &BlockchainProvider,
+    tx_hash: TxHash,
     _confirmations: usize,
 ) -> Result<TransactionReceipt> {
     info!("Waiting for confirmation of tx {}", tx_hash);

@@ -22,6 +22,10 @@ pub mod crypto;
 pub mod database;
 pub mod env;
 pub mod error;
+#[cfg(feature = "evm")]
+pub mod evm;
+#[cfg(feature = "evm-testing")]
+pub mod evm_testing;
 pub mod messaging;
 pub mod observability;
 pub mod password_policy;

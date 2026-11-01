@@ -13,7 +13,7 @@ serde_json.workspace = true
 # Note: bounty-manager is on axum 0.8 while the rest of the fleet (and the
 # `shared::metrics_mw` middleware) are on axum 0.7. We use the std-only
 # `MetricsRegistry` from shared and define our own per-request hook below.
-shared = { path = "../shared" }
+shared = { path = "../shared", features = ["evm"] }
 sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
@@ -23,6 +23,9 @@ tower-http = { version = "0.6.6", features = ["cors", "trace", "catch-panic"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true }
 uuid.workspace = true
-ethers = { version = "2.0", features = ["ws", "rustls"] }
+alloy = { workspace = true, features = ["std", "contract", "provider-http", "rpc-types", "signer-local", "network", "k256", "reqwest-rustls-tls", "sol-types"] }
 anyhow = "1"
 dotenvy = { workspace = true }
+
+[dev-dependencies]
+shared = { path = "../shared", features = ["evm-testing"] }

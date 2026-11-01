@@ -53,6 +53,9 @@ serde_qs = { version = "0.10", optional = true }
 dashmap = { version = "5.5", optional = true }
 sha2 = { version = "0.10", optional = true }
 
+# EVM chain helpers
+alloy = { workspace = true, optional = true, features = ["std", "providers", "network", "rpc-types", "signer-local"] }
+
 # Crypto dependencies
 base64 = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
@@ -85,5 +88,9 @@ redis = ["dep:redis"]
 redis-store = ["idempotency", "dep:redis"]
 # Crypto dependencies
 crypto = ["dep:base64", "dep:rand", "dep:hex"]
+# Provider and receipt helpers for services that talk to the chain
+evm = ["dep:alloy"]
+# Deploys the contracts to a local dev chain; for tests only
+evm-testing = ["evm", "alloy/contract", "alloy/provider-http", "alloy/reqwest-rustls-tls", "alloy/sol-types", "alloy/json-rpc"]
 # Logging with tracing-subscriber
 logging = ["dep:tracing-subscriber"]
