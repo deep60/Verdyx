@@ -23,32 +23,10 @@ ignore = [
     # parent major bumps to reach idna 1.0.
     "RUSTSEC-2024-0421",
 
-    # Old rustls 0.21 stack (ring 0.16, rustls-webpki 0.101, h2 0.3, webpki-roots
-    # 0.25). Our own code is on reqwest 0.12; only ethers 2.0.14, the final release
-    # of a deprecated crate, still pulls this in, through reqwest 0.11 and
-    # tungstenite 0.20. It is built into api-gateway, bounty-manager,
-    # payment-service and user-service and used for their blockchain RPC calls.
-    # Resolved by migrating from ethers to alloy.
-    "RUSTSEC-2025-0009",
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
-    "RUSTSEC-2026-0258",
-    "RUSTSEC-2026-0346",
-    "RUSTSEC-2026-0349",
-    "RUSTSEC-2026-0381",
-    "RUSTSEC-2026-0382",
-
-    # crypto-bigint 0.5 timing issues, pulled by ethers through k256 and
-    # elliptic-curve 0.13. Resolved by the same alloy migration, if its k256 has
-    # moved to crypto-bigint 0.7 by then.
+    # crypto-bigint 0.5 timing issues, pulled by alloy through k256 0.13 and
+    # elliptic-curve 0.13. It is built into api-gateway, bounty-manager,
+    # payment-service and user-service, and the first three sign transactions with
+    # it. alloy 2.5 is the current release and has no patched path. Resolved when
+    # alloy moves to a k256 on crypto-bigint 0.7.
     "RUSTSEC-2026-0387",
-
-    # zip 0.6 and zstd-safe 5 are in Cargo.lock only, through the optional svm-rs
-    # dependency of ethers-solc. `cargo tree --all-features --target all` shows no
-    # service builds them. The archive scanner uses zip 9, which is patched.
-    "RUSTSEC-2026-0367",
-    "RUSTSEC-2026-0368",
-    "RUSTSEC-2026-0369",
-    "RUSTSEC-2026-0403",
 ]

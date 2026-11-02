@@ -1,20 +1,18 @@
+use alloy::primitives::{Address, TxHash, U256};
+use alloy::providers::Provider;
+use alloy::rpc::types::TransactionReceipt;
+use alloy::signers::local::PrivateKeySigner;
 use anyhow::{Context, Result};
-use ethers::middleware::SignerMiddleware;
-use ethers::prelude::*;
-use ethers::signers::{LocalWallet, Signer};
 use redis::aio::ConnectionManager;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
-use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::blockchain::contracts::TokenContract::TokenContractInstance;
 use crate::blockchain::{BlockchainProvider, TokenContract};
 use crate::config::Config;
 use crate::models::*;
-
-/// Signer-bound client used for treasury-authored transactions.
-pub type SignerClient = SignerMiddleware<BlockchainProvider, LocalWallet>;
 
 pub struct PaymentService {
     config: Config,
@@ -59,20 +57,22 @@ impl PaymentService {
     }
 
     /// Build a treasury-signing client (provider + treasury wallet).
-    fn signer_client(&self) -> Result<Arc<SignerClient>> {
-        let wallet = self
+    fn signer_client(&self) -> Result<BlockchainProvider> {
+        let signer = self
             .config
             .blockchain
             .treasury_private_key
-            .parse::<LocalWallet>()
-            .context("Invalid treasury private key")?
-            .with_chain_id(self.config.blockchain.chain_id);
+            .parse::<PrivateKeySigner>()
+            .context("Invalid treasury private key")?;
 
-        let client = SignerMiddleware::new(self.provider()?.clone(), wallet);
-        Ok(Arc::new(client))
+        Ok(shared::evm::with_signer(
+            self.provider()?.clone(),
+            signer,
+            self.config.blockchain.chain_id,
+        ))
     }
 
-    fn token_contract(&self) -> Result<TokenContract<Provider<Ws>>> {
+    fn token_contract(&self) -> Result<TokenContractInstance<BlockchainProvider>> {
         let addr: Address = self
             .config
             .blockchain
@@ -82,7 +82,7 @@ impl PaymentService {
         Ok(TokenContract::new(addr, self.provider()?.clone()))
     }
 
-    fn token_contract_signed(&self) -> Result<TokenContract<SignerClient>> {
+    fn token_contract_signed(&self) -> Result<TokenContractInstance<BlockchainProvider>> {
         let addr: Address = self
             .config
             .blockchain
@@ -98,17 +98,14 @@ impl PaymentService {
         let addr: Address = address.parse().context("Invalid Ethereum address")?;
         let token = self.token_contract()?;
         token
-            .balance_of(addr)
+            .balanceOf(addr)
             .call()
             .await
             .context("Failed to call balanceOf")
     }
 
-    pub async fn get_tx_receipt(
-        &self,
-        tx_hash: &str,
-    ) -> Result<Option<ethers::types::TransactionReceipt>> {
-        let hash: H256 = tx_hash.parse().context("Invalid transaction hash")?;
+    pub async fn get_tx_receipt(&self, tx_hash: &str) -> Result<Option<TransactionReceipt>> {
+        let hash: TxHash = tx_hash.parse().context("Invalid transaction hash")?;
         self.provider()?
             .get_transaction_receipt(hash)
             .await
@@ -121,7 +118,7 @@ impl PaymentService {
             .get_gas_price()
             .await
             .context("Failed to get gas price")?;
-        Ok(U256::from(65_000) * gas_price)
+        Ok(U256::from(65_000) * U256::from(gas_price))
     }
 
     pub async fn health_check(&self) -> bool {
@@ -142,11 +139,7 @@ impl PaymentService {
 
     /// Transfer tokens FROM the treasury to `to`, waiting for confirmations.
     /// Returns the transaction receipt on success.
-    async fn treasury_transfer(
-        &self,
-        to: &str,
-        amount: U256,
-    ) -> Result<ethers::types::TransactionReceipt> {
+    async fn treasury_transfer(&self, to: &str, amount: U256) -> Result<TransactionReceipt> {
         let to_addr: Address = to.parse().context("Invalid recipient address")?;
         let token = self.token_contract_signed()?;
 
@@ -157,24 +150,27 @@ impl PaymentService {
             .treasury_address
             .parse()
             .context("Invalid treasury address")?;
-        let balance = token.balance_of(treasury).call().await?;
+        let balance = token.balanceOf(treasury).call().await?;
         if balance < amount {
             anyhow::bail!("Treasury balance {balance} below required {amount}");
         }
 
-        let call = token.transfer(to_addr, amount);
-        let pending = call.send().await.context("Failed to broadcast transfer")?;
+        let pending = token
+            .transfer(to_addr, amount)
+            .send()
+            .await
+            .context("Failed to broadcast transfer")?;
+        let tx_hash = *pending.tx_hash();
 
-        info!("Treasury transfer broadcast: {:?}", pending.tx_hash());
+        info!("Treasury transfer broadcast: {:?}", tx_hash);
 
-        let confirmations = self.config.blockchain.confirmation_blocks as usize;
-        let receipt = pending
-            .confirmations(confirmations.max(1))
+        let confirmations = self.config.blockchain.confirmation_blocks;
+        let receipt = shared::evm::wait_for_receipt(self.provider()?, tx_hash, confirmations)
             .await
             .context("Failed waiting for confirmations")?
             .ok_or_else(|| anyhow::anyhow!("Transfer dropped from mempool"))?;
 
-        if receipt.status != Some(1u64.into()) {
+        if !receipt.status() {
             anyhow::bail!("Transfer reverted on-chain: {:?}", receipt.transaction_hash);
         }
 
@@ -270,7 +266,7 @@ impl PaymentService {
         })?;
 
         // trunc() discards anything below one wei.
-        U256::from_dec_str(&scaled.trunc().to_string())
+        U256::from_str_radix(&scaled.trunc().to_string(), 10)
             .map_err(|e| PaymentError::ValidationError(format!("invalid amount: {e}")))
     }
 
@@ -299,7 +295,7 @@ impl PaymentService {
         {
             Ok(receipt) => {
                 let tx_hash = format!("{:?}", receipt.transaction_hash);
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
+                let block = receipt.block_number.map(|b| b as i64);
                 self.mark_payment(
                     payment_id,
                     PaymentStatus::Completed,
@@ -335,8 +331,10 @@ impl PaymentService {
         &self,
         req: &WithdrawRequest,
     ) -> PaymentResult<PaymentResponse> {
-        let min = U256::from_dec_str(&self.config.payment.min_withdraw_amount).unwrap_or_default();
-        let max = U256::from_dec_str(&self.config.payment.max_withdraw_amount).unwrap_or(U256::MAX);
+        let min =
+            U256::from_str_radix(&self.config.payment.min_withdraw_amount, 10).unwrap_or_default();
+        let max =
+            U256::from_str_radix(&self.config.payment.max_withdraw_amount, 10).unwrap_or(U256::MAX);
         let amount_wei = Self::to_wei(&req.amount)?;
 
         if amount_wei < min {
@@ -369,7 +367,7 @@ impl PaymentService {
         match self.treasury_transfer(&req.to_address, net).await {
             Ok(receipt) => {
                 let tx_hash = format!("{:?}", receipt.transaction_hash);
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
+                let block = receipt.block_number.map(|b| b as i64);
                 self.mark_payment(
                     payment_id,
                     PaymentStatus::Completed,
@@ -496,7 +494,7 @@ impl PaymentService {
         match self.treasury_transfer(&dest, amount_wei).await {
             Ok(receipt) => {
                 let tx_hash = format!("{:?}", receipt.transaction_hash);
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
+                let block = receipt.block_number.map(|b| b as i64);
                 self.mark_payment(
                     payment_id,
                     PaymentStatus::Completed,
@@ -557,12 +555,12 @@ impl PaymentService {
         };
         match self.get_tx_receipt(tx_hash).await {
             Ok(Some(receipt)) => {
-                let status = if receipt.status == Some(1u64.into()) {
+                let status = if receipt.status() {
                     PaymentStatus::Completed
                 } else {
                     PaymentStatus::Failed
                 };
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
+                let block = receipt.block_number.map(|b| b as i64);
                 self.mark_payment(payment.id, status, Some(tx_hash), block, None)
                     .await?;
             }
@@ -596,7 +594,10 @@ mod money_tests {
     /// used that as wei, so every payout was 10^18 times too small.
     #[test]
     fn one_token_is_ten_to_the_eighteen_wei() {
-        assert_eq!(wei("1"), U256::from_dec_str("1000000000000000000").unwrap());
+        assert_eq!(
+            wei("1"),
+            U256::from_str_radix("1000000000000000000", 10).unwrap()
+        );
     }
 
     /// Regression: the README's own example bounty is 0.05 tokens. Under the
@@ -606,11 +607,11 @@ mod money_tests {
     fn fractional_amounts_do_not_collapse_to_zero() {
         assert_eq!(
             wei("0.05"),
-            U256::from_dec_str("50000000000000000").unwrap()
+            U256::from_str_radix("50000000000000000", 10).unwrap()
         );
         assert_eq!(
             wei("0.5"),
-            U256::from_dec_str("500000000000000000").unwrap()
+            U256::from_str_radix("500000000000000000", 10).unwrap()
         );
         assert!(
             !wei("0.000001").is_zero(),
@@ -623,7 +624,7 @@ mod money_tests {
     /// 5-token withdrawal produced 5 wei and was rejected as below minimum.
     #[test]
     fn amounts_are_comparable_with_wei_denominated_config_bounds() {
-        let min_withdraw = U256::from_dec_str("1000000000000000000").unwrap(); // 1 token
+        let min_withdraw = U256::from_str_radix("1000000000000000000", 10).unwrap(); // 1 token
         assert!(
             wei("5") > min_withdraw,
             "5 tokens must exceed a 1-token minimum"
@@ -665,7 +666,7 @@ mod money_tests {
     /// Zero is a legitimate amount to convert; it must not error.
     #[test]
     fn zero_converts_to_zero() {
-        assert_eq!(wei("0"), U256::zero());
+        assert_eq!(wei("0"), U256::ZERO);
     }
 
     /// Negative amounts are rejected explicitly rather than failing deep in
@@ -683,5 +684,157 @@ mod money_tests {
         let huge = Decimal::MAX;
         let result = PaymentService::to_wei(&huge);
         assert!(result.is_err(), "overflow must be reported, not panic");
+    }
+}
+
+#[cfg(test)]
+mod local_chain_tests {
+    use super::*;
+    use crate::config::{
+        BlockchainConfig, DatabaseConfig, PaymentConfig, RedisConfig, ServerConfig,
+    };
+    use shared::evm_testing::{LocalChain, ADMIN_KEY, TOKEN};
+    use std::str::FromStr;
+
+    fn config(chain: &LocalChain, database_url: &str, redis_url: &str) -> Config {
+        Config {
+            server: ServerConfig {
+                host: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            database: DatabaseConfig {
+                url: database_url.to_string(),
+                max_connections: 2,
+            },
+            redis: RedisConfig {
+                url: redis_url.to_string(),
+            },
+            blockchain: BlockchainConfig {
+                rpc_url: chain.rpc_url.clone(),
+                ws_url: None,
+                chain_id: chain.chain_id,
+                treasury_address: format!("{:?}", chain.admin_address),
+                treasury_private_key: ADMIN_KEY.to_string(),
+                token_contract_address: format!("{:?}", chain.token),
+                payment_contract_address: format!("{:?}", chain.bounty_manager),
+                gas_price_multiplier: 1.0,
+                max_gas_price_gwei: 100,
+                confirmation_blocks: 1,
+            },
+            payment: PaymentConfig {
+                min_withdraw_amount: TOKEN.to_string(),
+                max_withdraw_amount: (TOKEN * U256::from(1_000)).to_string(),
+                withdraw_fee_percentage: 0.0,
+                stake_lock_duration_seconds: 60,
+                transaction_timeout_seconds: 60,
+                max_retry_attempts: 1,
+            },
+        }
+    }
+
+    /// Pay a bounty reward over WebSocket from the treasury, and check the
+    /// money, the receipt and the payment row. See `shared::evm_testing` for
+    /// how to run it.
+    #[tokio::test]
+    #[ignore = "needs a local chain, compiled contracts, Postgres and Redis"]
+    async fn local_chain_treasury_payment() {
+        let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+        let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL");
+
+        let chain = LocalChain::deploy().await;
+        let config = config(&chain, &database_url, &redis_url);
+        let provider = crate::blockchain::provider::create_provider(&config.blockchain)
+            .await
+            .expect("connects over WebSocket");
+
+        let mut wrong_chain = config.blockchain.clone();
+        wrong_chain.chain_id += 1;
+        assert!(crate::blockchain::provider::create_provider(&wrong_chain)
+            .await
+            .is_err());
+
+        let db_pool = PgPool::connect(&database_url).await.unwrap();
+        let redis_conn = redis::Client::open(redis_url.as_str())
+            .unwrap()
+            .get_connection_manager()
+            .await
+            .unwrap();
+        let service = PaymentService::new(config, db_pool.clone(), redis_conn, Some(provider))
+            .await
+            .unwrap();
+        assert!(service.health_check().await);
+        assert!(service.estimate_gas_for_transfer().await.unwrap() > U256::ZERO);
+
+        let winner = format!("{:?}", chain.recipient_address);
+        let before = service.get_token_balance(&winner).await.unwrap();
+
+        let response = service
+            .distribute_reward(&DistributeBountyRequest {
+                bounty_id: Uuid::new_v4(),
+                winner_address: winner.clone(),
+                winner_user_id: Uuid::new_v4(),
+                submission_id: Uuid::new_v4(),
+                amount: Decimal::from_str("2.5").unwrap(),
+            })
+            .await
+            .expect("payment goes through");
+        assert!(response.success);
+
+        let after = service.get_token_balance(&winner).await.unwrap();
+        assert_eq!(after - before, TOKEN * U256::from(5) / U256::from(2));
+
+        let tx_hash = response.tx_hash.expect("payment has a tx hash");
+        let receipt = service.get_tx_receipt(&tx_hash).await.unwrap().unwrap();
+        assert!(receipt.status());
+        assert_eq!(format!("{:?}", receipt.transaction_hash), tx_hash);
+
+        let (status, stored_hash, block): (String, Option<String>, Option<String>) =
+            sqlx::query_as(
+                "SELECT status, transaction_hash, metadata->>'block_number' \
+                 FROM payments WHERE id = $1",
+            )
+            .bind(response.payment_id.unwrap())
+            .fetch_one(&db_pool)
+            .await
+            .unwrap();
+        assert_eq!(status, PaymentStatus::Completed.to_string());
+        assert_eq!(stored_hash.as_deref(), Some(tx_hash.as_str()));
+        assert_eq!(block, receipt.block_number.map(|b| b.to_string()));
+
+        // A transfer the treasury cannot cover fails before anything is sent.
+        let error = service
+            .treasury_transfer(&winner, U256::MAX)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("below required"), "{error}");
+
+        // An unknown transaction has no receipt rather than an error.
+        let unknown = format!("0x{}", "11".repeat(32));
+        assert!(service.get_tx_receipt(&unknown).await.unwrap().is_none());
+    }
+
+    /// Startup must not hang or crash on an unreachable node; `main` then runs
+    /// with no provider so DB-backed routes keep serving.
+    #[tokio::test]
+    async fn unreachable_node_fails_quickly() {
+        let blockchain = BlockchainConfig {
+            rpc_url: "http://127.0.0.1:1".to_string(),
+            ws_url: None,
+            chain_id: 1,
+            treasury_address: String::new(),
+            treasury_private_key: String::new(),
+            token_contract_address: String::new(),
+            payment_contract_address: String::new(),
+            gas_price_multiplier: 1.0,
+            max_gas_price_gwei: 1,
+            confirmation_blocks: 1,
+        };
+        let attempt = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            crate::blockchain::provider::create_provider(&blockchain),
+        )
+        .await
+        .expect("connecting must not hang");
+        assert!(attempt.is_err());
     }
 }
