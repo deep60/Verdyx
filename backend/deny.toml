@@ -2,18 +2,28 @@
 # https://github.com/EmbarkStudios/cargo-deny
 
 [advisories]
-# Vulnerability database to use (default: rustsec)
-# db = "rustsec"
-# Path to local advisory database (optional)
-# db-path = "path/to/db"
-# Severity threshold for vulnerabilities (default: all)
-# severity = "all"
-# Ignore specific vulnerability IDs (e.g., false positives)
-ignore = []
+yanked = "warn"
+# Fail on unmaintained crates we depend on directly, not transitive ones.
+unmaintained = "workspace"
+# The deferred advisories from .cargo/audit.toml, where each one's reason is
+# recorded, limited to crates that are actually built. cargo-deny follows the real
+# build graph, so the Cargo.lock-only entries there aren't needed here.
+ignore = [
+    "RUSTSEC-2024-0421",
+    "RUSTSEC-2025-0009",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0258",
+    "RUSTSEC-2026-0346",
+    "RUSTSEC-2026-0349",
+    "RUSTSEC-2026-0381",
+    "RUSTSEC-2026-0382",
+    "RUSTSEC-2026-0387",
+]
 
 [licenses]
-# License compliance
-# Allow these SPDX license expressions
+# Anything not listed here is rejected.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -28,54 +38,27 @@ allow = [
     "Unicode-DFS-2016",
     "Zlib",
     "CC0-1.0",
+    "0BSD",
+    "bzip2-1.0.6",
+    "CDLA-Permissive-2.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unlicense",
 ]
-# Deny these licenses
-deny = [
-    "GPL-3.0-only",
-    "GPL-3.0-or-later",
-    "AGPL-3.0-only",
-    "AGPL-3.0-or-later",
-    "LGPL-3.0-only",
-    "LGPL-3.0-or-later",
-    "SSPL-1.0",
-    "Elastic-2.0",
-    "BSL-1.0",
-    "Commons-Clause-1.0",
-]
-# Allow specific crates to have disallowed licenses (with justification)
-# allow-clarifications = { "some-crate" = "Internal use only, reviewed" }
-# Unlicensed crates: "allow", "deny", "warn" (default: deny)
-unlicensed = "deny"
+
+[licenses.private]
+ignore = true
+
+# ring 0.16 has no license field in its manifest.
+[[licenses.clarify]]
+name = "ring"
+version = "0.16.20"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [bans]
-# Crates to ban (multiple versions = multiple entries)
-# Multiple criteria can be specified per entry
-# deny = [
-#   { name = "openssl", version = "=0.10.0" },
-#   { name = "some-bad-crate" },
-# ]
-# Allow specific versions of banned crates
-# allow = [
-#   { name = "openssl", version = ">=0.10.1" },
-# ]
-# Skip certain crates from bans (e.g., transitive dependencies you can't control)
-# skip = [
-#   { name = "openssl" },
-# ]
-# Multiple versions of the same crate: "allow", "deny", "warn" (default: warn)
 multiple-versions = "warn"
-# Highlight crates with yanked versions: "allow", "deny", "warn" (default: warn)
-yanked = "warn"
 
 [sources]
-# Trusted crate sources (default: crates.io)
-# allow-unknown = false
-# allow-git = false
-# Use alternative registries
-# allow = [
-#   { registry = "crates.io" },
-# ]
-
-[advisories]
-# Ignore specific advisories
-# ignore = ["RUSTSEC-2020-0071"]
+unknown-registry = "deny"
+unknown-git = "deny"
