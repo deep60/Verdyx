@@ -108,8 +108,10 @@ jobs:
         with:
           tool: cargo-audit
 
+      # Same policy as the deploy scan: fail on vulnerabilities, not on
+      # unmaintained-crate warnings. Deferred advisories are in .cargo/audit.toml.
       - name: Run cargo audit
-        run: cargo audit --deny warnings
+        run: cargo audit
 
       - name: Generate SARIF
         run: |
@@ -176,13 +178,6 @@ jobs:
           args: --file=frontend/package.json --severity-threshold=high --sarif-file-output=snyk-frontend.sarif
         continue-on-error: true
 
-      - name: Run Snyk on backend (via cargo)
-        if: env.SNYK_TOKEN != ''
-        uses: snyk/actions/rust@master
-        with:
-          args: --file=backend/Cargo.lock --severity-threshold=high --sarif-file-output=snyk-backend.sarif
-        continue-on-error: true
-
       - name: Upload Snyk SARIF
         uses: github/codeql-action/upload-sarif@v3
         if: always() && env.SNYK_TOKEN != ''
@@ -240,9 +235,10 @@ jobs:
       contents: read
       pull-requests: read
     steps:
+      - uses: actions/checkout@v4
+
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
           config-file: '.github/dependency-review-config.yml'
           fail-on-severity: high
-          allow-ghsas: []

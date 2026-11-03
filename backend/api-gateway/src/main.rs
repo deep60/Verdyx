@@ -307,6 +307,7 @@ async fn main() -> Result<()> {
             header::CONTENT_TYPE,
             header::ACCEPT,
             "X-API-Key".parse().unwrap(),
+            middleware::auth::WEB_CLIENT_HEADER.parse().unwrap(),
         ])
         .allow_credentials(true);
 

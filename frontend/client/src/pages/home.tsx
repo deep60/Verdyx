@@ -11,7 +11,7 @@ import { SEO } from "@/components/seo";
 import type { ApiStats } from "@/lib/api-types";
 
 const ENGINES: { name: string; detail: string }[] = [
-  { name: "ClamAV", detail: "Signature sweep against the clamd rule set." },
+  { name: "ClamAV", detail: "Optional. Signature sweep when a ClamAV server is connected." },
   { name: "YARA 4.5", detail: "Pattern match on strings, hex, and conditions." },
   { name: "Goblin", detail: "PE and ELF imports, sections, and packer marks." },
   { name: "Byte entropy", detail: "Histogram and packing score for the whole file." },
@@ -66,7 +66,7 @@ export default function Home() {
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <SEO
         title="Verdyx — Malware verdicts you can audit"
-        description="Verdyx runs eight engines on one file, seals each vote, then reveals the quorum. URL scans cover DNS, TLS, mail auth, and the page."
+        description="Verdyx runs several engines on one file, seals each vote, then reveals the quorum. URL scans cover DNS, TLS, mail auth, and the page."
       />
       <Navigation />
 
@@ -79,7 +79,7 @@ export default function Home() {
                 A malware verdict you can audit, engine by engine.
               </h1>
               <p className="mt-5 max-w-md text-[15px] leading-relaxed text-foreground/80 sm:text-base">
-                ClamAV, YARA, static parsing, and the rest of the set read the same artifact.
+                YARA, static parsing, hash intel, and the rest of the set read the same artifact.
                 Each vote is hashed before it is shown. The case keeps the quorum, the confidence, and the evidence.
               </p>
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
@@ -139,7 +139,7 @@ export default function Home() {
             <div>
               <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">File engines</h2>
               <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-                Always-on static, hash, heuristic, and signature passes. YARA, ClamAV, and the entropy model join the same case.
+                Always-on static, hash, heuristic, and signature passes. YARA, the entropy model, and ClamAV when connected join the same case.
               </p>
               <ul className="mt-6 border-t border-border">
                 {ENGINES.map((engine) => (

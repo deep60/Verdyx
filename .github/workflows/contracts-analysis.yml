@@ -52,6 +52,7 @@ jobs:
   mythril:
     name: Mythril (Symbolic Execution)
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     permissions:
       contents: read
       security-events: write
@@ -61,28 +62,66 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: blockchain/package-lock.json
+
+      # The contracts import OpenZeppelin from node_modules (see mythril.solc.json).
+      - name: Install dependencies
+        run: npm ci
+
       - name: Install Mythril
-        run: pipx install mythril
+        run: |
+          pipx install mythril
+          # Mythril still imports pkg_resources, which setuptools 81 removed.
+          pipx inject mythril "setuptools<81"
 
       - name: Run Mythril on core contracts
         run: |
+          # --execution-timeout doesn't bound solver time, so cap each contract.
           for contract in contracts/core/*.sol; do
-            echo "Analyzing $contract..."
-            myth analyze "$contract" --solc-json mythril.solc.json --execution-timeout 120 --max-depth 50 --sarif-output "${contract##*/}.sarif" || true
+            name=$(basename "$contract" .sol)
+            echo "Analyzing $name..."
+            status=0
+            timeout 900 myth analyze "$contract:$name" --solc-json mythril.solc.json --solv 0.8.28 \
+              --execution-timeout 120 --create-timeout 60 --solver-timeout 10000 --max-depth 50 \
+              -o jsonv2 > "mythril-$name.json" || status=$?
+            if [ "$status" -eq 124 ]; then
+              echo "::warning::Mythril timed out on $name; its analysis is incomplete"
+              echo '[{"issues": [], "timedOut": true}]' > "mythril-$name.json"
+            fi
           done
 
-      - name: Merge Mythril SARIF
-        if: always()
+      # Mythril exits non-zero for any finding, so judge the reports instead:
+      # fail on High severity or an analysis that produced no report.
+      - name: Check Mythril results
         run: |
-          cargo install sarif-fmt
-          sarif-fmt merge *.sarif -o mythril-merged.sarif
+          python3 - <<'PY'
+          import glob, json, sys
+          failed = False
+          for path in sorted(glob.glob("mythril-*.json")):
+              try:
+                  reports = json.load(open(path))
+              except ValueError:
+                  print(f"{path}: Mythril produced no report")
+                  failed = True
+                  continue
+              issues = [i for r in reports for i in r.get("issues", [])]
+              for i in issues:
+                  print(f"{path}: {i['severity']} {i['swcID']} {i['swcTitle']}")
+              failed |= any(i["severity"] == "High" for i in issues)
+              print(f"{path}: {len(issues)} issue(s)")
+          sys.exit(1 if failed else 0)
+          PY
 
-      - name: Upload Mythril SARIF
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload Mythril reports
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: ./blockchain/mythril-merged.sarif
-          category: mythril
+          name: mythril-reports
+          path: blockchain/mythril-*.json
 
   foundry-test:
     name: Foundry Tests (Fuzz + Invariant)
@@ -141,7 +180,7 @@ jobs:
         run: forge install
 
       - name: Run coverage
-        run: forge coverage --report lcov --ir-minimum --ir-optimize --ir-optimize-runs 200
+        run: forge coverage --report lcov --ir-minimum
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

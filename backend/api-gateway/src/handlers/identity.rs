@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use axum::http::{header, HeaderMap};
+use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -16,11 +16,9 @@ use crate::AppState;
 /// Build a single-entry header map forwarding the incoming `Authorization`
 /// header to a downstream service. `None` when the header is missing/!UTF-8.
 pub fn bearer_map(headers: &HeaderMap) -> Option<HashMap<String, String>> {
-    let value = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())?;
+    let token = crate::middleware::auth::request_token(headers)?;
     let mut map = HashMap::new();
-    map.insert("Authorization".to_string(), value.to_string());
+    map.insert("Authorization".to_string(), format!("Bearer {token}"));
     Some(map)
 }
 

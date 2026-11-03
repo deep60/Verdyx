@@ -6,7 +6,7 @@ fail-on-severity: high
 
 # Allow specific GHSA IDs (GitHub Security Advisory IDs) that are false positives
 # or have been assessed as acceptable risk
-allow-ghsas: []
+# allow-ghsas: []
 
 # Scope of the dependency review - which ecosystems to check
 # Default: all ecosystems supported by the GitHub Advisory Database

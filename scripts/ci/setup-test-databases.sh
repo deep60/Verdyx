@@ -17,6 +17,7 @@ SERVICES=(
     "analysis"
     "bounty"
     "consensus"
+    "gateway"
     "notification"
     "payment"
     "reputation"
@@ -64,6 +65,8 @@ for service in "${SERVICES[@]}"; do
         SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/bounty-manager"
     elif [[ "$service" == "consensus" ]]; then
         SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/consensus-service"
+    elif [[ "$service" == "gateway" ]]; then
+        SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/api-gateway"
     elif [[ "$service" == "notification" ]]; then
         SERVICE_DIR="${GITHUB_WORKSPACE:-$(pwd)}/backend/notification-service"
     elif [[ "$service" == "payment" ]]; then
@@ -89,6 +92,8 @@ for service in "${SERVICES[@]}"; do
         VAR_NAME="BOUNTY_MANAGER_DATABASE_URL"
     elif [[ "$service" == "consensus" ]]; then
         VAR_NAME="CONSENSUS_SERVICE_DATABASE_URL"
+    elif [[ "$service" == "gateway" ]]; then
+        VAR_NAME="API_GATEWAY_DATABASE_URL"
     elif [[ "$service" == "notification" ]]; then
         VAR_NAME="NOTIFICATION_SERVICE_DATABASE_URL"
     elif [[ "$service" == "payment" ]]; then

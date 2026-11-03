@@ -27,8 +27,6 @@ export function FileSubmissionForm() {
   const submitMutation = useMutation({
     mutationFn: async (body: FormData) => {
       const headers: Record<string, string> = {};
-      const token = localStorage.getItem("token");
-      if (token) headers.Authorization = `Bearer ${token}`;
       let response: Response;
       try {
         response = await fetch("/api/submissions/file", {

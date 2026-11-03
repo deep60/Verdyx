@@ -45,19 +45,21 @@ export function EngineCard({ engine }: EngineCardProps) {
           <div className="flex justify-between text-sm">
             <span>Accuracy</span>
             <span className="text-accent font-medium" data-testid={`accuracy-${engine.id}`}>
-              {parseFloat(engine.accuracyRate || "0").toFixed(2)}%
+              {engine.accuracyRate
+                ? `${parseFloat(engine.accuracyRate).toFixed(2)}%`
+                : "Not measured"}
             </span>
           </div>
           <div className="flex justify-between text-sm">
             <span>Analyses</span>
             <span className="text-primary font-medium" data-testid={`analyses-${engine.id}`}>
-              {(engine.totalAnalyses || 0).toLocaleString()}
+              {engine.totalAnalyses != null ? engine.totalAnalyses.toLocaleString() : "—"}
             </span>
           </div>
           <div className="flex justify-between text-sm">
             <span>Stake</span>
             <span className="text-secondary font-medium" data-testid={`stake-${engine.id}`}>
-              {engine.stakeAmount} ETH
+              {engine.stakeAmount ? `${engine.stakeAmount} ETH` : "—"}
             </span>
           </div>
         </div>

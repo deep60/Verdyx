@@ -563,8 +563,8 @@ impl DatabaseService {
         }))
     }
 
-    /// List recent file/URL submissions across the platform (used when guest views Dashboard/Marketplace).
-    pub async fn list_recent_file_submissions(
+    /// List file/URL submissions that carry a bounty, newest first, for the marketplace.
+    pub async fn list_bounty_file_submissions(
         &self,
         limit: i64,
         offset: i64,
@@ -582,6 +582,9 @@ impl DatabaseService {
                 (metadata ->> 'priority')::boolean AS priority,
                 (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id
             FROM submissions
+            WHERE EXISTS (SELECT 1 FROM bounties b WHERE b.submission_id = submissions.id)
+               OR (metadata ->> 'bountyAmount' ~ '^[0-9]+(\.[0-9]+)?$'
+                   AND (metadata ->> 'bountyAmount')::numeric > 0)
             ORDER BY created_at DESC
             LIMIT $1 OFFSET $2
             "#,
@@ -590,7 +593,7 @@ impl DatabaseService {
         .bind(offset)
         .fetch_all(&self.pool)
         .await
-        .context("Failed to list recent file submissions")?;
+        .context("Failed to list bounty submissions")?;
 
         Ok(rows
             .into_iter()

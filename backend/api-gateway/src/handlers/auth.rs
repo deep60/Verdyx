@@ -59,19 +59,25 @@ pub struct WalletConnectRequest {
     pub message: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct RefreshTokenRequest {
-    pub refresh_token: String,
+    /// API clients send it here; the web app's comes from its cookie.
+    pub refresh_token: Option<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthResponse {
     pub user: UserResponse,
-    pub access_token: String,
-    pub refresh_token: String,
+    /// Left out for the web app, which gets HttpOnly cookies instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
     pub expires_in: i64,
 }
+
+type AuthResult = ApiResult<(HeaderMap, Json<ApiResponse<AuthResponse>>)>;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,9 +108,10 @@ impl From<User> for UserResponse {
 }
 
 pub async fn register(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
-) -> ApiResult<Json<ApiResponse<AuthResponse>>> {
+) -> AuthResult {
     // Validate input
     if payload.username.is_empty() || payload.email.is_empty() {
         return Err(ApiError::Validation(
@@ -144,26 +151,27 @@ pub async fn register(
         "password": payload.password,
         "ethereum_address": payload.wallet_address,
     });
-    forward_auth(&state, "/api/v1/auth/register", body).await
+    forward_auth(&state, &headers, "/api/v1/auth/register", body).await
 }
 
 pub async fn login(
+    headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
-) -> ApiResult<Json<ApiResponse<AuthResponse>>> {
+) -> AuthResult {
     // user-service accepts an email or a username in its `email` field
     // (no '@' => username lookup), so pass the identifier straight through.
     let body = serde_json::json!({
         "email": payload.identifier,
         "password": payload.password,
     });
-    forward_auth(&state, "/api/v1/auth/login", body).await
+    forward_auth(&state, &headers, "/api/v1/auth/login", body).await
 }
 
 pub async fn logout(
     headers: HeaderMap,
     State(state): State<AppState>,
-) -> ApiResult<Json<ApiResponse<()>>> {
+) -> ApiResult<(HeaderMap, Json<ApiResponse<()>>)> {
     // Forward to user-service, which blacklists the token and clears the
     // session. Logout is best-effort for UX, so failures are swallowed.
     if let Some(hm) = bearer_map(&headers) {
@@ -178,18 +186,26 @@ pub async fn logout(
             .await;
     }
 
-    Ok(Json(ApiResponse::success_with_message(
-        (),
-        "Successfully logged out".to_string(),
-    )))
+    Ok((
+        crate::middleware::auth::clear_session_cookies(),
+        Json(ApiResponse::success_with_message(
+            (),
+            "Successfully logged out".to_string(),
+        )),
+    ))
 }
 
 pub async fn refresh_token(
+    headers: HeaderMap,
     State(state): State<AppState>,
-    Json(payload): Json<RefreshTokenRequest>,
-) -> ApiResult<Json<ApiResponse<AuthResponse>>> {
-    let body = serde_json::json!({ "refresh_token": payload.refresh_token });
-    forward_auth(&state, "/api/v1/auth/refresh", body).await
+    payload: Option<Json<RefreshTokenRequest>>,
+) -> AuthResult {
+    let refresh_token = payload
+        .and_then(|Json(p)| p.refresh_token)
+        .or_else(|| crate::middleware::auth::request_refresh_token(&headers))
+        .ok_or(ApiError::Unauthorized)?;
+    let body = serde_json::json!({ "refresh_token": refresh_token });
+    forward_auth(&state, &headers, "/api/v1/auth/refresh", body).await
 }
 
 pub async fn verify_token(
@@ -301,17 +317,7 @@ fn decode_token(token: &str, secret: &str) -> ApiResult<Claims> {
 }
 
 fn extract_token_from_header(headers: &HeaderMap) -> ApiResult<String> {
-    let auth_header = headers
-        .get("Authorization")
-        .ok_or(ApiError::Unauthorized)?
-        .to_str()
-        .map_err(|_| ApiError::Unauthorized)?;
-
-    if !auth_header.starts_with("Bearer ") {
-        return Err(ApiError::Unauthorized);
-    }
-
-    Ok(auth_header[7..].to_string())
+    crate::middleware::auth::request_token(headers).ok_or(ApiError::Unauthorized)
 }
 
 async fn authenticate_user(headers: &HeaderMap, state: &AppState) -> ApiResult<User> {
@@ -624,9 +630,10 @@ fn map_auth_status(code: u16) -> ApiError {
 /// gateway's public `AuthResponse` contract.
 async fn forward_auth(
     state: &AppState,
+    request_headers: &HeaderMap,
     path: &str,
     body: serde_json::Value,
-) -> ApiResult<Json<ApiResponse<AuthResponse>>> {
+) -> AuthResult {
     let resp = state
         .proxy
         .post("user-service", path, body, None)
@@ -640,17 +647,38 @@ async fn forward_auth(
             .await
             .map_err(|e| ApiError::Internal(format!("invalid user-service response: {e}")))?;
         let rep = sync_user_to_gateway_db(state, &ua.user).await;
+        let expires_in = if ua.expires_in > 0 {
+            ua.expires_in
+        } else {
+            3600
+        };
+        // The web app gets the tokens as HttpOnly cookies so page scripts can't
+        // read them; API clients get them in the body as before.
+        let (cookies, access_token, refresh_token) =
+            if crate::middleware::auth::is_web_client(request_headers) {
+                (
+                    crate::middleware::auth::session_cookies(
+                        &ua.access_token,
+                        &ua.refresh_token,
+                        expires_in,
+                    ),
+                    None,
+                    None,
+                )
+            } else {
+                (
+                    HeaderMap::new(),
+                    Some(ua.access_token),
+                    Some(ua.refresh_token),
+                )
+            };
         let auth_resp = AuthResponse {
             user: to_user_response_with_rep(ua.user, rep),
-            access_token: ua.access_token,
-            refresh_token: ua.refresh_token,
-            expires_in: if ua.expires_in > 0 {
-                ua.expires_in
-            } else {
-                3600
-            },
+            access_token,
+            refresh_token,
+            expires_in,
         };
-        Ok(Json(ApiResponse::success(auth_resp)))
+        Ok((cookies, Json(ApiResponse::success(auth_resp))))
     } else {
         // Prefer the downstream error message when present.
         let msg = resp

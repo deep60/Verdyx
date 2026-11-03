@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { setAuthCookies, clearAuthCookies } from "@/lib/cookie-auth";
+import { clearAuthCookies } from "@/lib/cookie-auth";
 
 export interface User {
   id: string;
@@ -14,8 +14,10 @@ export interface User {
 }
 
 /**
- * Removes data written by the old offline fallbacks: a browser-only account list
- * that held plain-text passwords, made-up scan reports, and fake sessions.
+ * Removes data written by older versions: a browser-only account list that held
+ * plain-text passwords, made-up scan reports, fake sessions, and login tokens
+ * kept where page scripts could read them. Sessions now live in HttpOnly cookies
+ * set by the API.
  */
 function purgeLegacyLocalData() {
   if (typeof window === "undefined") return;
@@ -25,14 +27,12 @@ function purgeLegacyLocalData() {
     Object.keys(localStorage)
       .filter((key) => key.startsWith("verdyx_reset_"))
       .forEach((key) => localStorage.removeItem(key));
-    if (localStorage.getItem("token")?.startsWith("local-jwt-")) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("user");
-    }
+    localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
   } catch {
     // Storage may be blocked; there is nothing to purge in that case.
   }
+  clearAuthCookies();
 }
 
 const SERVICE_UNAVAILABLE_MESSAGE =
@@ -53,15 +53,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function getAuthToken(): string | null {
-  return localStorage.getItem("token");
-}
-
 interface AuthResponseData {
   user: User;
-  accessToken: string;
-  refreshToken: string;
   expiresIn: number;
+}
+
+/** The signed-in user, renewing the session cookie once if it has expired. */
+async function fetchSessionUser(): Promise<Response> {
+  const response = await fetch("/api/v1/auth/verify");
+  if (response.status !== 401) return response;
+  const refreshed = await fetch("/api/v1/auth/refresh", { method: "POST" });
+  return refreshed.ok ? fetch("/api/v1/auth/verify") : response;
 }
 
 async function parseJsonSafe(response: Response): Promise<{
@@ -103,17 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkAuthStatus = async () => {
     try {
-      const token = getAuthToken();
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
-
-      const response = await fetch("/api/v1/auth/verify", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const response = await fetchSessionUser();
 
       if (response.ok) {
         const { isJson, body } = await parseJsonSafe(response);
@@ -121,8 +113,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(body.data as User);
         }
       } else if (response.status === 401) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("refreshToken");
         localStorage.removeItem("user");
         setUser(null);
       }
@@ -133,17 +123,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // The API sets the session as HttpOnly cookies; only the profile is cached here.
   const persistSession = (authData: AuthResponseData) => {
     setUser(authData.user);
-    localStorage.setItem("token", authData.accessToken);
-    localStorage.setItem("refreshToken", authData.refreshToken);
     localStorage.setItem("user", JSON.stringify(authData.user));
-    setAuthCookies(
-      authData.accessToken,
-      authData.refreshToken,
-      authData.user,
-      authData.expiresIn
-    );
   };
 
   /** Calls an auth endpoint; throws a user-readable error for any failure. */
@@ -214,23 +197,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      const token = getAuthToken();
-      if (token) {
-        await fetch("/api/v1/auth/logout", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-      }
+      await fetch("/api/v1/auth/logout", { method: "POST" });
     } catch {
       // Ignore logout network error
     } finally {
       setUser(null);
-      localStorage.removeItem("token");
-      localStorage.removeItem("refreshToken");
       localStorage.removeItem("user");
-      clearAuthCookies();
       toast({
         title: "Logged out",
         description: "See you soon!",
@@ -269,14 +241,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         params: [message, walletAddress],
       });
 
-      const token = getAuthToken();
-      if (!token) throw new Error("Not signed in");
+      if (!user) throw new Error("Not signed in");
       const response = await fetch("/api/v1/auth/wallet/connect", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_address: walletAddress,
           signature,
@@ -309,14 +277,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const disconnectWallet = async () => {
     try {
-      const token = getAuthToken();
-      if (!token) throw new Error("Not signed in");
+      if (!user) throw new Error("Not signed in");
       const response = await fetch("/api/v1/auth/wallet/disconnect", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
       });
       if (!response.ok) throw new Error("Wallet disconnect was rejected");
       if (user) {
@@ -341,10 +305,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) throw new Error("Not signed in");
     const response = await fetch("/api/users/me", {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${getAuthToken() ?? ""}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: input.username, email: input.email }),
     });
     if (!response.ok) throw new Error("Could not update your profile. Please try again.");
@@ -362,17 +323,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const deleteAccount = async () => {
     // Only clear the session once the server confirms, so a failed request
     // can't look like a deleted account.
-    const response = await fetch("/api/users/me", {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${getAuthToken() ?? ""}` },
-    });
+    const response = await fetch("/api/users/me", { method: "DELETE" });
     if (!response.ok) throw new Error("Could not delete your account. Please try again.");
 
     setUser(null);
-    localStorage.removeItem("token");
-    localStorage.removeItem("refreshToken");
     localStorage.removeItem("user");
-    clearAuthCookies();
   };
 
   return (

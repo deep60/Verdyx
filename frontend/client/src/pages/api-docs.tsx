@@ -125,7 +125,7 @@ const PLAYGROUND_PRESETS = [
   { label: "Platform Stats", path: "/api/analysis/stats" },
   { label: "Security Engines (8)", path: "/api/engines" },
   { label: "Reputation Standings", path: "/api/reputation/standings" },
-  { label: "Recent Submissions", path: "/api/submissions" },
+  { label: "My Submissions", path: "/api/submissions" },
   { label: "Website OSINT (example.com)", path: "/api/analysis/web-intel?url=https://example.com" },
 ];
 
@@ -203,8 +203,6 @@ export default function ApiDocs() {
     const t0 = performance.now();
     try {
       const headers: Record<string, string> = { Accept: "application/json" };
-      const token = localStorage.getItem("token");
-      if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch(targetPath, {
         method: "GET",
         headers,

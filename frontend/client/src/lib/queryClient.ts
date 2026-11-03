@@ -14,8 +14,6 @@ export async function apiRequest(
 ): Promise<Response> {
   const headers: Record<string, string> = {};
   if (data) headers["Content-Type"] = "application/json";
-  const token = localStorage.getItem("token");
-  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, {
     method,
@@ -37,8 +35,6 @@ export const getQueryFn: <T>(options: {
     const urlPath = queryKey.join("/") as string;
 
     const headers: Record<string, string> = {};
-    const token = localStorage.getItem("token");
-    if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const res = await fetch(urlPath, {
       credentials: "include",
