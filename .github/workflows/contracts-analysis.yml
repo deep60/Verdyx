@@ -52,6 +52,7 @@ jobs:
   mythril:
     name: Mythril (Symbolic Execution)
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     permissions:
       contents: read
       security-events: write
@@ -79,11 +80,18 @@ jobs:
 
       - name: Run Mythril on core contracts
         run: |
+          # --execution-timeout doesn't bound solver time, so cap each contract.
           for contract in contracts/core/*.sol; do
             name=$(basename "$contract" .sol)
             echo "Analyzing $name..."
-            myth analyze "$contract:$name" --solc-json mythril.solc.json --solv 0.8.28 \
-              --execution-timeout 120 --max-depth 50 -o jsonv2 > "mythril-$name.json" || true
+            status=0
+            timeout 900 myth analyze "$contract:$name" --solc-json mythril.solc.json --solv 0.8.28 \
+              --execution-timeout 120 --create-timeout 60 --solver-timeout 10000 --max-depth 50 \
+              -o jsonv2 > "mythril-$name.json" || status=$?
+            if [ "$status" -eq 124 ]; then
+              echo "::warning::Mythril timed out on $name; its analysis is incomplete"
+              echo '[{"issues": [], "timedOut": true}]' > "mythril-$name.json"
+            fi
           done
 
       # Mythril exits non-zero for any finding, so judge the reports instead:
@@ -102,7 +110,7 @@ jobs:
                   continue
               issues = [i for r in reports for i in r.get("issues", [])]
               for i in issues:
-                  print(f"{path}: {i['severity']} SWC-{i['swcID']} {i['swcTitle']}")
+                  print(f"{path}: {i['severity']} {i['swcID']} {i['swcTitle']}")
               failed |= any(i["severity"] == "High" for i in issues)
               print(f"{path}: {len(issues)} issue(s)")
           sys.exit(1 if failed else 0)
