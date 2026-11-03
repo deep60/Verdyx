@@ -45,7 +45,7 @@ config = "0.15"
 dotenvy = "0.15"
 
 # Authentication
-jsonwebtoken = "9.3"
+jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 argon2 = "0.5"
 bcrypt = "0.19"
 
