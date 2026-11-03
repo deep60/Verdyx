@@ -604,6 +604,8 @@ contract ReputationSystem is IReputationSystem, AccessControl {
         address engine
     ) external view override returns (uint256) {
         EngineProfile memory profile = engines[engine];
+        // A zero counter check, not a balance comparison.
+        // slither-disable-next-line incorrect-equality
         if (profile.totalSubmissions == 0) return 0;
 
         return (profile.correctPredictions * 100) / profile.totalSubmissions;

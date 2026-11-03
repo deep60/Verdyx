@@ -328,10 +328,12 @@ contract ThreatToken is
         bytes32 analysisId
     ) internal view returns (uint256) {
         uint256 stakedAmount = _getStakedAmountForAnalysis(engine, analysisId);
-        uint256 reputationBonus = engineReputation[engine] / 1000; // 0.1% bonus per 1000 reputation
+        // Whole steps of 1000 reputation each add 1% to the base reward.
+        // slither-disable-next-line divide-before-multiply
+        uint256 reputationBonus = engineReputation[engine] / 1000;
 
         uint256 baseReward = (stakedAmount * BASE_REWARD_RATE) / 100;
-        uint256 bonusReward = (baseReward * reputationBonus) / 100;
+        uint256 bonusReward = (stakedAmount * BASE_REWARD_RATE * reputationBonus) / 10000;
 
         return baseReward + bonusReward;
     }

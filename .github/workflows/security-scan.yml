@@ -108,8 +108,10 @@ jobs:
         with:
           tool: cargo-audit
 
+      # Same policy as the deploy scan: fail on vulnerabilities, not on
+      # unmaintained-crate warnings. Deferred advisories are in .cargo/audit.toml.
       - name: Run cargo audit
-        run: cargo audit --deny warnings
+        run: cargo audit
 
       - name: Generate SARIF
         run: |
@@ -245,4 +247,3 @@ jobs:
         with:
           config-file: '.github/dependency-review-config.yml'
           fail-on-severity: high
-          allow-ghsas: []

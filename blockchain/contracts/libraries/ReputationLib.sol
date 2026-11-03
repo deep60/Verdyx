@@ -126,11 +126,11 @@ library ReputationLib {
 
         // Apply diminishing returns for high reputation
         if (currentReputation > 800) {
-            totalGain = (totalGain * 50) / 100; // 50% reduction
-        } else if (currentReputation > 600) {
-            totalGain = (totalGain * 75) / 100; // 25% reduction
+            return (totalGain * 50) / 100; // 50% reduction
         }
-
+        if (currentReputation > 600) {
+            return (totalGain * 75) / 100; // 25% reduction
+        }
         return totalGain;
     }
 
@@ -152,11 +152,11 @@ library ReputationLib {
 
         // Apply protection for low reputation
         if (currentReputation < 200) {
-            totalLoss = (totalLoss * 50) / 100; // 50% reduction
-        } else if (currentReputation < 400) {
-            totalLoss = (totalLoss * 75) / 100; // 25% reduction
+            return (totalLoss * 50) / 100; // 50% reduction
         }
-
+        if (currentReputation < 400) {
+            return (totalLoss * 75) / 100; // 25% reduction
+        }
         return totalLoss;
     }
 
@@ -274,15 +274,11 @@ library ReputationLib {
     ) internal pure returns (uint256) {
         if (truePositives == 0) return 0;
 
-        uint256 precision = (truePositives * BASIS_POINTS_BASE) /
-            (truePositives + falsePositives);
-        uint256 recall = (truePositives * BASIS_POINTS_BASE) /
-            (truePositives + falseNegatives);
-
-        if (precision + recall == 0) return 0;
-
-        uint256 f1 = (2 * precision * recall) / (precision + recall);
-        return (f1 * PERCENTAGE_BASE) / BASIS_POINTS_BASE;
+        // Equal to the harmonic mean of precision and recall, computed with a
+        // single division so neither is rounded first.
+        return
+            (2 * truePositives * PERCENTAGE_BASE) /
+            (2 * truePositives + falsePositives + falseNegatives);
     }
 
     /**

@@ -162,6 +162,8 @@ contract BountyManager is ReentrancyGuard {
     }
 
     modifier bountyActive(uint256 bountyId) {
+        // Comparing an enum status, not a balance, so strict equality is intended.
+        // slither-disable-next-line incorrect-equality
         require(
             bounties[bountyId].status == BountyStatus.Active,
             "Bounty not active"
@@ -369,6 +371,10 @@ contract BountyManager is ReentrancyGuard {
         bounty.consensusVerdict = consensus;
         bounty.status = BountyStatus.Completed;
 
+        // Settle rewards and stakes before calling out to ReputationSystem, so no
+        // state is written after an external call.
+        _distributeRewards(bountyId, consensus, consensusCount);
+
         // Update reputation for all analysts based on their analysis accuracy
         for (uint256 i = 0; i < analysts.length; i++) {
             address analyst = analysts[i];
@@ -377,7 +383,8 @@ contract BountyManager is ReentrancyGuard {
             // Check if analyst's verdict matches consensus
             bool wasCorrect = (analysis.verdict == consensus);
 
-            // Update reputation in reputation system
+            // The new score is read back from ReputationSystem when needed.
+            // slither-disable-next-line unused-return
             reputationSystem.updateReputationForAnalysis(
                 analyst,
                 bountyId,
@@ -385,9 +392,6 @@ contract BountyManager is ReentrancyGuard {
                 analysis.stakeAmount
             );
         }
-
-        // Distribute rewards and slash stakes
-        _distributeRewards(bountyId, consensus, consensusCount);
 
         // Calculate confidence score (percentage of consensus)
         uint256 totalAnalyses = bountyAnalysts[bountyId].length;
