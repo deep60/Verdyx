@@ -1148,10 +1148,12 @@ mod tests {
         assert!(!ssl.is_valid);
         assert!(ssl.issuer.is_none());
         assert!(ssl.expiry_days.is_none());
+        // The denial message embeds the random port, so only check for the
+        // old hardcoded issuer here; expiry is covered by `expiry_days` above.
         assert!(ssl
             .certificate_errors
             .iter()
-            .all(|e| !e.contains("Let's Encrypt") && !e.contains("90")));
+            .all(|e| !e.contains("Let's Encrypt")));
     }
 
     #[test]
