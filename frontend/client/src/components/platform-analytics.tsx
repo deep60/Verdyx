@@ -90,23 +90,21 @@ export function PlatformAnalytics() {
   }, [submissions, maliciousTotal, suspiciousTotal, stats?.benignCount, totalVolume]);
 
   // Engine performance comparison derived from engine records
-  const enginePerformance = useMemo(() => {
-    if (engines.length > 0) {
-      return engines.slice(0, 8).map((engine) => {
-        const rawAcc = parseFloat(engine.accuracy || engine.accuracyRate || "0");
-        const normalizedAcc = rawAcc <= 1 && rawAcc > 0 ? rawAcc * 100 : rawAcc;
-        return {
-          name: engine.name.substring(0, 15),
-          accuracy: Number(normalizedAcc.toFixed(1)),
-        };
-      });
-    }
-    return [
-      { name: "YARA Rules", accuracy: 96.5 },
-      { name: "ClamAV Scanner", accuracy: 94.2 },
-      { name: "PE Heuristic", accuracy: 91.8 },
-    ];
-  }, [engines]);
+  const enginePerformance = useMemo(
+    () =>
+      engines
+        .filter((engine) => engine.accuracy || engine.accuracyRate)
+        .slice(0, 8)
+        .map((engine) => {
+          const rawAcc = parseFloat(engine.accuracy || engine.accuracyRate || "0");
+          const normalizedAcc = rawAcc <= 1 && rawAcc > 0 ? rawAcc * 100 : rawAcc;
+          return {
+            name: engine.name.substring(0, 15),
+            accuracy: Number(normalizedAcc.toFixed(1)),
+          };
+        }),
+    [engines],
+  );
 
   // Analysis volume by 2-hour bucket derived from submissions
   const hourlyVolume = useMemo(() => {
@@ -372,6 +370,11 @@ export function PlatformAnalytics() {
             <CardDescription>Top engines by accuracy rate</CardDescription>
           </CardHeader>
           <CardContent>
+            {enginePerformance.length === 0 ? (
+              <p className="flex h-[300px] items-center justify-center text-center text-sm text-muted-foreground">
+                Engine accuracy hasn&apos;t been measured yet.
+              </p>
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={enginePerformance} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
@@ -398,6 +401,7 @@ export function PlatformAnalytics() {
                 <Bar dataKey="accuracy" fill="hsl(var(--primary))" radius={[0, 8, 8, 0]} name="Accuracy %" />
               </BarChart>
             </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 

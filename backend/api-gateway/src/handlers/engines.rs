@@ -52,102 +52,111 @@ pub struct EngineSummary {
     #[serde(rename = "type")]
     pub r#type: String,
     pub description: Option<String>,
-    pub accuracy_rate: String,
-    pub accuracy: String,
-    pub total_analyses: i64,
-    pub stake_amount: String,
+    /// None until accuracy has been measured; never estimated.
+    pub accuracy_rate: Option<String>,
+    pub accuracy: Option<String>,
+    pub total_analyses: Option<i64>,
+    pub stake_amount: Option<String>,
     pub is_active: bool,
+    /// Live state reported by the analysis engine, such as "online" or "unavailable".
+    pub status: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
 impl From<EngineDbRow> for EngineSummary {
     fn from(row: EngineDbRow) -> Self {
-        let raw_acc = row.accuracy_rate.unwrap_or(0.95);
-        let pct = if raw_acc <= 1.0 && raw_acc > 0.0 {
-            raw_acc * 100.0
-        } else {
-            raw_acc
-        };
-        let acc_str = format!("{:.2}", pct);
+        let accuracy = row.accuracy_rate.map(|raw| {
+            let pct = if raw <= 1.0 && raw > 0.0 {
+                raw * 100.0
+            } else {
+                raw
+            };
+            format!("{:.2}", pct)
+        });
         Self {
             id: row.id,
             name: row.name,
             r#type: row.engine_type.clone(),
             engine_type: row.engine_type,
             description: row.description,
-            accuracy_rate: acc_str.clone(),
-            accuracy: acc_str,
-            total_analyses: row.total_analyses.unwrap_or(0),
-            stake_amount: "1.0".to_string(),
+            accuracy_rate: accuracy.clone(),
+            accuracy,
+            total_analyses: row.total_analyses,
+            stake_amount: None,
             is_active: row.is_active,
+            status: None,
             created_at: row.created_at,
         }
     }
 }
 
-fn default_builtin_engines() -> Vec<EngineSummary> {
-    let now = Utc::now();
-    vec![
-        EngineSummary {
-            id: Uuid::parse_str("11111111-1111-4111-8111-111111111101").unwrap(),
-            name: "ClamAV Antivirus".to_string(),
-            engine_type: "signature".to_string(),
-            r#type: "signature".to_string(),
-            description: Some("Multi-platform signature and archive malware scanner".to_string()),
-            accuracy_rate: "96.40".to_string(),
-            accuracy: "96.40".to_string(),
-            total_analyses: 1280,
-            stake_amount: "2.5".to_string(),
-            is_active: true,
-            created_at: now,
-        },
-        EngineSummary {
-            id: Uuid::parse_str("11111111-1111-4111-8111-111111111102").unwrap(),
-            name: "YARA Rule Engine".to_string(),
-            engine_type: "signature".to_string(),
-            r#type: "signature".to_string(),
-            description: Some(
-                "Pattern-matching rule engine for APTs, packers, and malware families".to_string(),
-            ),
-            accuracy_rate: "98.10".to_string(),
-            accuracy: "98.10".to_string(),
-            total_analyses: 1540,
-            stake_amount: "3.0".to_string(),
-            is_active: true,
-            created_at: now,
-        },
-        EngineSummary {
-            id: Uuid::parse_str("11111111-1111-4111-8111-111111111103").unwrap(),
-            name: "PE & Binary Heuristic Analyzer".to_string(),
-            engine_type: "ml".to_string(),
-            r#type: "ml".to_string(),
-            description: Some(
-                "Static PE/ELF/Mach-O structural, import, and section entropy analyzer".to_string(),
-            ),
-            accuracy_rate: "93.50".to_string(),
-            accuracy: "93.50".to_string(),
-            total_analyses: 980,
-            stake_amount: "2.0".to_string(),
-            is_active: true,
-            created_at: now,
-        },
-        EngineSummary {
-            id: Uuid::parse_str("11111111-1111-4111-8111-111111111104").unwrap(),
-            name: "Decompilation & String Inspector".to_string(),
-            engine_type: "hybrid".to_string(),
-            r#type: "hybrid".to_string(),
-            description: Some(
-                "Automated control-flow, suspicious API, and obfuscated indicator extractor"
-                    .to_string(),
-            ),
-            accuracy_rate: "91.20".to_string(),
-            accuracy: "91.20".to_string(),
-            total_analyses: 760,
-            stake_amount: "1.5".to_string(),
-            is_active: true,
-            created_at: now,
-        },
-    ]
+/// One analyzer as reported by the analysis engine's `/engines/status`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnalyzerStatus {
+    id: String,
+    name: String,
+    engine_type: String,
+    status: String,
+    details: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnalyzerReport {
+    engines: Vec<AnalyzerStatus>,
+}
+
+/// Stable id for a built-in analyzer, derived from its name so links keep working.
+fn builtin_engine_id(analyzer_id: &str) -> Uuid {
+    let mut bytes = [0u8; 16];
+    for (i, b) in analyzer_id.bytes().enumerate() {
+        bytes[i % 16] = bytes[i % 16].wrapping_mul(31).wrapping_add(b);
+    }
+    uuid::Builder::from_random_bytes(bytes).into_uuid()
+}
+
+impl From<AnalyzerStatus> for EngineSummary {
+    fn from(a: AnalyzerStatus) -> Self {
+        Self {
+            id: builtin_engine_id(&a.id),
+            name: a.name,
+            r#type: a.engine_type.clone(),
+            engine_type: a.engine_type,
+            description: Some(a.details),
+            accuracy_rate: None,
+            accuracy: None,
+            total_analyses: None,
+            stake_amount: None,
+            is_active: a.status == "online",
+            status: Some(a.status),
+            created_at: Utc::now(),
+        }
+    }
+}
+
+/// The analyzers built into the analysis engine, with their live status.
+async fn builtin_engines(state: &AppState) -> Result<Vec<EngineSummary>, StatusCode> {
+    let resp = state
+        .proxy
+        .get("analysis-engine", "/engines/status", None)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Analysis engine status unavailable: {}", e);
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
+    if !resp.status().is_success() {
+        tracing::warn!("Analysis engine status returned {}", resp.status());
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+    let report: AnalyzerReport = resp.json().await.map_err(|e| {
+        tracing::warn!("Unreadable analysis engine status: {}", e);
+        StatusCode::SERVICE_UNAVAILABLE
+    })?;
+    Ok(report
+        .engines
+        .into_iter()
+        .map(EngineSummary::from)
+        .collect())
 }
 
 /// List all security engines
@@ -178,7 +187,7 @@ pub async fn list_engines(
     .unwrap_or_default();
 
     if rows.is_empty() {
-        return Ok(Json(default_builtin_engines()));
+        return builtin_engines(&state).await.map(Json);
     }
 
     Ok(Json(rows.into_iter().map(EngineSummary::from).collect()))
@@ -212,7 +221,8 @@ pub async fn get_engine(
         return Ok(Json(EngineSummary::from(r)));
     }
 
-    default_builtin_engines()
+    builtin_engines(&state)
+        .await?
         .into_iter()
         .find(|e| e.id == engine_id)
         .map(Json)
@@ -237,7 +247,7 @@ pub async fn register_engine(
     let row = sqlx::query_as::<_, EngineDbRow>(
         r#"
         INSERT INTO engines (id, name, engine_type, description, owner_id, api_endpoint, is_active, accuracy_rate, total_analyses, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, true, 0.9500, 0, $7, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, true, NULL, 0, $7, $7)
         RETURNING id, name, engine_type, description,
                   accuracy_rate::FLOAT8 as accuracy_rate,
                   total_analyses::BIGINT as total_analyses,
@@ -261,7 +271,40 @@ pub async fn register_engine(
 
     let mut summary = EngineSummary::from(row);
     if let Some(stake) = payload.stake_amount {
-        summary.stake_amount = stake;
+        summary.stake_amount = Some(stake);
     }
     Ok(Json(summary))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_engines_report_live_status_and_no_invented_numbers() {
+        let report: AnalyzerReport = serde_json::from_value(serde_json::json!({
+            "engines": [
+                {"id": "yara", "name": "YARA Engine", "engineType": "yara", "isOptional": true,
+                 "status": "online", "version": "4.5", "details": "Rules loaded", "error": null},
+                {"id": "clamav", "name": "ClamAV Scanner", "engineType": "clamav", "isOptional": true,
+                 "status": "unavailable", "version": "clamd", "details": "No daemon", "error": "refused"}
+            ],
+            "totalEngines": 2
+        }))
+        .unwrap();
+        let engines: Vec<EngineSummary> = report
+            .engines
+            .into_iter()
+            .map(EngineSummary::from)
+            .collect();
+
+        assert!(engines[0].is_active);
+        assert!(!engines[1].is_active);
+        assert_eq!(engines[1].status.as_deref(), Some("unavailable"));
+        for e in &engines {
+            assert!(e.accuracy.is_none() && e.total_analyses.is_none() && e.stake_amount.is_none());
+        }
+        assert_eq!(builtin_engine_id("yara"), builtin_engine_id("yara"));
+        assert_ne!(builtin_engine_id("yara"), builtin_engine_id("clamav"));
+    }
 }
