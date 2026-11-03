@@ -966,16 +966,6 @@ pub async fn create_file_submission(
             metadata, created_at, updated_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11)
-        ON CONFLICT (file_hash) DO UPDATE SET
-            submitter_id = EXCLUDED.submitter_id,
-            original_filename = EXCLUDED.original_filename,
-            url = COALESCE(EXCLUDED.url, submissions.url),
-            mime_type = EXCLUDED.mime_type,
-            file_path = COALESCE(EXCLUDED.file_path, submissions.file_path),
-            submission_type = EXCLUDED.submission_type,
-            analysis_status = 'pending',
-            metadata = EXCLUDED.metadata,
-            updated_at = NOW()
         RETURNING id
         "#,
     )
