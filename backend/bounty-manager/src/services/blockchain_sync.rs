@@ -979,7 +979,7 @@ impl From<uuid::Error> for SyncError {
 }
 
 /// Classify a Solidity event log topic to a BlockchainEventType
-/// Topic[0] = keccak256(event_signature)
+/// `topics[0]` = keccak256(event_signature)
 fn classify_event_topic(topic: &ethers::types::H256) -> Option<BlockchainEventType> {
     use ethers::utils::keccak256;
 

@@ -235,18 +235,19 @@ jobs:
         with:
           workspaces: backend
 
-      - name: Install grcov
+      - name: Install grcov and nextest
         uses: taiki-e/install-action@v2
         with:
-          tool: grcov
+          tool: grcov,cargo-nextest
 
+      # Unit tests only: this job has no Postgres or Redis service.
       - name: Run tests with coverage
         env:
           CARGO_INCREMENTAL: 0
-          RUSTFLAGS: "-Cinstrument-coverage -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off -Zpanic_abort_tests -Cpanic=abort"
+          RUSTFLAGS: "-Cinstrument-coverage -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off"
           LLVM_PROFILE_FILE: "coverage/%p-%m.profraw"
         run: |
-          cargo nextest run --workspace --all-targets --profile ci
+          cargo nextest run --workspace --lib --bins --profile ci
           grcov . --binary-path ./target/debug/deps -s . -t lcov --branch --ignore-not-existing --ignore "/*" --ignore "*/.cargo/*" --ignore "*/tests/*" -o lcov.info
 
       - name: Upload coverage to Codecov
