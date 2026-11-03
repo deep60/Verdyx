@@ -123,6 +123,8 @@ pub struct SubmissionFilters {
     pub date_to: Option<DateTime<Utc>>,
     pub page: Option<u32>,
     pub limit: Option<u32>,
+    /// `bounties` lists every scan carrying a bounty; otherwise only the caller's own.
+    pub scope: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1032,38 +1034,24 @@ pub async fn list_submissions(
     claims: Option<crate::middleware::auth::Claims>,
     Query(filters): Query<SubmissionFilters>,
 ) -> Result<Json<Vec<FileSubmissionListItem>>, StatusCode> {
+    // Scans can name private files and URLs, so nobody browses them anonymously.
+    let claims = claims.ok_or(StatusCode::UNAUTHORIZED)?;
     let limit = filters.limit.unwrap_or(50).clamp(1, 200) as i64;
     let offset = (filters.page.unwrap_or(1).max(1) as i64 - 1) * limit;
 
-    let rows = match claims {
-        Some(c) => {
-            let user_rows = state
-                .db
-                .list_file_submissions_for_user(c.sub, limit, offset)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Failed to list submissions for {}: {}", c.sub, e);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                })?;
-            if user_rows.is_empty() {
-                state
-                    .db
-                    .list_recent_file_submissions(limit, offset)
-                    .await
-                    .unwrap_or_default()
-            } else {
-                user_rows
-            }
-        }
-        None => state
+    let rows = if filters.scope.as_deref() == Some("bounties") {
+        // Scans carrying a bounty are posted for analysts to work on.
+        state.db.list_bounty_file_submissions(limit, offset).await
+    } else {
+        state
             .db
-            .list_recent_file_submissions(limit, offset)
+            .list_file_submissions_for_user(claims.sub, limit, offset)
             .await
-            .map_err(|e| {
-                tracing::error!("Failed to list recent submissions: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?,
-    };
+    }
+    .map_err(|e| {
+        tracing::error!("Failed to list submissions for {}: {}", claims.sub, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     Ok(Json(rows))
 }
@@ -1344,6 +1332,7 @@ pub async fn get_my_submissions(
         date_to: None,
         page: Some(1),
         limit: Some(20),
+        scope: None,
     };
 
     let (submissions, total) = state

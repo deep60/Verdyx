@@ -55,8 +55,16 @@ function Router() {
         <Route path="/register" component={Register} />
         <Route path="/forgot-password" component={ForgotPassword} />
         <Route path="/reset-password" component={ResetPassword} />
-        <Route path="/dashboard" component={Dashboard} />
-        <Route path="/marketplace" component={Marketplace} />
+        <Route path="/dashboard">
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        </Route>
+        <Route path="/marketplace">
+          <ProtectedRoute>
+            <Marketplace />
+          </ProtectedRoute>
+        </Route>
         <Route path="/analysis/:id" component={AnalysisDetails} />
         <Route path="/api" component={ApiDocs} />
         <Route path="/profile">

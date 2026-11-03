@@ -71,7 +71,7 @@ export default function Marketplace() {
     isLoading: submissionsLoading,
     refetch: refetchSubmissions,
   } = useQuery<ApiSubmission[]>({
-    queryKey: ["/api/submissions"],
+    queryKey: ["/api/submissions?scope=bounties"],
   });
   const submissions: ApiSubmission[] = Array.isArray(rawSubmissions) ? rawSubmissions : [];
 
