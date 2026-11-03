@@ -37,15 +37,14 @@ describe("installDirectApi", () => {
     window.fetch = originalFetch;
   });
 
-  it("rewrites API calls, keeps their options and drops the CSRF header", async () => {
+  it("rewrites API calls, keeps their options and marks them as web app calls", async () => {
     const native = vi.fn(async () => new Response("{}"));
     window.fetch = native as typeof window.fetch;
     installDirectApi(ORIGIN);
 
     await window.fetch("/api/submissions", {
       method: "POST",
-      credentials: "include",
-      headers: { Authorization: "Bearer t", "X-CSRF-Token": "c" },
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": "c" },
     });
 
     const [url, init] = native.mock.calls[0] as unknown as [string, RequestInit];
@@ -53,8 +52,22 @@ describe("installDirectApi", () => {
     expect(url).toBe(`${ORIGIN}/api/v1/submissions`);
     expect(init.method).toBe("POST");
     expect(init.credentials).toBe("include");
-    expect(headers.get("Authorization")).toBe("Bearer t");
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(headers.get("X-Verdyx-Client")).toBe("web");
     expect(headers.has("X-CSRF-Token")).toBe(false);
+  });
+
+  it("sends the session cookie on same-origin API calls too", async () => {
+    const native = vi.fn(async () => new Response("{}"));
+    window.fetch = native as typeof window.fetch;
+    installDirectApi("");
+
+    await window.fetch("/api/v1/auth/verify");
+
+    const [url, init] = native.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/v1/auth/verify");
+    expect(init.credentials).toBe("include");
+    expect(new Headers(init.headers).get("X-Verdyx-Client")).toBe("web");
   });
 
   it("does not touch other requests", async () => {
@@ -64,6 +77,6 @@ describe("installDirectApi", () => {
 
     await window.fetch("https://rdap.org/domain/a.com");
 
-    expect(native.mock.calls[0][0 as never]).toBe("https://rdap.org/domain/a.com");
+    expect(native.mock.calls[0]).toEqual(["https://rdap.org/domain/a.com", undefined]);
   });
 });

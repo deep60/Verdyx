@@ -18,18 +18,24 @@ export function webSocketUrl(origin: string = API_ORIGIN): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
-/** Sends every relative /api call to the gateway, so call sites stay unchanged. */
-export function installDirectApi(origin: string = API_ORIGIN): void {
-  if (!origin) return;
+/** Header the gateway requires before it accepts the session cookie (CSRF guard). */
+export const WEB_CLIENT_HEADER = "X-Verdyx-Client";
 
+/**
+ * Marks every relative /api call as coming from the web app and sends the
+ * HttpOnly session cookie with it. With an API origin configured, also sends
+ * the call to the gateway directly, so call sites stay unchanged.
+ */
+export function installDirectApi(origin: string = API_ORIGIN): void {
   const nativeFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
-    const url = typeof input === "string" ? directApiUrl(input, origin) : null;
-    if (!url) return nativeFetch(input, init);
+    if (typeof input !== "string" || !API_PREFIX.test(input)) return nativeFetch(input, init);
 
-    // The gateway ignores this header and its CORS rules reject it.
     const headers = new Headers(init?.headers);
+    headers.set(WEB_CLIENT_HEADER, "web");
+    // The gateway ignores this header and its CORS rules reject it.
     headers.delete("X-CSRF-Token");
-    return nativeFetch(url, { ...init, headers });
+    const url = directApiUrl(input, origin) ?? input;
+    return nativeFetch(url, { ...init, headers, credentials: "include" });
   };
 }

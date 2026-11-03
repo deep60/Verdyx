@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{FromRequestParts, State},
-    http::{header, Request, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Request, StatusCode},
     middleware::Next,
     response::Response,
 };
@@ -127,21 +127,107 @@ impl JwtService {
     }
 }
 
+/// Session cookies set for the web app. HttpOnly, so page scripts never see them.
+pub const ACCESS_COOKIE: &str = "verdyx_access";
+pub const REFRESH_COOKIE: &str = "verdyx_refresh";
+const REFRESH_COOKIE_PATH: &str = "/api/v1/auth";
+
+/// The web app sends this header on every API request. A page can only add a
+/// custom header to a cross-origin request after a CORS preflight, which the
+/// origin allow-list gates, so session cookies count only when it is present.
+/// That stops other sites from riding a logged-in user's cookies (CSRF).
+pub const WEB_CLIENT_HEADER: &str = "x-verdyx-client";
+
+/// Whether the request comes from the Verdyx web app.
+pub fn is_web_client(headers: &HeaderMap) -> bool {
+    headers.contains_key(WEB_CLIENT_HEADER)
+}
+
+/// Value of the named cookie, if the request carries it.
+pub fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| value)
+        .filter(|value| !value.is_empty())
+}
+
+/// The caller's access token: a Bearer header, or the session cookie on a web
+/// app request.
+pub fn request_token(headers: &HeaderMap) -> Option<String> {
+    if let Some(token) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+    {
+        return Some(token.to_string());
+    }
+    if is_web_client(headers) {
+        return cookie(headers, ACCESS_COOKIE).map(str::to_string);
+    }
+    None
+}
+
+/// The refresh token a web app request carries in its cookie.
+pub fn request_refresh_token(headers: &HeaderMap) -> Option<String> {
+    is_web_client(headers)
+        .then(|| cookie(headers, REFRESH_COOKIE).map(str::to_string))
+        .flatten()
+}
+
+/// Set-Cookie headers that start a web session.
+pub fn session_cookies(access_token: &str, refresh_token: &str, expires_in: i64) -> HeaderMap {
+    let refresh_days: i64 = std::env::var("REFRESH_TOKEN_EXPIRY_DAYS")
+        .ok()
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(30);
+    let mut headers = HeaderMap::new();
+    for cookie in [
+        format!(
+            "{ACCESS_COOKIE}={access_token}; Path=/; Max-Age={expires_in}; HttpOnly; Secure; SameSite=Lax"
+        ),
+        format!(
+            "{REFRESH_COOKIE}={refresh_token}; Path={REFRESH_COOKIE_PATH}; Max-Age={}; HttpOnly; Secure; SameSite=Strict",
+            refresh_days * 86_400
+        ),
+    ] {
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            headers.append(header::SET_COOKIE, value);
+        }
+    }
+    headers
+}
+
+/// Set-Cookie headers that end a web session.
+pub fn clear_session_cookies() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for cookie in [
+        format!("{ACCESS_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"),
+        format!(
+            "{REFRESH_COOKIE}=; Path={REFRESH_COOKIE_PATH}; Max-Age=0; HttpOnly; Secure; SameSite=Strict"
+        ),
+    ] {
+        headers.append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&cookie).expect("static cookie is a valid header"),
+        );
+    }
+    headers
+}
+
 /// Authentication middleware
 pub async fn auth_middleware(
     State(state): State<AppState>,
     mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Extract authorization header
-    let auth_header = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
-
-    match auth_header {
-        Some(header) if header.starts_with("Bearer ") => {
-            let token = &header[7..];
+    match request_token(request.headers()) {
+        Some(token) => {
+            let token = token.as_str();
 
             // Recreate JwtService here (in production, this should ideally be in AppState but for now we create it on fly or cached)
             // However, JwtService construction is cheap (key derivation), or we can move it to AppState.
@@ -169,19 +255,11 @@ pub async fn optional_auth_middleware(
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
-    // Extract authorization header
-    let auth_header = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
+    if let Some(token) = request_token(request.headers()) {
+        let jwt_service = JwtService::new(&state.config.security.jwt_secret);
 
-    if let Some(header) = auth_header {
-        if let Some(token) = header.strip_prefix("Bearer ") {
-            let jwt_service = JwtService::new(&state.config.security.jwt_secret);
-
-            if let Ok(claims) = jwt_service.validate_token(token) {
-                request.extensions_mut().insert(claims);
-            }
+        if let Ok(claims) = jwt_service.validate_token(&token) {
+            request.extensions_mut().insert(claims);
         }
     }
 
@@ -301,6 +379,57 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(*k, HeaderValue::from_str(v).unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn bearer_header_wins_over_cookie() {
+        let h = headers(&[
+            ("authorization", "Bearer from-header"),
+            ("cookie", "verdyx_access=from-cookie"),
+            (WEB_CLIENT_HEADER, "web"),
+        ]);
+        assert_eq!(request_token(&h).as_deref(), Some("from-header"));
+    }
+
+    #[test]
+    fn session_cookie_counts_only_for_web_app_requests() {
+        let cookie_only = headers(&[("cookie", "theme=dark; verdyx_access=abc.def")]);
+        assert_eq!(request_token(&cookie_only), None);
+
+        let web = headers(&[
+            ("cookie", "theme=dark; verdyx_access=abc.def"),
+            (WEB_CLIENT_HEADER, "web"),
+        ]);
+        assert_eq!(request_token(&web).as_deref(), Some("abc.def"));
+        assert_eq!(request_refresh_token(&web), None);
+    }
+
+    #[test]
+    fn session_cookies_are_http_only_and_cleared_on_logout() {
+        let set = session_cookies("acc", "ref", 3600);
+        let values: Vec<_> = set
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(values.len(), 2);
+        for v in &values {
+            assert!(v.contains("HttpOnly") && v.contains("Secure"), "{v}");
+        }
+        assert!(values[0].starts_with("verdyx_access=acc;") && values[0].contains("Max-Age=3600"));
+        assert!(values[1].contains("Path=/api/v1/auth") && values[1].contains("SameSite=Strict"));
+
+        for v in clear_session_cookies().get_all(header::SET_COOKIE) {
+            assert!(v.to_str().unwrap().contains("Max-Age=0"));
+        }
+    }
 
     #[test]
     fn test_claims_creation() {

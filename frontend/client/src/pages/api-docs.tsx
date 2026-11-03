@@ -203,8 +203,6 @@ export default function ApiDocs() {
     const t0 = performance.now();
     try {
       const headers: Record<string, string> = { Accept: "application/json" };
-      const token = localStorage.getItem("token");
-      if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch(targetPath, {
         method: "GET",
         headers,
