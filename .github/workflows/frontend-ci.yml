@@ -16,6 +16,9 @@ jobs:
   lint-and-test:
     name: Lint and Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
 
     defaults:
       run:
@@ -61,6 +64,8 @@ jobs:
           lcov-file: ./frontend/coverage/lcov.info
           github-token: ${{ secrets.GITHUB_TOKEN }}
         if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        # PRs from forks get a read-only token; a missing comment is not a test failure.
+        continue-on-error: true
 
   build:
     name: Build Application
@@ -98,6 +103,8 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     defaults:
       run:
@@ -114,13 +121,12 @@ jobs:
       - name: Run npm audit
         run: npm audit --omit=dev --audit-level=high
 
+      # Runs only once a SNYK_TOKEN secret is configured; npm audit above is the gate.
       - name: Run Snyk security scan
         uses: snyk/actions/node@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           args: --severity-threshold=high
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && env.SNYK_TOKEN != ''
 
   # ── End-to-end (Playwright) ────────────────────────────────────────────────
   # Exercises real user flows in a browser — routing, rendering, auth guards —

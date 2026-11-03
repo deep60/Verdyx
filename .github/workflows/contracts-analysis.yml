@@ -180,7 +180,7 @@ jobs:
         run: forge install
 
       - name: Run coverage
-        run: forge coverage --report lcov --ir-minimum --ir-optimize --ir-optimize-runs 200
+        run: forge coverage --report lcov --ir-minimum
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

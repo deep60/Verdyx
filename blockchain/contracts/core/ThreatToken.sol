@@ -333,7 +333,9 @@ contract ThreatToken is
         uint256 reputationBonus = engineReputation[engine] / 1000;
 
         uint256 baseReward = (stakedAmount * BASE_REWARD_RATE) / 100;
-        uint256 bonusReward = (stakedAmount * BASE_REWARD_RATE * reputationBonus) / 10000;
+        uint256 bonusReward = (stakedAmount *
+            BASE_REWARD_RATE *
+            reputationBonus) / 10000;
 
         return baseReward + bonusReward;
     }

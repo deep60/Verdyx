@@ -227,6 +227,12 @@ jobs:
         working-directory: ./backend
     if: github.event_name == 'pull_request'
     steps:
+      # Instrumented debug builds of the whole workspace overflow the runner's disk.
+      - name: Free disk space
+        working-directory: /
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -244,6 +250,7 @@ jobs:
       - name: Run tests with coverage
         env:
           CARGO_INCREMENTAL: 0
+          CARGO_PROFILE_DEV_DEBUG: line-tables-only
           RUSTFLAGS: "-Cinstrument-coverage -Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Coverflow-checks=off"
           LLVM_PROFILE_FILE: "coverage/%p-%m.profraw"
         run: |
