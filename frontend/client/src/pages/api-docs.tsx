@@ -15,12 +15,12 @@ import { useLocation } from "wouter";
 
 const ENDPOINT_GROUPS = [
   {
-    category: "Submissions & 8-Engine Scanning",
+    category: "Submissions & Multi-Engine Scanning",
     items: [
       {
         method: "POST",
         path: "/api/v1/submissions/file",
-        description: "Submit binary file, phishing email (.eml / MIME), or URL for 8-engine analysis",
+        description: "Submit binary file, phishing email (.eml / MIME), or URL for multi-engine analysis",
         methodColor: "bg-accent text-accent-foreground",
       },
       {
@@ -38,7 +38,7 @@ const ENDPOINT_GROUPS = [
       {
         method: "GET",
         path: "/api/v1/submissions/:id/consensus",
-        description: "Get stake-weighted Bayesian consensus score and engine agreement breakdown",
+        description: "Get the consensus verdict and the per-engine vote breakdown",
         methodColor: "bg-primary text-primary-foreground",
       },
     ],
@@ -123,7 +123,7 @@ const ENDPOINT_GROUPS = [
 const PLAYGROUND_PRESETS = [
   { label: "Gateway Health", path: "/api/health" },
   { label: "Platform Stats", path: "/api/analysis/stats" },
-  { label: "Security Engines (8)", path: "/api/engines" },
+  { label: "Security Engines", path: "/api/engines" },
   { label: "Reputation Standings", path: "/api/reputation/standings" },
   { label: "My Submissions", path: "/api/submissions" },
   { label: "Website OSINT (example.com)", path: "/api/analysis/web-intel?url=https://example.com" },
@@ -242,7 +242,7 @@ resp = requests.post(
 submission = resp.json()
 sub_id = submission["id"]
 
-# 2. Fetch 8-engine detections & Bayesian consensus
+# 2. Fetch per-engine detections & the consensus
 consensus = requests.get(f"{BASE}/submissions/{sub_id}/consensus", headers=HEADERS).json()
 print("Verdict:", consensus["finalVerdict"], "Confidence:", consensus["confidenceScore"])
 
@@ -259,7 +259,7 @@ requests.post(f"{BASE}/voting/bounty/{bounty_id}/commit", headers=HEADERS, json=
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <SEO
         title="Developer API & Live Playground — Verdyx"
-        description="Integrate Verdyx 8-engine malware analysis, 36-module Website OSINT, Commit-Reveal consensus, and HMAC webhooks into CI/CD and SOAR pipelines."
+        description="Integrate Verdyx multi-engine malware analysis, 36-module Website OSINT, bounty commit-reveal voting, and HMAC webhooks into CI/CD and SOAR pipelines."
       />
       <Navigation />
 

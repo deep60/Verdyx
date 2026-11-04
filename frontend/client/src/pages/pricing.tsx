@@ -1,111 +1,131 @@
 import { Navigation } from "@/components/navigation";
 import { Footer } from "@/components/footer";
-import { Check } from "lucide-react";
+import { Check, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { SEO } from "@/components/seo";
 
+const GITHUB_ISSUES = "https://github.com/deep60/Verdyx/issues/new";
+
+/** What the free beta includes today. Every line maps to something running. */
+const INCLUDED = [
+  "File scans with every voting engine, per-engine evidence, and the consensus",
+  "URL scans: redirect chain, TLS, DNS and mail auth, page checks, URLhaus and ThreatFox",
+  "36 website inspection checks",
+  "Uploads up to 100 MB",
+  "REST API with the same submissions as the console",
+  "Private results: your scans are tied to your account",
+];
+
+/** Limits the gateway enforces today. Fair-use: heavy automated use may be throttled. */
+const LIMITS = [
+  ["Upload size", "100 MB"],
+  ["Sign-in attempts", "30 per 15 minutes"],
+];
+
+/** On the roadmap, not available yet. Listed so nobody pays for a promise. */
+const NOT_YET = [
+  "Paid plans and higher limits",
+  "ClamAV signatures (being set up on a dedicated server)",
+  "A trained ML model (today's model is advisory only)",
+  "Sandbox (run-the-file) analysis",
+];
+
 export default function Pricing() {
   return (
     <div className="min-h-screen bg-background text-muted-foreground font-sans selection:bg-primary/30">
-      <SEO 
-        title="Transparent Pricing" 
-        description="Pay-as-you-go API credits for developers and enterprise volume tiers for SOCs. Zero hidden fees."
+      <SEO
+        title="Pricing"
+        description="Verdyx is free during the beta. Every live engine, URL scanning, and the API are included, with published rate limits."
       />
       <Navigation />
-      
+
       <main id="main-content" tabIndex={-1} className="pb-20 pt-12 sm:pt-16">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 max-w-xl">
             <h1 className="text-3xl font-medium tracking-[-0.035em] text-foreground sm:text-5xl">
-              Pricing
+              Free during the beta
             </h1>
             <p className="mt-3 text-base leading-relaxed text-muted-foreground">
-              Pay for the analyses you run. The developer tier includes a monthly allowance. Enterprise volume is priced on the scans you actually send.
+              No card, no credits. Everything that runs today is included. Paid plans will come with
+              higher limits once there's something worth paying for, and they'll be announced here first.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            
-            {/* Developer Tier - Pay As You Go */}
-            <div className="bg-card/50 border border-border rounded-2xl p-8 hover:border-primary/40 transition-colors relative h-full flex flex-col">
-              <div className="mb-8">
-                <div className="mb-4 inline-flex border border-border px-2 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Pay as you go</div>
-                <h2 className="text-3xl font-bold text-foreground mb-2 font-display">Developer</h2>
-                <div className="flex items-baseline gap-1 mt-4">
-                  <span className="text-4xl font-bold text-foreground">$0.005</span>
-                  <span className="text-muted-foreground font-mono text-sm">/ analysis</span>
-                </div>
-                <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
-                  Perfect for independent researchers, hobbyists, or CI/CD pipelines at small scale. 
-                </p>
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            <section className="flex flex-col border border-border bg-card/50 p-6 sm:p-8" aria-labelledby="beta-heading">
+              <div className="mb-2 inline-flex w-fit border border-border px-2 py-1 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                Beta
               </div>
-              
-              <ul className="space-y-4 mb-8 flex-grow">
-                {[
-                  "1,000 free requests per month",
-                  "Access to standard YARA & ClamAV engines",
-                  "Community Discord support",
-                  "Max payload size: 50MB",
-                  "Standard REST API access"
-                ].map((feature, i) => (
-                  <li key={i} className="flex gap-3 items-start">
-                    <Check className="w-5 h-5 text-primary shrink-0" />
-                    <span className="text-foreground/90">{feature}</span>
+              <h2 id="beta-heading" className="text-2xl font-medium tracking-[-0.03em] text-foreground">
+                Everything that's live
+              </h2>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-4xl font-medium text-foreground">$0</span>
+                <span className="font-mono text-sm text-muted-foreground">while in beta</span>
+              </div>
+
+              <ul className="mt-6 flex-grow space-y-3">
+                {INCLUDED.map((feature) => (
+                  <li key={feature} className="flex items-start gap-3">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />
+                    <span className="text-sm text-foreground/90">{feature}</span>
                   </li>
                 ))}
               </ul>
 
               <Link href="/register">
-                <Button className="w-full h-12">
-                  Start Building
-                </Button>
+                <Button className="mt-8 h-11 w-full">Create a free account</Button>
               </Link>
-            </div>
+            </section>
 
-            {/* Enterprise Tier */}
-            <div className="border-gradient rounded-2xl p-8 relative glow-effect h-full flex flex-col">
-              <div className="absolute top-0 right-0 transform translate-x-2 -translate-y-2">
-                 <span className="bg-gradient-brand text-white text-xs font-semibold px-3 py-1 rounded-tl-lg rounded-br-lg shadow-lg">PRODUCTION READY</span>
-              </div>
-              
-              <div className="mb-8">
-                <h2 className="text-3xl font-bold text-foreground mb-2 font-display">Enterprise</h2>
-                <div className="flex items-baseline gap-1 mt-4">
-                  <span className="text-4xl font-bold text-foreground">Custom Volume</span>
-                </div>
-                <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
-                  For SOCs and massive CI footprints. Bring your own private nodes and engines behind the firewall.
+            <div className="flex flex-col gap-8">
+              <section className="border border-border p-6" aria-labelledby="limits-heading">
+                <h2 id="limits-heading" className="text-base font-medium text-foreground">
+                  Limits
+                </h2>
+                <dl className="mt-4 divide-y divide-border border-y border-border">
+                  {LIMITS.map(([label, value]) => (
+                    <div key={label} className="flex justify-between gap-4 py-2.5 text-sm">
+                      <dt>{label}</dt>
+                      <dd className="font-mono text-foreground">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-3 text-xs leading-relaxed">
+                  Fair use applies: heavy automated scanning may be slowed down during the beta.
                 </p>
-              </div>
-              
-              <ul className="space-y-4 mb-8 flex-grow">
-                {[
-                  "Bulk volumetric discounts (< $0.001/req)",
-                  "Access to ML (ONNX) experimental engines",
-                  "Deploy private scanning nodes (Bring Your Own Engine)",
-                  "Sub-second gRPC stream access",
-                  "SLA guarantees and direct engineer support",
-                  "Unlimited payload sizes (up to local disk limit)"
-                ].map((feature, i) => (
-                  <li key={i} className="flex gap-3 items-start">
-                    <Check className="w-5 h-5 text-accent shrink-0" />
-                    <span className="text-foreground/90">{feature}</span>
-                  </li>
-                ))}
-              </ul>
+              </section>
 
-              <a href="mailto:enterprise@verdyx.io?subject=Verdyx%20Enterprise%20Inquiry">
-                <Button variant="outline" className="w-full h-12">
-                  Contact Sales
-                </Button>
-              </a>
+              <section className="border border-border p-6" aria-labelledby="not-yet-heading">
+                <h2 id="not-yet-heading" className="text-base font-medium text-foreground">
+                  Not available yet
+                </h2>
+                <ul className="mt-4 space-y-2.5">
+                  {NOT_YET.map((item) => (
+                    <li key={item} className="flex items-start gap-3 text-sm">
+                      <Minus className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-5 text-sm leading-relaxed">
+                  Need higher limits or something on this list?{" "}
+                  <a
+                    href={GITHUB_ISSUES}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground underline underline-offset-4"
+                  >
+                    Open an issue on GitHub
+                  </a>
+                  .
+                </p>
+              </section>
             </div>
-
           </div>
         </div>
       </main>
-
       <Footer tag="pricing" />
     </div>
   );
