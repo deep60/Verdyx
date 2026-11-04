@@ -46,7 +46,7 @@ tower = { version = "0.4", optional = true }
 governor = { version = "0.6", optional = true }
 
 # Validation
-validator = { version = "0.18", optional = true, features = ["derive"] }
+validator = { version = "0.20", optional = true, features = ["derive"] }
 serde_qs = { version = "0.10", optional = true }
 
 # Idempotency
