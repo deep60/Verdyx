@@ -442,6 +442,22 @@ impl HeuristicEngine {
     }
 }
 
+/// `content[start..end]`, widened to the nearest character boundaries.
+///
+/// Match offsets plus a fixed byte window can land inside a multi-byte
+/// character (any non-ASCII text in a file), and slicing there panics.
+fn snippet(content: &str, start: usize, end: usize) -> &str {
+    let mut start = start.min(content.len());
+    while !content.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = end.clamp(start, content.len());
+    while !content.is_char_boundary(end) {
+        end += 1;
+    }
+    &content[start..end]
+}
+
 // Context extraction functions
 fn extract_api_context(content: &str, offset: usize) -> HashMap<String, String> {
     let mut context = HashMap::new();
@@ -449,7 +465,7 @@ fn extract_api_context(content: &str, offset: usize) -> HashMap<String, String> 
     // Extract surrounding context (100 chars before and after)
     let start = offset.saturating_sub(100);
     let end = std::cmp::min(offset + 100, content.len());
-    let surrounding = &content[start..end];
+    let surrounding = snippet(content, start, end);
 
     context.insert("surrounding_context".to_string(), surrounding.to_string());
     context.insert("api_sequence".to_string(), "detected".to_string());
@@ -463,7 +479,7 @@ fn extract_registry_context(content: &str, offset: usize) -> HashMap<String, Str
     // Look for registry key patterns
     let start = offset.saturating_sub(50);
     let end = std::cmp::min(offset + 200, content.len());
-    let surrounding = &content[start..end];
+    let surrounding = snippet(content, start, end);
 
     context.insert("registry_location".to_string(), surrounding.to_string());
     context.insert(
@@ -479,7 +495,7 @@ fn extract_exploit_context(content: &str, offset: usize) -> HashMap<String, Stri
 
     let start = offset.saturating_sub(20);
     let end = std::cmp::min(offset + 100, content.len());
-    let pattern = &content[start..end];
+    let pattern = snippet(content, start, end);
 
     context.insert(
         "exploit_pattern".to_string(),
@@ -495,7 +511,7 @@ fn extract_shellcode_context(content: &str, offset: usize) -> HashMap<String, St
 
     let start = offset.saturating_sub(10);
     let end = std::cmp::min(offset + 50, content.len());
-    let shellcode = &content[start..end];
+    let shellcode = snippet(content, start, end);
 
     context.insert(
         "shellcode_bytes".to_string(),
@@ -510,7 +526,7 @@ fn extract_network_context(content: &str, offset: usize) -> HashMap<String, Stri
 
     let start = offset.saturating_sub(50);
     let end = std::cmp::min(offset + 200, content.len());
-    let network_data = &content[start..end];
+    let network_data = snippet(content, start, end);
 
     context.insert(
         "network_communication".to_string(),
@@ -526,7 +542,7 @@ fn extract_domain_context(content: &str, offset: usize) -> HashMap<String, Strin
 
     let start = offset.saturating_sub(30);
     let end = std::cmp::min(offset + 100, content.len());
-    let domain_context = &content[start..end];
+    let domain_context = snippet(content, start, end);
 
     context.insert("domain_context".to_string(), domain_context.to_string());
 
@@ -538,7 +554,7 @@ fn extract_base64_context(content: &str, offset: usize) -> HashMap<String, Strin
 
     let start = offset;
     let end = std::cmp::min(offset + 200, content.len());
-    let b64_content = &content[start..end];
+    let b64_content = snippet(content, start, end);
 
     context.insert(
         "encoded_preview".to_string(),
@@ -554,7 +570,7 @@ fn extract_string_obfuscation_context(content: &str, offset: usize) -> HashMap<S
 
     let start = offset;
     let end = std::cmp::min(offset + 100, content.len());
-    let obfuscated = &content[start..end];
+    let obfuscated = snippet(content, start, end);
 
     context.insert("obfuscated_string".to_string(), obfuscated.to_string());
     context.insert("obfuscation_type".to_string(), "hex_escape".to_string());
@@ -567,7 +583,7 @@ fn extract_mining_context(content: &str, offset: usize) -> HashMap<String, Strin
 
     let start = offset.saturating_sub(30);
     let end = std::cmp::min(offset + 100, content.len());
-    let mining_data = &content[start..end];
+    let mining_data = snippet(content, start, end);
 
     context.insert("mining_pool".to_string(), mining_data.to_string());
 
@@ -579,7 +595,7 @@ fn extract_ransomware_context(content: &str, offset: usize) -> HashMap<String, S
 
     let start = offset.saturating_sub(50);
     let end = std::cmp::min(offset + 200, content.len());
-    let ransom_context = &content[start..end];
+    let ransom_context = snippet(content, start, end);
 
     context.insert("ransom_message".to_string(), ransom_context.to_string());
 
@@ -591,7 +607,7 @@ fn extract_bitcoin_context(content: &str, offset: usize) -> HashMap<String, Stri
 
     let start = offset.saturating_sub(50);
     let end = std::cmp::min(offset + 100, content.len());
-    let payment_context = &content[start..end];
+    let payment_context = snippet(content, start, end);
 
     context.insert("payment_demand".to_string(), payment_context.to_string());
 
@@ -603,7 +619,7 @@ fn extract_stealer_context(content: &str, offset: usize) -> HashMap<String, Stri
 
     let start = offset.saturating_sub(50);
     let end = std::cmp::min(offset + 150, content.len());
-    let stealer_context = &content[start..end];
+    let stealer_context = snippet(content, start, end);
 
     context.insert("credential_target".to_string(), stealer_context.to_string());
 
@@ -615,7 +631,7 @@ fn extract_browser_context(content: &str, offset: usize) -> HashMap<String, Stri
 
     let start = offset.saturating_sub(30);
     let end = std::cmp::min(offset + 100, content.len());
-    let browser_path = &content[start..end];
+    let browser_path = snippet(content, start, end);
 
     context.insert("browser_data_path".to_string(), browser_path.to_string());
 
@@ -626,6 +642,32 @@ fn extract_browser_context(content: &str, offset: usize) -> HashMap<String, Stri
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn snippet_never_splits_a_character() {
+        let text = "式式式"; // 3 bytes each
+        assert_eq!(snippet(text, 1, 2), "式");
+        assert_eq!(snippet(text, 4, 7), "式式式"[3..9].to_string());
+        assert_eq!(snippet(text, 0, 100), text);
+        assert_eq!(snippet(text, 50, 100), "");
+    }
+
+    #[tokio::test]
+    async fn non_ascii_text_around_a_match_does_not_panic() {
+        // 40 three-byte characters put the match at byte 120, so the
+        // 100-byte context window starts at byte 20, inside a character.
+        let content = format!(
+            "{}CreateProcess WriteProcessMemory VirtualAllocEx{}",
+            "式".repeat(40),
+            "式".repeat(40)
+        );
+        let engine = HeuristicEngine::new();
+        let matches = engine
+            .analyze_content(&content, std::path::Path::new("sample.exe"))
+            .await
+            .unwrap();
+        assert!(!matches.is_empty());
+    }
 
     #[tokio::test]
     async fn test_heuristic_engine_creation() {

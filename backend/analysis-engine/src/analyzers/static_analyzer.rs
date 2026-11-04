@@ -459,6 +459,13 @@ impl StaticAnalyzer {
             pe_analysis.as_ref(),
         );
 
+        // Record why: the score and the indicators behind it.
+        metadata.insert("threat_score".to_string(), serde_json::json!(threat_score));
+        metadata.insert(
+            "threat_details".to_string(),
+            serde_json::json!(&threat_details),
+        );
+
         let confidence = match verdict {
             ThreatVerdict::Benign => (0.93 - (threat_score * 0.25) as f32).clamp(0.85, 0.95),
             _ => match confidence_level {
