@@ -55,7 +55,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 
 # JWT tokens
-jsonwebtoken = "9.3"
+jsonwebtoken = { version = "10.3", features = ["aws_lc_rs"] }
 
 # Password hashing
 argon2 = "0.5"
@@ -72,7 +72,7 @@ mime = "0.3"
 governor = "0.6"
 
 # Validation
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 
 # Additional utilities that might be needed based on your code
 base64 = "0.22"

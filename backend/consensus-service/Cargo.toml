@@ -51,7 +51,7 @@ dotenvy = "0.15"
 async-trait = "0.1"
 
 # Validation
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 
 # Statistical calculations
 statrs = "0.16"
