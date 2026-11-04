@@ -187,12 +187,14 @@ pub mod ml_stub {
     pub struct MlAnalyzerConfig {
         pub enabled: bool,
         pub feature_size: usize,
+        pub counts_toward_verdict: bool,
     }
     impl Default for MlAnalyzerConfig {
         fn default() -> Self {
             Self {
                 enabled: true,
                 feature_size: 256,
+                counts_toward_verdict: false,
             }
         }
     }
@@ -1283,7 +1285,11 @@ impl AnalysisEngine {
                 (
                     "online",
                     "ort 2.0.0-rc.13",
-                    "ONNX threat classifier and anomaly detector models loaded".to_string(),
+                    if self.config.ml_analyzer.counts_toward_verdict {
+                        "ONNX threat classifier and anomaly detector models loaded".to_string()
+                    } else {
+                        "Advisory only: hand-set model weights, not trained on data; predictions are shown but do not vote".to_string()
+                    },
                     None,
                 )
             } else {
