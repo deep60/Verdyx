@@ -1,0 +1,1994 @@
+{
+  "version": 1,
+  "created": "2026-11-04",
+  "malicious": [
+    {
+      "sha256": "349c5de12537405b7c8c52785777cda9bdda2ce9022ed8c8e22061943f6a9ac0",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 4265984,
+      "first_seen": "2026-11-04 19:15:38",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "e34b71614a4f542fb145a7bd2878f3ba87b1812ed85b8bf08d64e513814ffe7f",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 72776,
+      "first_seen": "2026-11-04 18:39:56",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b15e44bcb245ee99bfbe2e500f20327868dc6a153f12d5f89d5fe0ffa149ce0f",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "DCRat",
+      "size": 848896,
+      "first_seen": "2026-11-04 17:20:14",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "939206fbe9ba9b034d5828c54611d00d4cb59d7bf6b92542d47340ff799ebb6f",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 856064,
+      "first_seen": "2026-11-04 15:43:56",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9dd4875fa3e1b47f5cc6802afbe31a1287216240353375d0e531c2eb8cde42e6",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 311296,
+      "first_seen": "2026-11-04 15:32:58",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "c9ca5797b92076943247208f2159ae169802b159555341b7adeee6f7dd387886",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "DonutLoader",
+      "size": 508456,
+      "first_seen": "2026-11-04 15:19:02",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "76c854e5c2ec50f8da09c3bba7d292ed010587fc11d90996c2c8d5174e4748dc",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 1804784,
+      "first_seen": "2026-11-04 15:18:56",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7a7b1c234c94c4a20540c2be5b94cb193dc16bdb263b6bb11762f25db27bdc30",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "VShell",
+      "size": 16896,
+      "first_seen": "2026-11-04 15:05:25",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0e4d87b44ccd91af41c14719d39bd3362091a93aaea573c0038432abd70c266d",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "ArcaneStealer",
+      "size": 8593424,
+      "first_seen": "2026-11-04 14:54:07",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "68a2ae3c48e8da2c291354023c92330193589430024477765cb1acf26717f61d",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "RustyStealer",
+      "size": 6495232,
+      "first_seen": "2026-11-04 14:42:18",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9ce4dd3d7b4edeef5922197213eef35761e770c2cff042a4a7dc20b22302830e",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "RustyStealer",
+      "size": 2406912,
+      "first_seen": "2026-11-04 14:42:10",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a3075b92ee52142d400d24cc99e7e98f0ca6038c0bb36b4709d362d8173e803d",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "SalatStealer",
+      "size": 8049664,
+      "first_seen": "2026-11-04 14:32:23",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d1a7e6dc4ce3f0e426a1507b99f8a95be948c5d7ecfaa8af56887b124b51e7f7",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "SalatStealer",
+      "size": 4398080,
+      "first_seen": "2026-11-04 14:28:01",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "265994409a3dbd511ff5bd6a6d24dea5b089d41f1dea8dcaeaabccd530ea09dd",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 630784,
+      "first_seen": "2026-11-04 14:08:27",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "51691f616ed51be9ef5eb8f52433321491c819a5b641433ce6c9d50168a226b4",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "ACRStealer",
+      "size": 1226856,
+      "first_seen": "2026-11-04 12:48:40",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "071e3e45090fd134fad750dff5cfbf2c873ed5c3d1c6826d61bb5ab0bbab1de3",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "AgentTesla",
+      "size": 923648,
+      "first_seen": "2026-11-04 12:47:44",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b65764a7b531ee22c369bdf770d0df5d90805babe96de881e3c3c9d93041b658",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 869296,
+      "first_seen": "2026-11-04 12:11:47",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5ffd5746710416489fdd05477f3d3e71bd312d614d94b30253da982122a81cd4",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 90624,
+      "first_seen": "2026-11-04 11:18:32",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b99a44bb4bfe7004bdebaec8ecf33a44f3c75650f0f846b90cbefa1199ffe67a",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "PureLogsStealer",
+      "size": 817664,
+      "first_seen": "2026-11-04 11:18:28",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0cceb3eb88916dfcf5e7cdef4eab8a74d42bc1bd38d842472dee97c9861bb8ad",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 4081664,
+      "first_seen": "2026-11-04 11:18:17",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ae992ffe474500cd5c28922ac75f8fbc18a947d4e6565cedc221b9e979add806",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "unknown",
+      "size": 90112,
+      "first_seen": "2026-11-04 11:18:14",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "cf8c24b3d7d1b390d799b964bfbf8ae3ca0b533185b01451f5a023d838513053",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "SnappyClient",
+      "size": 7782690,
+      "first_seen": "2026-11-04 11:08:51",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "fc46dde47fabce7f6352ff1cc34f8cdb13702d5f05f7797a3a5555fe9b692840",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "RevStealer",
+      "size": 2989056,
+      "first_seen": "2026-11-04 10:40:55",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "258022c9ee70b92625662def214028b4d2a99edab59a9a1e702cd777dbfdb462",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "PureRAT",
+      "size": 328704,
+      "first_seen": "2026-11-04 10:28:07",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b94078d9fff5e0100ef99a9d1701316d385cf27f8f86807676b856edb690728d",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "RemcosRAT",
+      "size": 537600,
+      "first_seen": "2026-11-04 10:27:22",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ac6ac23c5e91a171a50a7c9037461c4de55a2e8b96a91d8202736eb9265f92a1",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "CoinMiner",
+      "size": 3322880,
+      "first_seen": "2026-11-04 10:04:26",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d9ac3f4a2937fd9c254ab5efccc0c0f2d2020c1e5cf826970cc0f45d59b918cc",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "MopsStealer",
+      "size": 6030336,
+      "first_seen": "2026-11-04 09:37:39",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d41d3a534ca8bacd8133591b94e9dc639e95d23eccc5c546b4cd95fff0c6087f",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "DCRat",
+      "size": 847360,
+      "first_seen": "2026-11-04 09:10:19",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "eb175a973d117fb34df1c23fa46587c01f68bb014ea192790021be47730661b8",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "Formbook",
+      "size": 939008,
+      "first_seen": "2026-11-04 08:32:18",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "352cfb22ba4830b5c184041bf4457a21580e44bdfa66f615e003799c3a76fc97",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "NanoCore",
+      "size": 905728,
+      "first_seen": "2026-11-04 08:32:15",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a9894038b6d13c7a1652cff094430c50b1ce80c605497d5df0243eebfcb5ae76",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "Formbook",
+      "size": 924672,
+      "first_seen": "2026-11-04 08:32:07",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "28329653cb009dceeade90b92866ddd53e31d2e76d6109b5381fcdf379d22509",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "XWorm",
+      "size": 615424,
+      "first_seen": "2026-11-04 08:32:03",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "3e66e6cd018119de4c9d8e384b9c2d6cb33ec899da2a10cb3fe6cbe4d6f6a713",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "AsyncRAT",
+      "size": 664576,
+      "first_seen": "2026-11-04 08:31:58",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "58ef254e7db2f4009a0941e98d6327d80f4c44bf7bcddb6af77a42702e477396",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "SnakeKeylogger",
+      "size": 825856,
+      "first_seen": "2026-11-04 08:31:50",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "3d2aab719bcda98fef5a741571552117ca2b7d705ccb090c0afde2353b462ce3",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "XWorm",
+      "size": 610304,
+      "first_seen": "2026-11-04 08:31:45",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "adfe94a99972c39c3e53cfaa9b92546b9ff5be4e75b20bc4a0c615a88aac74eb",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "AgentTesla",
+      "size": 891392,
+      "first_seen": "2026-11-04 08:31:42",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7ebbf1ced6ef059e21b2504595bcc0a4671e1c713c975e21ee1d7d21441d62d0",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "AsyncRAT",
+      "size": 662016,
+      "first_seen": "2026-11-04 08:31:31",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0446aa974dff931e43c2284a74099cd256f3bbd8b7098be489267a6b9d65b4f7",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "XWorm",
+      "size": 793600,
+      "first_seen": "2026-11-04 08:31:26",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ecbc41f173aaaf4086a92fbbf8d51e006824dc11afffd87fee251b5c73a32025",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "Formbook",
+      "size": 875008,
+      "first_seen": "2026-11-04 08:31:21",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ed0f1d1b4673e50dfda972458c7a37b3291086e4f3d72a4464ac92b16b524cf3",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "AgentTesla",
+      "size": 1114624,
+      "first_seen": "2026-11-04 07:55:48",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "4f03a59c124b154a10126dd253ad037bff96159c0a2827836e8bc0eb04b329de",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "Formbook",
+      "size": 939520,
+      "first_seen": "2026-11-04 07:16:03",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5815bb9cc42b73d9a164cc85bd5565ffaaf759f1ed5acb4c1f4b4c505627a590",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "HawkEye",
+      "size": 1176576,
+      "first_seen": "2026-11-04 07:16:00",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5df8d19faea9fab8141875fe86f844291cace363fec5c764e8b5cc11da141b32",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "AgentTesla",
+      "size": 891392,
+      "first_seen": "2026-11-04 07:15:55",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "764f0fae11de72f3c80fd07118ef290a2e432aa3d90e57443610a83317d738fe",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "njrat",
+      "size": 727040,
+      "first_seen": "2026-11-04 07:15:51",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d3a7474494b1ff8d7c8d7d03f3e4f8b041cb87f9a053e937b78eb7a5bdc8f966",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "SnakeKeylogger",
+      "size": 882688,
+      "first_seen": "2026-11-04 07:15:48",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d72d4088a8a48857e657d4d3a25417e1d5d62ea46f7efd398baa93d720f3855b",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "RemcosRAT",
+      "size": 1195008,
+      "first_seen": "2026-11-04 07:15:43",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "e77d35be6d308d824d06258f6520bf71b600c6b47f09229f9cd0e3e588c12909",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "DCRat",
+      "size": 1164425,
+      "first_seen": "2026-11-04 06:45:21",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7f5bf23cb0e7c9b9fb42deb4d53ad6b98f176f95fae477c11069815b0035bd21",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "RemcosRAT",
+      "size": 1320448,
+      "first_seen": "2026-11-04 05:03:26",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d0c49323ffadf825f022fd40f36772c7665d0f548a341d43347318e183fd42d6",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "NanoCore",
+      "size": 208384,
+      "first_seen": "2026-11-04 04:55:08",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "28c09862bfc850120201e22988176ce41900b491c064b61174f29aa6578f29ac",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "NetSupport",
+      "size": 19627520,
+      "first_seen": "2026-11-04 04:50:38",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "30a43e3a64b90e8853daaa61ca5c2a0e6b5f3e7126e47b3ab6d826243e9ca14b",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "MeshAgent",
+      "size": 8209462,
+      "first_seen": "2026-11-04 04:50:37",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d4a8ce2863d7717a1e5787c8b094098ec4e92e2379d26089bee2e235948a4446",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "Meterpreter",
+      "size": 73802,
+      "first_seen": "2026-11-04 04:37:29",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "df565eec185189cd6281e541953975959b81524626f38272a85b6eef71c4ec16",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "njrat",
+      "size": 28160,
+      "first_seen": "2026-11-04 04:35:09",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "4e6a07bb1abcbc9f994217c66ae0ee51981e590d9497107b653a44727b2daf4e",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "VShell",
+      "size": 4608,
+      "first_seen": "2026-11-04 04:31:56",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "30a8365303ef8233d566a4a55f5d8f21cb5020444045537a489b89a0013cecb9",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "LummaStealer",
+      "size": 466944,
+      "first_seen": "2026-11-04 04:20:11",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9a02a157acf5643e7ba6bcb422f093f7a681c184fcfa285c568e27803762dc49",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "ValleyRAT",
+      "size": 116224,
+      "first_seen": "2026-11-04 04:15:12",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "1859bee638ea6cc1081be27301058313e2d1213b517db791d7f89fb012c79c65",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "VShell",
+      "size": 4134912,
+      "first_seen": "2026-11-04 04:12:50",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "2b0097062884dde6c69c1886decd489bf57ab5ddc27c3f8560b2800f7419b5ec",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "VShell",
+      "size": 3584,
+      "first_seen": "2026-11-04 04:12:49",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "62588a99e3e0784e08a8bddaae655febd2bcc1fc7bc5affac10f962312f34ca3",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "SalatStealer",
+      "size": 12570930,
+      "first_seen": "2026-11-04 03:25:40",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "2121d89582dcf0c50db21770effabab7e9eabbe241cbba827266323dacf226b8",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "SalatStealer",
+      "size": 12570810,
+      "first_seen": "2026-11-04 03:25:31",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "08b2c0d4baf3be0329a687354d9257d46d7256c4159c2d826fc507ad0d6abad0",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "WARDENStealer",
+      "size": 777216,
+      "first_seen": "2026-11-04 02:37:26",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d2b60bb3b7af913b210a589a5256ea9054c4719e8b626eb2c26626e0a62652f5",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "WARDENStealer",
+      "size": 545792,
+      "first_seen": "2026-11-04 02:36:27",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "fd77ac53f8943ff412fae6815b0335a824e5d671951fe4cb00da84f499f4c372",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "WARDENStealer",
+      "size": 732672,
+      "first_seen": "2026-11-04 02:35:33",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "768f46d4dc306502ce6b847b1a06509a9301fc44794cc3d70858657278d30ab7",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "exe",
+      "family": "WARDENStealer",
+      "size": 510976,
+      "first_seen": "2026-11-04 02:34:50",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "c806290db9b11e7f25d6eddb9a47c8baadfd190f1d7cf48ddd8d31b4cd76bc14",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ValleyRAT",
+      "size": 242176,
+      "first_seen": "2026-11-03 14:45:17",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a389c0ff8c85715fd69fdd23312e140fe69644874abfcde5d2f612c7fe3f8bb1",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "GhostPulse",
+      "size": 900608,
+      "first_seen": "2026-11-03 09:46:15",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "40bd526a2b04656e8d9e3c514fecf6eda25378f16fd292c37d2fdec7afb5fc57",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "WannaCry",
+      "size": 5267459,
+      "first_seen": "2026-11-03 00:31:02",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "61b24ff38bfdeb7b9f1716ee22535dccf1add5b19095a8f8b227a67270b279b2",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ShadowPad",
+      "size": 177152,
+      "first_seen": "2026-11-02 14:09:48",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "6098a3066c8f3edbc83fbc7f516f242a83a7e5fb7fbac7a35b46ee89ecd607bc",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ValleyRAT",
+      "size": 389632,
+      "first_seen": "2026-11-02 08:45:31",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b292553214c1eb0e0aa485a4835f213547856bb3580171f2c2bcb97ab0a40b0e",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ValleyRAT",
+      "size": 389632,
+      "first_seen": "2026-11-01 00:10:10",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "87adc00cc7aa18d84c0b047bc186b34e48715b89f8d2f40278f7eb3a01d05223",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "WannaCry",
+      "size": 5267459,
+      "first_seen": "2026-10-31 17:06:58",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d687fd479c608be08e730f290b9f8963f68b218b6cdd64920004cafb856c1fbc",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "WannaCry",
+      "size": 5267459,
+      "first_seen": "2026-10-31 00:04:38",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "e6a3ac4235b6ef444de81213a9c13c6ab5f208f67a240afb5e9182ff538425a5",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "WannaCry",
+      "size": 5267459,
+      "first_seen": "2026-10-31 00:04:31",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "6ec4b8e7a1c5f3e289bf126822e5a158e168998d1b7be31e07c1278707f8cc6c",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Conficker",
+      "size": 168371,
+      "first_seen": "2026-10-31 00:04:16",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0429da8788c6e83d2774ea3feb60951ecc097d4a8c697efe617920ee47ab99d8",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Blackmoon",
+      "size": 851968,
+      "first_seen": "2026-10-22 04:34:28",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7d5ad688d1cdb34f8ee694e60b9d47e894c879f23218c5c29a19a514030e706d",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Flame",
+      "size": 827392,
+      "first_seen": "2026-10-19 08:16:34",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "117c449c7be8d4f7c174d0835427a05e2f1fa3541cae479878178a3fc7555990",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ACRStealer",
+      "size": 3659776,
+      "first_seen": "2026-10-18 06:18:53",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "f7d67d6a8a49950b65a194e10bc64a7926eb5a746591dbbc988b6d0822f4bea5",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "HijackLoader",
+      "size": 1408048,
+      "first_seen": "2026-10-15 16:18:59",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9aa69d1b5fd4690a152b14482c9ebac60e0d7088e00f4e6c9279b646d0bee016",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Amadey",
+      "size": 119808,
+      "first_seen": "2026-10-15 14:58:31",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "620b1658e3715d4b7eb9bb46a15381039422f367571d8313c78be1ecd010a533",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Amadey",
+      "size": 1102336,
+      "first_seen": "2026-10-15 14:58:08",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "1bad5a9a770ce72f976b551baac0e9c43153bb5b66ff35639abdb00462dd722d",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Gh0stRAT",
+      "size": 113152,
+      "first_seen": "2026-10-12 22:33:22",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "fae30c83ee2d6a1736a8b9004c7c1a0881dd9cbf9f65d956be29540c574e21a6",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Gh0stRAT",
+      "size": 113152,
+      "first_seen": "2026-10-12 20:50:53",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a0ac168e5fb23ba59d93f3d53057909f48d97ca4d3ade0d185b0ef47a7c68287",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "YoungLotus",
+      "size": 102400,
+      "first_seen": "2026-10-12 20:50:31",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "f8f0e1646a40813d516c11428afc508732f416732f76fe1d6627ccba8410340d",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "YoungLotus",
+      "size": 102400,
+      "first_seen": "2026-10-12 20:50:24",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "76273382e4252c1f60a2251141e108942494409c759358320735891762c0682e",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Chisel",
+      "size": 8487424,
+      "first_seen": "2026-10-12 07:51:03",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "3c7738f6bb832e8beada8d7c7e825342d6a9ccc29900b213e8a89ce459d29b9a",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "OxyPlot",
+      "size": 617472,
+      "first_seen": "2026-10-10 19:21:46",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "426a5fd88b8b8f4900cfbb578218ee112057ac086e08823c415bde70b4bc0022",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ZhongStealer",
+      "size": 4534272,
+      "first_seen": "2026-10-10 16:46:57",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "4ddf228dbf2223bf9fd2348440eda53ca45de1ca1a2d8785f219f20197b32c9f",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Gh0stRAT",
+      "size": 184320,
+      "first_seen": "2026-10-09 02:20:12",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ad7ae1df63dc9f6ee4eabbeb4e9c0f98b2a1b1d69ad8bde9b564e998678310c4",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ZigClipper",
+      "size": 188480,
+      "first_seen": "2026-10-08 21:29:25",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "13608aa205e934e3e0b3ac504e1589a41285f9197f6f53be01c2bc59f46b6837",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "ZigClipper",
+      "size": 557568,
+      "first_seen": "2026-10-08 21:28:01",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "6b8194c4e8b8aed744248148bc584b51736c9418cef350f1fc57158e5bb2da9a",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "R77Rootkit",
+      "size": 717312,
+      "first_seen": "2026-10-07 16:41:50",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "3810dcbf520e708ced3f9de88308bcb270ba81f0bfeee13df59be681fb953559",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "KrasnyBanker",
+      "size": 619520,
+      "first_seen": "2026-10-06 15:01:43",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ab21f534e2d446aafdc6a1fd6cfb77ea3d2d25a9ca78f6cceee27f05f87cf0da",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "DCAgentRMM",
+      "size": 18944,
+      "first_seen": "2026-10-06 07:26:40",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a525c76919698b097df01e31958a58ad700c2faaf0d927961b67c5fbb7f67069",
+      "label": "malicious",
+      "category": "pe",
+      "file_type": "dll",
+      "family": "Expiro",
+      "size": 5267459,
+      "first_seen": "2026-10-05 23:18:45",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "4f54d288f1afc013221f07f26ea33482addca8ecaff187891e1955f7f2aefcd7",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 1288875,
+      "first_seen": "2026-11-04 17:15:05",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "111e83dc9ddd1770e104604ec5cd59ccc91d37603166cdf00f71129f537fcf04",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 7471297,
+      "first_seen": "2026-11-04 16:59:05",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ce53a018048b9d35b8d4e17fff78da3744667e747093c4c84880330e65b903d3",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 103456,
+      "first_seen": "2026-11-04 16:23:09",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "2cf06fa2b68a315eea3ad87d354884e1ac4b1ae41211e873272961bbec168618",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 119636,
+      "first_seen": "2026-11-04 16:23:07",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ec8a06e4fb5f905ee316897c1edeb9f71b095b880d1b6791c7075b5b1d0dabdf",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 137256,
+      "first_seen": "2026-11-04 16:22:06",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b2d036ed18d07a66e4ff3bb4045e1d401dfb0215f5f0534342345cfd6289ae8f",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 99364,
+      "first_seen": "2026-11-04 16:22:04",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "199d2533e21b82c9627d5e71080fa38f119d2569b976da9e1ab148d590eb744c",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 6619298,
+      "first_seen": "2026-11-04 16:07:05",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "c53aff57027cf3db92bf9ff18230610aaee4cf0f31c85dbc072c9fded1646005",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 6586530,
+      "first_seen": "2026-11-04 15:33:05",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0978c48d03225651ac1df665352c4d5bd154905dd5b7672d0e7ba736882354fb",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 165552,
+      "first_seen": "2026-11-04 14:02:16",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "60973410d54f11d025b2336113481455c3dc43ab27f80fb355c4a7597f25d160",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Mirai",
+      "size": 52560,
+      "first_seen": "2026-11-04 14:02:05",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7bca47715e5b8158e210174035450b6ac3d7836068e8c92fbafd215da50c0d47",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Gafgyt",
+      "size": 123477,
+      "first_seen": "2026-11-04 12:40:57",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d5d1992604bf015d84b17710dc510ea6dd54c908445590e3ae5f0d35404d1790",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Sliver",
+      "size": 14822192,
+      "first_seen": "2026-11-04 11:07:13",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "8bbd10af59bff538aa07be3ef41c1c1cc3706372df5bbd19deb710ee7abcca79",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Panchan",
+      "size": 9207808,
+      "first_seen": "2026-11-04 09:00:15",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "72f71d7ff657a1b7e9f91556b1859e356a84406ecfaba9ea9be01529eae5683c",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "Prometei",
+      "size": 449287,
+      "first_seen": "2026-11-04 07:16:52",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "6a1c249e5c2fde82890219fdc95f474964e8012c1255d929ef53b4f2366c3d8a",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "XorDDoS",
+      "size": 6490348,
+      "first_seen": "2026-11-04 05:32:22",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7a77e228f4597b800c5b48a0140597ec45970eb4842aacec1d9d1926227b43fa",
+      "label": "malicious",
+      "category": "elf",
+      "file_type": "elf",
+      "family": "XorDDoS",
+      "size": 2753292,
+      "first_seen": "2026-11-04 05:32:04",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "3eba1e42c88f035ace13f7539bb43983bcd420a9b80522780b2897b8a8e25597",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "LxBaseRAT",
+      "size": 2617744,
+      "first_seen": "2026-11-04 18:42:07",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "c3e9b4e22d747e9069b979f97bfdcfc67d31cf3090676d4aa6acfb74b7b31e74",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "RemcosRAT",
+      "size": 2469540,
+      "first_seen": "2026-11-04 09:55:29",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7be358c6fb07ebdb94412c652f94187d03c4b8a9ce0c34d6c235758adc590c7e",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "Arechclient2",
+      "size": 218992,
+      "first_seen": "2026-11-02 04:25:48",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "34a2f3bf3e131e794689b61d42c8415d0a9d5c1fd46e3aef12bb1f17f30db91c",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "ACRStealer",
+      "size": 647491,
+      "first_seen": "2026-11-02 01:30:21",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7d33d7780e4de1b568c1a99eaadb4895e16fc0ae7a72a25e5cc115b6b218e381",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "ZigClipper",
+      "size": 490827,
+      "first_seen": "2026-11-01 00:01:42",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "60f4f3fd202f77f14d1eda4829c48b5c5fcd170951c914a0a73428c332df9844",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "Arechclient2",
+      "size": 458514,
+      "first_seen": "2026-10-31 23:59:25",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "1541b17cf4b7cf252dd9790522f72d1c413422c0320fb24e09280228c2e5b17e",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "ACRStealer",
+      "size": 232090,
+      "first_seen": "2026-10-31 13:24:20",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "83dd6364ef1a11aee67aad7e333691279e4f0f6b86c95214265a12fb8776aef6",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "VIPKeylogger",
+      "size": 1220668,
+      "first_seen": "2026-10-27 06:35:06",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a6093c7a16fdfcd38a435628a5e1f1624e09846ead33d78aeb79892587cccf61",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "a310Logger",
+      "size": 2696112,
+      "first_seen": "2026-10-27 06:34:35",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ed263d7dbabbc20839a5d95ba6688c1354434caaf45c9083a06aaea723bf95d9",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "TonRAT",
+      "size": 498181,
+      "first_seen": "2026-10-24 08:48:17",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9ce4d8776c2e0d707ef3f4f81153acf0aad5e80882e6012f48cbbbcf5d917056",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "VIPKeylogger",
+      "size": 1213265,
+      "first_seen": "2026-10-22 09:35:55",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "298420620fe532e9dbbe0f9f96ab67bac7d16f9258902aa3d676739b829311c6",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "ps1",
+      "family": "PhantomStealer",
+      "size": 3482342,
+      "first_seen": "2026-10-21 11:36:38",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "c26311f71197a5b1dbdd7eb574c716f00e7885096a9b275f4b77e8a09a6bbcfe",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "MassLogger",
+      "size": 2600721,
+      "first_seen": "2026-11-04 18:39:16",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9e26dc9598297a6b7d5a8e21d3fd2c2a46d20c89d5991ee0e21838f2148fa0ab",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "MassLogger",
+      "size": 2600737,
+      "first_seen": "2026-11-04 18:39:13",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "de98931fb8730e2c1dd37518a77474980949a822c9cfea7f4934d67260f07c2b",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "DonutLoader",
+      "size": 3666947,
+      "first_seen": "2026-11-04 18:39:11",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ee95d8904b4b060eab664eae7174bdac8a4d9ce285bca2d00cf1ec95b1a442d0",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "XWorm",
+      "size": 2413551,
+      "first_seen": "2026-11-04 15:54:28",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ef0affec7c502ecbf5c56d8b8d6c4f51286380fa677c6884d66a55d0e698ae92",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "MassLogger",
+      "size": 761953,
+      "first_seen": "2026-11-04 15:54:25",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5971a293f3907f54e4ab4c62ef6f8976422add15bf1fcd480ace6ba79c48a25b",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "DonutLoader",
+      "size": 3281903,
+      "first_seen": "2026-11-04 15:54:19",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "cad23b194b75ab368c7062fae024c9355f578fa45637efa1a39c7d93eeca5053",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "PureLogsStealer",
+      "size": 1707866,
+      "first_seen": "2026-11-04 11:18:25",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a70f4962a9cad7165bd195c6e5b8d9e02c76997da50869078ca0e7799257ac79",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "PureLogsStealer",
+      "size": 1707488,
+      "first_seen": "2026-11-04 11:18:22",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "95e7b046825803dd984e46eb76eb5b88d0e0a693548ec4131325d255d2cdbdfb",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "PureLogsStealer",
+      "size": 1708143,
+      "first_seen": "2026-11-04 11:18:20",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "6c0a855ad8a9bf9a71afcc4cbe946b29d53dc6a1f0562450b804a5f9ec4fb67a",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "MassLogger",
+      "size": 773313,
+      "first_seen": "2026-11-04 10:55:30",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9a1df2df288e194b0b2e5ab4b25911e723f5515562cb01ee7c0fb7ef27597bf3",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "LxBaseRAT",
+      "size": 801500,
+      "first_seen": "2026-11-04 10:52:05",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "af14c03c491addbf0d62010a77f9a1dcceaaed779dc107d90e9aa68ec3ad36f1",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "js",
+      "family": "LxBaseRAT",
+      "size": 657856,
+      "first_seen": "2026-11-04 10:51:51",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0535c0dc125655cf2424c6ac0d42184208f88795e476ba4fd3091ce1f4323063",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "AsyncRAT",
+      "size": 188582,
+      "first_seen": "2026-11-04 18:39:35",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "03a635ad634b219e87d0bc44e5b483816c1910e2cbf5a107e05172f2c57694c2",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "LxBaseRAT",
+      "size": 692030,
+      "first_seen": "2026-11-04 15:54:42",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "4ca065c5129dd7f2a90a0cdd8a5f1d610d29106ee6fe93316f6ebe85c859a985",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "DarkCloud",
+      "size": 160634,
+      "first_seen": "2026-11-04 10:53:58",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "1bd6c6c129405106f36f587fd24ca4d80769a129d50b41f0b2ef652c6cf9e23d",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "GuLoader",
+      "size": 50059,
+      "first_seen": "2026-11-04 10:53:46",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "409f9a9781841428b4b09a8ef4ea49b4b26643102203676630a51a195eb8bd17",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "GuLoader",
+      "size": 51177,
+      "first_seen": "2026-11-04 10:53:41",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "25ee7569337cc1bfb3176606e12263829ae1ba7107a199a0bb75e4318e424934",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "AsyncRAT",
+      "size": 204391,
+      "first_seen": "2026-11-04 06:45:55",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9f72c50f8e66727f7589f24254b006c43cd51ba2207a56fc008e399ccca49127",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "GuLoader",
+      "size": 57632,
+      "first_seen": "2026-11-02 13:37:52",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ca3b0bc21b24136080dc2d869966bfc23befc6b5dd495c48878a3cb1ba6cccf1",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "GuLoader",
+      "size": 62677,
+      "first_seen": "2026-11-02 13:37:48",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "e11b705f1fbca862c459f0ea4200ce3f6767e705bb1574fe77b48826569d2445",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "VIPKeylogger",
+      "size": 270736,
+      "first_seen": "2026-10-30 19:17:42",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "1f1e4e8fe8c8f90542c6b95ba133be5a5b0eaf6034709d2e8b61b02b9522a9ff",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "vbs",
+      "family": "NovaStealer",
+      "size": 223530,
+      "first_seen": "2026-10-30 12:06:14",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "07e26317533211e85f78739b643423dd65f4b589e701c4b855378c743fa82558",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "bat",
+      "family": "MeshAgent",
+      "size": 1140,
+      "first_seen": "2026-11-04 11:49:48",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "3d677911ed807621f3ee246f1429959dda28be6dbd402c8812521497a41d740d",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "bat",
+      "family": "PureRAT",
+      "size": 79756,
+      "first_seen": "2026-11-04 04:45:33",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ecefe715624f0588bce5f546f175675e320da90583a378993c6ac54c074b01d1",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "bat",
+      "family": "Koadic",
+      "size": 3192557,
+      "first_seen": "2026-10-29 22:12:53",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "90a4792390309c8097c54a910999864f96df9b00cdc2d5f21f14e4ef2dc0338f",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "bat",
+      "family": "Koadic",
+      "size": 3555495,
+      "first_seen": "2026-10-29 12:23:51",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "e169bd066b4532515844045497fe9d42ed26a15bf236d1f1a2b64573f5717b7d",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "bat",
+      "family": "PureRAT",
+      "size": 81034,
+      "first_seen": "2026-10-29 12:17:21",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "d40573a99a3cf4da2b02cd1c3718e42df079019051a6cc9c407cf50a13a2d00d",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "hta",
+      "family": "NetSupport",
+      "size": 12094,
+      "first_seen": "2026-10-21 15:58:28",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "7c0706ae79f3245afd7a6d3bdb81a38a7c91d9cd6a55584e480774a31088edfa",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "hta",
+      "family": "Amadey",
+      "size": 3579,
+      "first_seen": "2026-10-20 12:08:03",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ffd22e0f9d49e33005c76a1f0dd8583ee048b5f0a668707684b6431612ea5559",
+      "label": "malicious",
+      "category": "script",
+      "file_type": "hta",
+      "family": "Action1RMM",
+      "size": 3588,
+      "first_seen": "2026-10-19 15:39:41",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0a27d422d8ab0e1cc58258e431a83834239fec7285146b62e5de9b11cd3b3e9e",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "doc",
+      "family": "INC",
+      "size": 15060,
+      "first_seen": "2026-10-20 12:20:07",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "6fc6b7a65481e9351a92b85b6ce041b7f6d3ffb1f7833748f0cb80b296ba6e41",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "doc",
+      "family": "INC",
+      "size": 11314,
+      "first_seen": "2026-10-20 12:15:34",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "05fdec10ee1d5869d422ffdeeec305a56b291f1db016c9df56cbdd1bd95c7e08",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "doc",
+      "family": "Loda",
+      "size": 135046,
+      "first_seen": "2026-09-23 08:01:25",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "e3fbe466054844db78527a099d11a4e9d12c40a4bd9add4bef9faea10a902eae",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "doc",
+      "family": "Havoc",
+      "size": 37825,
+      "first_seen": "2026-08-12 21:46:51",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "12898ccc6a9cf84dda412ea2bc17de58de6742ffae8392a84294fb7f95fcde27",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "doc",
+      "family": "TrickBot",
+      "size": 91423,
+      "first_seen": "2026-05-21 13:34:38",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "76dbff8597d2b8673b444be6ae19964dbab73ef59517e519581e292dd5d639d3",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "doc",
+      "family": "Loda",
+      "size": 216527,
+      "first_seen": "2026-04-17 13:20:15",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "c2b78e277970e1607c23f03bf7facfb77a1dd50798acc078fd942abe59baca6f",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "docm",
+      "family": "QuasarRAT",
+      "size": 22423,
+      "first_seen": "2025-06-14 13:17:05",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "221292a9f77f1a16fa0a7ed41b0eedbd312475dd9a5104c7923ed7889ea0f292",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "docm",
+      "family": "ReverseShell",
+      "size": 1415758,
+      "first_seen": "2025-01-23 02:05:04",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "59657f4537018aa3621450282e9a973895e33e6f236f4f644769a505c498c004",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "docm",
+      "family": "Metasploit",
+      "size": 85507,
+      "first_seen": "2024-12-19 19:15:59",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "12d47f62ed1f5d60193a3a3099873286365c15dc6bf9df17aa250e1f7660c36c",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "docm",
+      "family": "SnakeKeylogger",
+      "size": 16050,
+      "first_seen": "2024-12-09 15:34:24",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "715a3d7675672d8474b83bedfee8e594b96856fa34a915debf9ae57c171ee366",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "docm",
+      "family": "SnakeKeylogger",
+      "size": 16191,
+      "first_seen": "2024-12-06 08:27:38",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5b168fed855515940cfe164b18fd5f9d73873902d01f04171de65bc34487f402",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "docm",
+      "family": "Braodo",
+      "size": 16226,
+      "first_seen": "2024-08-15 11:41:11",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9481b7f7cbb7245e45c59323624e631605d156ee62e8b495bda44b73b7ce8174",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xls",
+      "family": "VIPKeylogger",
+      "size": 32256,
+      "first_seen": "2026-10-26 12:30:17",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "fc6095c6cfefef70ff331d2f8911581185b55bae2fe9d70750e769588033387d",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xls",
+      "family": "AveMariaRAT",
+      "size": 250368,
+      "first_seen": "2026-10-26 07:30:00",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "bd3638d874cd3365499e672b2951c6a8cf856b4349abced45aa77d6e991ce946",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xls",
+      "family": "AveMariaRAT",
+      "size": 250368,
+      "first_seen": "2026-10-26 07:29:56",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "10febbe117878eb4949f7bad97bdc5a8c86f69ca9edffcdf801a215a403ecbd6",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xls",
+      "family": "AveMariaRAT",
+      "size": 252416,
+      "first_seen": "2026-10-26 07:29:54",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b50cbccb118983cef416958e90cb75d8c7dc2b4466f6687ca8916acdf5fcb450",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xls",
+      "family": "AveMariaRAT",
+      "size": 253440,
+      "first_seen": "2026-10-26 07:29:51",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "1289888aeeb1185514df473a72dceb9d5651a95022f8abe66d767bad72f5462f",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xls",
+      "family": "STRRAT",
+      "size": 373248,
+      "first_seen": "2026-08-26 07:02:58",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "f0699a95fc39bed963289229b613f2b4684ed034e28f8b355fe0b6825a01e774",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xlsm",
+      "family": "QuasarRAT",
+      "size": 226688,
+      "first_seen": "2026-10-23 09:09:44",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "728a2f85c9ff8bbb463e93253ec05e8f3933271887457c5a0f5d4933ec8712c7",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xlsm",
+      "family": "PureRAT",
+      "size": 29073,
+      "first_seen": "2026-07-30 13:17:21",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "f673426085334e706064501731e19ca5112d78c48aa94869ad1b8017874820fa",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xlsm",
+      "family": "QuasarRAT",
+      "size": 273899,
+      "first_seen": "2026-06-17 06:07:59",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "34783b81201fe9f7a05428641b25be10a214a1d5adf9fb0b13185a52366e621b",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xlsm",
+      "family": "PhantomStealer",
+      "size": 240417,
+      "first_seen": "2026-06-15 16:51:08",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "4cd298a3197f1283ef907976ac01b387dc9a44c93432c3a900ba511f48c03523",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xlsm",
+      "family": "QuasarRAT",
+      "size": 146327,
+      "first_seen": "2026-06-09 18:25:35",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "4ca7ca5b39a0ccd6075520932154ac6acf5f5159871d764b24fadab35488b997",
+      "label": "malicious",
+      "category": "office",
+      "file_type": "xlsm",
+      "family": "WeedHack",
+      "size": 142744,
+      "first_seen": "2026-04-28 06:58:11",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "996672367ea46d6a367ba0329f7d62cb761ba860f2f482651c65d9ef84a10863",
+      "label": "malicious",
+      "category": "pdf",
+      "file_type": "pdf",
+      "family": "Action1RMM",
+      "size": 200249,
+      "first_seen": "2026-10-19 15:37:15",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5095c6478dbb7f167c637511536ddc9bdc60828cc7c323041c68a2918eb351e8",
+      "label": "malicious",
+      "category": "pdf",
+      "file_type": "pdf",
+      "family": "Gamaredon",
+      "size": 154668,
+      "first_seen": "2025-11-24 17:47:41",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9b14d367c99b7d9187a58406ad3eb55e2dee12b4b2bc341f9058c622b7b87fa3",
+      "label": "malicious",
+      "category": "pdf",
+      "file_type": "pdf",
+      "family": "Gamaredon",
+      "size": 193512,
+      "first_seen": "2025-11-23 15:51:08",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "9ab20ec2ce6e78ca129ebfd4e0d1e844de1b03c7fbac9ea9a681d0dd6383029d",
+      "label": "malicious",
+      "category": "pdf",
+      "file_type": "pdf",
+      "family": "ConnectWise",
+      "size": 208656,
+      "first_seen": "2025-08-04 15:34:39",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5aa7d6560aa450a8636dd5c8e8e066ccff2a4cdd9022c3c57cc829746387af0e",
+      "label": "malicious",
+      "category": "pdf",
+      "file_type": "pdf",
+      "family": "NetSupport",
+      "size": 98501,
+      "first_seen": "2025-06-16 07:11:30",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5cc241140c015634805a51d62ac1afe626c741a6a6cb181c6952723e73889a06",
+      "label": "malicious",
+      "category": "lnk",
+      "file_type": "lnk",
+      "family": "MeshAgent",
+      "size": 1615,
+      "first_seen": "2026-11-04 04:50:36",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "3147f07bd6405ecafa1c40012524ab48aa62234e9556b2f9a88a83624e10c385",
+      "label": "malicious",
+      "category": "lnk",
+      "file_type": "lnk",
+      "family": "Kharon",
+      "size": 2027,
+      "first_seen": "2026-10-27 11:56:34",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "36ee3c08ba015e06d74feb1fba658212b842ec09116e37724b90c3abb39b6629",
+      "label": "malicious",
+      "category": "lnk",
+      "file_type": "lnk",
+      "family": "DonutLoader",
+      "size": 2781,
+      "first_seen": "2026-10-12 19:15:07",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "385b70c5cddf2e9fe4a4951dab0dc8dc0eee6271a2699a0051d385b476cb249b",
+      "label": "malicious",
+      "category": "lnk",
+      "file_type": "lnk",
+      "family": "ConnectWise",
+      "size": 3592,
+      "first_seen": "2026-10-05 08:55:29",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "041619c550dd329d99cbb1b6f6bd5d3b06fcee2d26ddc0cecdbe45538182b0bd",
+      "label": "malicious",
+      "category": "lnk",
+      "file_type": "lnk",
+      "family": "ConnectWise",
+      "size": 3592,
+      "first_seen": "2026-10-05 08:55:25",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ebb4e6d6e10600b6fa4e390548e63d53991623df26684078453c05f79797b727",
+      "label": "malicious",
+      "category": "lnk",
+      "file_type": "lnk",
+      "family": "Guildma",
+      "size": 11622,
+      "first_seen": "2026-09-24 10:05:46",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b8dd2c924604e8d4cac9a235cee2bf49a375727438f705a0028d0c89b7f9f1b7",
+      "label": "malicious",
+      "category": "lnk",
+      "file_type": "lnk",
+      "family": "Phorpiex",
+      "size": 2003,
+      "first_seen": "2026-08-19 06:03:29",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "b17d030bee752859158181d586644569e40dfe13b0fd470f124829b5fbeddc26",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "NGate",
+      "size": 13837819,
+      "first_seen": "2026-11-02 22:20:32",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "a9859c49d20baf131d1e9253acb0118fac412acaa97938d87c7c8daa7554cd54",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "CECbot",
+      "size": 210589,
+      "first_seen": "2026-11-02 08:47:57",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "ae5483625f278378e9d8930562c3be0dc41c9132fbcaad3894c78b76eb986141",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "KATARU",
+      "size": 497575,
+      "first_seen": "2026-10-29 14:53:15",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "0a592e8cbc7f6ece7de140a8f49c359fbf152f3d7bab474eb0f52f521f3e56c3",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "KATARU",
+      "size": 587432,
+      "first_seen": "2026-10-29 14:50:33",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "425469176c41994bc33ce0582948798875f5c9682b7d0967c925a10f813e1a3d",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "IRATA",
+      "size": 10344785,
+      "first_seen": "2026-10-24 08:03:04",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "5d5c21fbab62ec156c8e3897caf31a0dfb1a2bf2e1198a9e9b8ecdea87089a19",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "IRATA",
+      "size": 8152724,
+      "first_seen": "2026-10-06 06:50:11",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "173192ec576111adbc0c228f75244cf627513c95ca1709036e9850f0cdb7c90b",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "GhostRAT",
+      "size": 2569523,
+      "first_seen": "2026-10-05 13:08:57",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "1f333d910158316c6211f7b24d118aadca778abb3964f3a4b7d3914e49278b7d",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "BtmobRAT",
+      "size": 9513281,
+      "first_seen": "2026-10-05 12:51:36",
+      "source": "MalwareBazaar"
+    },
+    {
+      "sha256": "af56cbeba5bb0e5b10af555f7380214d89f8f1bfcca229f2e713c7eb4a371630",
+      "label": "malicious",
+      "category": "apk",
+      "file_type": "apk",
+      "family": "NGate",
+      "size": 13102853,
+      "first_seen": "2026-10-02 00:45:34",
+      "source": "MalwareBazaar"
+    }
+  ],
+  "clean_sources": [
+    {
+      "name": "python-3.12.7-embed-amd64",
+      "url": "https://www.python.org/ftp/python/3.12.7/python-3.12.7-embed-amd64.zip"
+    },
+    {
+      "name": "MinGit-2.47.0-64-bit",
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.47.0.windows.1/MinGit-2.47.0-64-bit.zip"
+    },
+    {
+      "name": "putty-0.81-w64",
+      "url": "https://the.earth.li/~sgtatham/putty/0.81/w64/putty.zip"
+    },
+    {
+      "name": "notepad++-8.7-portable-x64",
+      "url": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.7/npp.8.7.portable.x64.zip"
+    }
+  ]
+}

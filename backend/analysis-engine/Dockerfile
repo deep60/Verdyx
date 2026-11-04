@@ -41,8 +41,9 @@ COPY proptest ./proptest
 # Build analysis-engine with locked BuildKit cache mounts to prevent OOM
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    cargo build --release --bin analysis-engine --features clamav,yara-engine,ml-engine && \
-    cp /app/target/release/analysis-engine /app/app-bin
+    cargo build --release --bin analysis-engine --bin verdyx-benchmark --features clamav,yara-engine,ml-engine && \
+    cp /app/target/release/analysis-engine /app/app-bin && \
+    cp /app/target/release/verdyx-benchmark /app/benchmark-bin
 
 # Fetch the pinned YARA-Forge rule pack and verify its checksum. Plain data, so
 # it runs on the build platform instead of under arm64 emulation.
@@ -78,6 +79,8 @@ RUN useradd -m -u 1000 app
 WORKDIR /app
 
 COPY --from=builder /app/app-bin /usr/local/bin/app
+# Detection benchmark (benchmark/README.md). Not run by the service itself.
+COPY --from=builder /app/benchmark-bin /usr/local/bin/verdyx-benchmark
 
 # Ship the signature/YARA rules, ONNX ML models, and writable working dirs
 COPY analysis-engine/rules ./rules
