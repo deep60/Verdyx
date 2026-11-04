@@ -5,11 +5,16 @@
 //! anomaly detector — and runs them over a numeric feature vector extracted
 //! from the file bytes.
 //!
-//! IMPORTANT: the models that ship in `ml_models/*.onnx` are currently empty
-//! placeholders. When a model file is missing, empty, or fails to load, the
-//! analyzer degrades gracefully: it returns a non-fatal `Unknown` detection
-//! (with an `error_message`) instead of panicking or failing the whole scan.
-//! Real inference begins automatically once valid models are dropped in.
+//! IMPORTANT: the models that ship in `ml_models/*.onnx` have hand-set
+//! weights and were never trained on data (see `ml_models/README.md`); they
+//! call ordinary archives and images malicious. Their prediction is therefore
+//! advisory: it is recorded in the detection's metadata but does not vote in
+//! the consensus, unless `ML_COUNTS_TOWARD_VERDICT=true` is set once a model
+//! trained on labelled data is installed.
+//!
+//! When a model file is missing, empty, or fails to load, the analyzer
+//! degrades gracefully: it returns a non-fatal `Unknown` detection (with an
+//! `error_message`) instead of panicking or failing the whole scan.
 //!
 //! The feature-vector layout produced by [`extract_features`] is a contract
 //! the trained model must match. The default layout is:
@@ -61,6 +66,9 @@ pub struct MlAnalyzerConfig {
     /// Class labels, index-aligned with the classifier's output vector.
     /// Index 0 is treated as the "benign" class.
     pub labels: Vec<String>,
+    /// Whether the prediction votes in the consensus verdict. Off by default
+    /// because the shipped models are not trained on data.
+    pub counts_toward_verdict: bool,
 }
 
 impl Default for MlAnalyzerConfig {
@@ -94,6 +102,9 @@ impl Default for MlAnalyzerConfig {
                 "worm".to_string(),
                 "virus".to_string(),
             ],
+            counts_toward_verdict: std::env::var("ML_COUNTS_TOWARD_VERDICT")
+                .map(|v| v.trim().eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
         }
     }
 }
@@ -335,6 +346,31 @@ impl MlAnalyzer {
             _ => SeverityLevel::Info,
         };
 
+        if !self.config.counts_toward_verdict {
+            metadata.insert(
+                "advisory_verdict".to_string(),
+                serde_json::json!(format!("{verdict:?}").to_lowercase()),
+            );
+            metadata.insert(
+                "advisory_confidence".to_string(),
+                serde_json::json!(confidence),
+            );
+            return DetectionResult {
+                detection_id: Uuid::new_v4(),
+                engine_name: "ML Engine".to_string(),
+                engine_version: "onnx".to_string(),
+                engine_type: EngineType::Ml,
+                verdict: ThreatVerdict::Unknown,
+                confidence: 0.0,
+                severity: SeverityLevel::Info,
+                categories: vec![],
+                metadata,
+                detected_at: chrono::Utc::now(),
+                processing_time_ms,
+                error_message: Some(ADVISORY_REASON.to_string()),
+            };
+        }
+
         DetectionResult {
             detection_id: Uuid::new_v4(),
             engine_name: "ML Engine".to_string(),
@@ -413,7 +449,7 @@ impl MlAnalyzer {
                 features.push(*c as f32 / len);
             }
         } else {
-            features.extend(std::iter::repeat(0.0).take(HISTOGRAM_BINS));
+            features.extend(std::iter::repeat_n(0.0, HISTOGRAM_BINS));
         }
         debug_assert_eq!(features.len(), DEFAULT_FEATURE_SIZE);
 
@@ -436,6 +472,9 @@ impl MlAnalyzer {
         entropy
     }
 }
+
+/// Shown with every advisory ML result, and why it doesn't vote.
+pub const ADVISORY_REASON: &str = "Advisory only: the ML model's weights are hand-set, not trained on data, so its prediction does not count toward the verdict";
 
 #[cfg(test)]
 mod tests {
@@ -477,7 +516,7 @@ mod tests {
         let feats = analyzer.extract_features(&[0xFFu8; 4]);
         assert_eq!(feats.len(), DEFAULT_FEATURE_SIZE);
         assert_eq!(feats[SCALAR_FEATURES + 0xFF], 1.0);
-        assert_eq!(feats[SCALAR_FEATURES + 0x00], 0.0);
+        assert_eq!(feats[SCALAR_FEATURES], 0.0);
     }
 
     /// An explicit undersized override still truncates, deliberately.
@@ -533,7 +572,10 @@ mod tests {
             feature_size: DEFAULT_FEATURE_SIZE,
             ..Default::default()
         };
-        let analyzer = MlAnalyzer::new(cfg);
+        let analyzer = MlAnalyzer::new(MlAnalyzerConfig {
+            counts_toward_verdict: true,
+            ..cfg.clone()
+        });
         assert!(analyzer.is_available(), "classifier should have loaded");
 
         let res = analyzer
@@ -543,6 +585,24 @@ mod tests {
 
         assert!(res.error_message.is_none(), "inference should succeed");
         assert_eq!(res.verdict, ThreatVerdict::Malicious);
+
+        // By default the same prediction is advisory and doesn't vote.
+        let advisory = MlAnalyzer::new(MlAnalyzerConfig {
+            counts_toward_verdict: false,
+            ..cfg
+        })
+        .analyze_file_data(b"some non-empty sample bytes for inference", "f.bin")
+        .await
+        .unwrap();
+        assert_eq!(advisory.verdict, ThreatVerdict::Unknown);
+        assert_eq!(advisory.error_message.as_deref(), Some(ADVISORY_REASON));
+        assert_eq!(
+            advisory
+                .metadata
+                .get("advisory_verdict")
+                .and_then(|v| v.as_str()),
+            Some("malicious")
+        );
         assert_eq!(
             res.metadata.get("predicted_class").and_then(|v| v.as_str()),
             Some("malware")

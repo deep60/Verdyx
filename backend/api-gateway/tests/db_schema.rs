@@ -73,3 +73,39 @@ async fn same_file_from_two_users_keeps_both_submissions() {
 
     tx.rollback().await.expect("rollback");
 }
+
+#[tokio::test]
+async fn seeded_engines_carry_no_invented_stats() {
+    let Some(database_url) = test_database_url() else {
+        eprintln!("skipping api-gateway schema test; API_GATEWAY_DATABASE_URL not set");
+        return;
+    };
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await
+        .expect("connect to test database");
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations apply cleanly");
+
+    let rows: Vec<(bool, Option<f64>, Option<i32>)> = sqlx::query_as(
+        "SELECT COALESCE(is_active, true), accuracy_rate::FLOAT8, total_analyses
+         FROM engines WHERE id::text LIKE '11111111-1111-4111-8111-11111111110_'",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("read seeded engines");
+
+    assert_eq!(rows.len(), 4);
+    for (active, accuracy, total) in rows {
+        assert!(!active, "seeded engine still listed");
+        assert!(
+            accuracy.is_none() && total.is_none(),
+            "seeded engine keeps made-up stats"
+        );
+    }
+}
