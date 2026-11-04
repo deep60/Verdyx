@@ -17,6 +17,7 @@ use tracing::{info, warn};
 use url::{Host, Url};
 use uuid::Uuid;
 
+use super::abuse_ch::{AbuseChClient, ThreatIntelMatch, ThreatIntelReport};
 use super::url_policy::{
     is_fetch_refusal, is_public_ip, parse_certificate, refusal, validate_url_policy,
     MAX_FETCH_BYTES,
@@ -68,6 +69,9 @@ pub struct UrlScanResult {
     pub redirect_chain: Vec<String>,
     pub ssl_info: Option<SslInfo>,
     pub content_analysis: Option<ContentAnalysis>,
+    /// URLhaus / ThreatFox results; `None` when no abuse.ch key is configured.
+    #[serde(default)]
+    pub threat_intel: Option<ThreatIntelReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +153,7 @@ pub struct ContentAnalysis {
 /// URL scanner implementation
 pub struct UrlScanner {
     config: UrlScannerConfig,
+    abuse_ch: Option<AbuseChClient>,
     blocklist_domains: Vec<String>,
     blocklist_keywords: Vec<String>,
     suspicious_tlds: Vec<String>,
@@ -165,8 +170,16 @@ impl Scanner for UrlScanner {
     fn new(config: Self::Config) -> Result<Self> {
         info!("Initializing URL scanner");
 
+        let abuse_ch = AbuseChClient::from_env();
+        if abuse_ch.is_some() {
+            info!("URL scanner: URLhaus and ThreatFox lookups enabled");
+        } else {
+            info!("URL scanner: ABUSE_CH_API_KEY not set; URLhaus and ThreatFox skipped");
+        }
+
         Ok(Self {
             config,
+            abuse_ch,
             blocklist_domains: Self::load_blocklist_domains(),
             blocklist_keywords: Self::load_blocklist_keywords(),
             suspicious_tlds: Self::load_suspicious_tlds(),
@@ -290,6 +303,41 @@ impl Scanner for UrlScanner {
                 push_denial(&mut fetch_denials, denied);
             }
             inspection.visited
+        };
+
+        // Known-bad lookups for the submitted URL and, after redirects, the
+        // final destination. Blocked (private) destinations are never sent to
+        // a third party.
+        let threat_intel = match &self.abuse_ch {
+            Some(client) if !start_blocked => {
+                let mut report = client.check_url(&parsed).await;
+                if let Some(last) = redirect_chain
+                    .last()
+                    .filter(|u| u.as_str() != parsed.as_str())
+                    .and_then(|u| Url::parse(u).ok())
+                {
+                    let more = client.check_url(&last).await;
+                    for m in more.matches {
+                        if !report.matches.contains(&m) {
+                            report.matches.push(m);
+                        }
+                    }
+                    for e in more.errors {
+                        if !report.errors.contains(&e) {
+                            report.errors.push(e);
+                        }
+                    }
+                }
+                for m in &report.matches {
+                    if let Some(finding) =
+                        threat_intel_finding(m, self.is_trusted_domain(&url_info.parsed_url.domain))
+                    {
+                        base_result.add_finding(finding);
+                    }
+                }
+                Some(report)
+            }
+            _ => None,
         };
 
         if redirect_chain.len() > 1 {
@@ -427,6 +475,7 @@ impl Scanner for UrlScanner {
             redirect_chain,
             ssl_info,
             content_analysis,
+            threat_intel,
         })
     }
 
@@ -489,8 +538,11 @@ impl UrlScanner {
 
     /// Check domain reputation
     fn check_domain_reputation(&self, domain: &str) -> DomainReputation {
-        let is_on_blocklist = self.blocklist_domains.iter().any(|d| domain.contains(d));
-        let is_trusted = self.trusted_domains.iter().any(|d| domain.contains(d));
+        let is_on_blocklist = self
+            .blocklist_domains
+            .iter()
+            .any(|d| domain_matches(domain, d));
+        let is_trusted = self.is_trusted_domain(domain);
 
         let category = if is_on_blocklist {
             DomainCategory::Malicious
@@ -516,6 +568,12 @@ impl UrlScanner {
             reputation_score,
             category,
         }
+    }
+
+    fn is_trusted_domain(&self, domain: &str) -> bool {
+        self.trusted_domains
+            .iter()
+            .any(|d| domain_matches(domain, d))
     }
 
     /// Check for phishing patterns
@@ -933,6 +991,97 @@ fn push_denial(denials: &mut Vec<String>, reason: String) {
     }
 }
 
+/// `domain` is `listed` or a subdomain of it. A plain substring test would
+/// treat `google.com.evil.example` as `google.com`.
+fn domain_matches(domain: &str, listed: &str) -> bool {
+    let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+    let listed = listed.trim_end_matches('.').to_ascii_lowercase();
+    domain == listed || domain.ends_with(&format!(".{listed}"))
+}
+
+/// Turn one feed match into a finding. An exact URL or IOC match is malware;
+/// a host that is merely serving malware elsewhere is suspicious, and is
+/// skipped for trusted shared hosts (code hosting, file sharing).
+fn threat_intel_finding(m: &ThreatIntelMatch, host_is_trusted: bool) -> Option<Finding> {
+    let what = [m.malware.clone(), m.threat.clone()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut evidence = vec![format!("{} {}: {}", m.source, m.match_type, m.indicator)];
+    if let Some(status) = &m.status {
+        evidence.push(format!("Status: {status}"));
+    }
+    if let Some(c) = m.confidence {
+        evidence.push(format!("Feed confidence: {c}%"));
+    }
+    if !m.tags.is_empty() {
+        evidence.push(format!("Tags: {}", m.tags.join(", ")));
+    }
+    if let Some(r) = &m.reference {
+        evidence.push(r.clone());
+    }
+
+    let (category, severity, title) = match (m.source.as_str(), m.match_type.as_str()) {
+        ("URLhaus", "host") => {
+            if host_is_trusted {
+                return None;
+            }
+            (
+                FindingCategory::Suspicious,
+                ThreatLevel::High,
+                "Host is serving malware (URLhaus)".to_string(),
+            )
+        }
+        ("URLhaus", _) => {
+            if m.status.as_deref() == Some("online") {
+                (
+                    FindingCategory::Malware,
+                    ThreatLevel::Critical,
+                    "URL listed on URLhaus as active malware".to_string(),
+                )
+            } else {
+                (
+                    FindingCategory::Suspicious,
+                    ThreatLevel::Medium,
+                    "URL previously listed on URLhaus (now offline)".to_string(),
+                )
+            }
+        }
+        _ => match m.confidence.unwrap_or(0) {
+            75.. => (
+                FindingCategory::Malware,
+                ThreatLevel::Critical,
+                format!("Known malicious indicator on {}", m.source),
+            ),
+            50..=74 => (
+                FindingCategory::Malware,
+                ThreatLevel::High,
+                format!("Known malicious indicator on {}", m.source),
+            ),
+            _ => (
+                FindingCategory::Suspicious,
+                ThreatLevel::Medium,
+                format!("Low-confidence indicator on {}", m.source),
+            ),
+        },
+    };
+
+    Some(Finding {
+        finding_id: Uuid::new_v4(),
+        category,
+        title,
+        description: if what.is_empty() {
+            format!("{} reported {}", m.source, m.indicator)
+        } else {
+            format!("{} reported {} ({what})", m.source, m.indicator)
+        },
+        severity,
+        evidence,
+        recommendation: Some("Block this URL".to_string()),
+    })
+}
+
 fn ssl_not_checked(reason: &str) -> SslInfo {
     SslInfo {
         has_ssl: false,
@@ -1000,6 +1149,65 @@ async fn read_body_limited(mut response: reqwest::Response, max_bytes: usize) ->
 mod tests {
     use super::certificate_facts;
     use super::*;
+
+    fn feed_match(source: &str, match_type: &str) -> ThreatIntelMatch {
+        ThreatIntelMatch {
+            source: source.to_string(),
+            match_type: match_type.to_string(),
+            indicator: "bad.example".to_string(),
+            threat: Some("malware_download".to_string()),
+            malware: None,
+            status: None,
+            confidence: None,
+            tags: vec![],
+            reference: None,
+        }
+    }
+
+    #[test]
+    fn domain_match_is_suffix_not_substring() {
+        assert!(domain_matches("google.com", "google.com"));
+        assert!(domain_matches("mail.google.com", "google.com"));
+        assert!(domain_matches("Mail.Google.com.", "google.com"));
+        assert!(!domain_matches("google.com.evil.example", "google.com"));
+        assert!(!domain_matches("notgoogle.com", "google.com"));
+    }
+
+    #[test]
+    fn feed_matches_map_to_findings() {
+        let mut online = feed_match("URLhaus", "url");
+        online.status = Some("online".to_string());
+        let f = threat_intel_finding(&online, false).unwrap();
+        assert!(matches!(f.category, FindingCategory::Malware));
+        assert!(matches!(f.severity, ThreatLevel::Critical));
+
+        let mut offline = feed_match("URLhaus", "url");
+        offline.status = Some("offline".to_string());
+        let f = threat_intel_finding(&offline, false).unwrap();
+        assert!(matches!(f.category, FindingCategory::Suspicious));
+
+        let host = feed_match("URLhaus", "host");
+        assert!(
+            threat_intel_finding(&host, true).is_none(),
+            "trusted shared host"
+        );
+        assert!(matches!(
+            threat_intel_finding(&host, false).unwrap().category,
+            FindingCategory::Suspicious
+        ));
+
+        let mut ioc = feed_match("ThreatFox", "domain");
+        ioc.confidence = Some(90);
+        assert!(matches!(
+            threat_intel_finding(&ioc, false).unwrap().severity,
+            ThreatLevel::Critical
+        ));
+        ioc.confidence = Some(25);
+        assert!(matches!(
+            threat_intel_finding(&ioc, false).unwrap().category,
+            FindingCategory::Suspicious
+        ));
+    }
     use crate::scanners::url_policy::{is_public_ip, parse_certificate, validate_url_policy};
 
     #[tokio::test]

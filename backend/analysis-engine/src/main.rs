@@ -28,10 +28,11 @@ mod scanners;
 mod storage;
 mod utils;
 
-use crate::analyzers::hash_analyzer::{HashInfo, HashType};
+use crate::analyzers::hash_analyzer::{HashAnalyzer, HashAnalyzerConfig, HashInfo, HashType};
 use crate::analyzers::{
     AnalysisEngine, AnalysisEngineConfig, AnalysisOptions, FileAnalysisRequest,
 };
+use crate::models::analysis_result::ThreatVerdict;
 use crate::scanners::file_scanner::{FileScanner, FileScannerConfig};
 use crate::scanners::url_scanner::{UrlScanner, UrlScannerConfig};
 use crate::scanners::Scanner;
@@ -47,6 +48,9 @@ pub struct AppState {
     s3_client: Arc<S3Client>,
     file_scanner: Arc<FileScanner>,
     url_scanner: Arc<UrlScanner>,
+    /// Hash lookups get their own analyzer so slow feed calls never hold the
+    /// `analysis_engine` lock that file scans need.
+    hash_analyzer: Arc<HashAnalyzer>,
     db: sqlx::PgPool,
     metrics: shared::MetricsRegistry,
 }
@@ -181,6 +185,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     info!("Initializing scanners...");
     let file_scanner = Arc::new(<FileScanner as Scanner>::new(FileScannerConfig::default())?);
     let url_scanner = Arc::new(<UrlScanner as Scanner>::new(UrlScannerConfig::default())?);
+    let hash_analyzer = Arc::new(HashAnalyzer::new(HashAnalyzerConfig::default())?);
 
     // Create application state
     let app_state = AppState {
@@ -189,6 +194,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         s3_client: s3_client.clone(),
         file_scanner,
         url_scanner,
+        hash_analyzer,
         db: db_pool.clone(),
         metrics: shared::MetricsRegistry::new("analysis-engine", env!("CARGO_PKG_VERSION")),
     };
@@ -673,21 +679,59 @@ async fn perform_hash_analysis(
         hash_info.hash_value, hash_info.hash_type
     );
 
-    // Check if we already have a completed submission or analysis matching this hash
-    let existing: Option<(Option<bool>, Option<f64>)> = sqlx::query_as(
-        "SELECT (result_data->>'is_malicious')::boolean, confidence::float8 FROM engine_analysis_results WHERE result_data->>'hash' = $1 AND status = 'Completed' ORDER BY completed_at DESC LIMIT 1"
-    )
-    .bind(&hash_info.hash_value)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
-
-    let (verdict, confidence) = match existing {
-        Some((Some(true), conf)) => ("Malicious", conf.unwrap_or(0.9) as f32),
-        Some((Some(false), conf)) => ("Benign", conf.unwrap_or(0.85) as f32),
-        _ => ("Benign", 0.75_f32),
+    // Ask the threat feeds (MalwareBazaar, VirusTotal, Hybrid Analysis —
+    // whichever have keys). Only a source that knows the hash gives a verdict.
+    let lookup = state.hash_analyzer.analyze_hash(&hash_info, None).await;
+    let (mut verdict, mut confidence, sources, lookup_error) = match &lookup {
+        Ok(result) => {
+            let consensus = result
+                .detections
+                .iter()
+                .find(|d| d.engine_name == "Hash Analyzer Consensus");
+            let sources: Vec<serde_json::Value> = result
+                .detections
+                .iter()
+                .filter(|d| d.engine_name != "Hash Analyzer Consensus")
+                .map(|d| {
+                    serde_json::json!({
+                        "source": d.engine_name,
+                        "verdict": format!("{:?}", d.verdict).to_lowercase(),
+                        "detection_names": d.metadata.get("malware_family"),
+                        "error": d.error_message,
+                    })
+                })
+                .collect();
+            match consensus {
+                Some(c) if c.verdict != ThreatVerdict::Unknown => {
+                    (format!("{:?}", c.verdict), c.confidence, sources, None)
+                }
+                _ => ("Unknown".to_string(), 0.0_f32, sources, None),
+            }
+        }
+        Err(e) => (
+            "Unknown".to_string(),
+            0.0_f32,
+            Vec::new(),
+            Some(e.to_string()),
+        ),
     };
+
+    // No feed knows it: fall back to an earlier completed scan of the same file.
+    if verdict == "Unknown" {
+        let existing: Option<(Option<bool>, Option<f64>)> = sqlx::query_as(
+            "SELECT (result_data->>'is_malicious')::boolean, confidence::float8 FROM engine_analysis_results WHERE result_data->>'hash' = $1 AND status = 'Completed' AND verdict <> 'Unknown' ORDER BY completed_at DESC LIMIT 1"
+        )
+        .bind(&hash_info.hash_value)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+        if let Some((Some(is_malicious), conf)) = existing {
+            verdict = if is_malicious { "Malicious" } else { "Benign" }.to_string();
+            confidence = conf.unwrap_or(0.0) as f32;
+        }
+    }
+    let verdict = verdict.as_str();
 
     let result_json = serde_json::json!({
         "type": "hash",
@@ -695,6 +739,8 @@ async fn perform_hash_analysis(
         "hash_type": format!("{:?}", hash_info.hash_type),
         "verdict": verdict.to_lowercase(),
         "confidence": confidence,
+        "sources": sources,
+        "lookup_error": lookup_error,
         "status": "completed"
     });
 
