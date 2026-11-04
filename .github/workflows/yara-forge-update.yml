@@ -1,0 +1,90 @@
+name: YARA-Forge Rule Update
+
+# Weekly: if YARA-Forge published a newer rule pack, check that it compiles with
+# libyara and stays quiet on clean system files, then open a PR bumping the pin
+# in backend/analysis-engine/rules/yara-forge.conf. Merging it redeploys the
+# analysis engine with the new rules.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: Check for a new rule pack
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CONF: backend/analysis-engine/rules/yara-forge.conf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare with the pinned version
+        id: version
+        run: |
+          . "$CONF"
+          latest=$(gh api repos/YARAHQ/yara-forge/releases/latest -q .tag_name)
+          echo "pinned=$YARA_FORGE_VERSION latest=$latest"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "package=$YARA_FORGE_PACKAGE" >> "$GITHUB_OUTPUT"
+          branch="chore/yara-forge-$latest"
+          if [ "$latest" = "$YARA_FORGE_VERSION" ] || git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null; then
+            echo "update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "update=true" >> "$GITHUB_OUTPUT"
+            echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download and test the new pack
+        if: steps.version.outputs.update == 'true'
+        id: test
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq yara
+          latest=${{ steps.version.outputs.latest }}
+          package=${{ steps.version.outputs.package }}
+          curl -fsSL -o rules.zip \
+            "https://github.com/YARAHQ/yara-forge/releases/download/$latest/yara-forge-rules-$package.zip"
+          sha=$(sha256sum rules.zip | cut -d' ' -f1)
+          mkdir -p pack && unzip -q -j rules.zip '*.yar' -d pack
+          yarac -w pack/*.yar pack.yarc
+          rules=$(grep -cE '^\s*((private|global)\s+)*rule\s' pack/*.yar)
+          clean_files=$(find /usr/bin /usr/sbin -maxdepth 1 -type f | wc -l)
+          hits=$(yara -C -w pack.yarc /usr/bin 2>/dev/null; yara -C -w pack.yarc /usr/sbin 2>/dev/null)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "rules=$rules" >> "$GITHUB_OUTPUT"
+          echo "clean_files=$clean_files" >> "$GITHUB_OUTPUT"
+          echo "hit_count=$(printf '%s' "$hits" | grep -c . || true)" >> "$GITHUB_OUTPUT"
+          { echo 'hits<<EOF'; printf '%s\n' "$hits" | head -20; echo EOF; } >> "$GITHUB_OUTPUT"
+
+      - name: Open a PR bumping the pin
+        if: steps.version.outputs.update == 'true'
+        run: |
+          latest=${{ steps.version.outputs.latest }}
+          branch=${{ steps.version.outputs.branch }}
+          sed -i -E \
+            -e "s/^YARA_FORGE_VERSION=.*/YARA_FORGE_VERSION=$latest/" \
+            -e "s/^YARA_FORGE_SHA256=.*/YARA_FORGE_SHA256=${{ steps.test.outputs.sha }}/" \
+            "$CONF"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "chore(analysis-engine): update YARA-Forge rules to $latest"
+          git push origin "$branch"
+          cat > body.md <<EOF
+          Bumps the YARA-Forge ${{ steps.version.outputs.package }} pack to [$latest](https://github.com/YARAHQ/yara-forge/releases/tag/$latest).
+
+          - Compiles with libyara: yes (${{ steps.test.outputs.rules }} rules)
+          - Matches on ${{ steps.test.outputs.clean_files }} clean files in /usr/bin and /usr/sbin: ${{ steps.test.outputs.hit_count }}
+
+          \`\`\`
+          ${{ steps.test.outputs.hits }}
+          \`\`\`
+          EOF
+          gh pr create --base main --head "$branch" \
+            --title "chore(analysis-engine): update YARA-Forge rules to $latest" \
+            --body-file body.md

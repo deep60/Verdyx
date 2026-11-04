@@ -4,6 +4,11 @@
 //! libyara). Rule files (`*.yar` / `*.yara`) are discovered recursively under
 //! the configured rules directory, each compiled into its own ruleset so that
 //! a single malformed file cannot disable detection for the rest.
+//!
+//! Severity comes from an explicit `severity` meta field or tag when a rule has
+//! one (our own rules), otherwise from the YARA-Forge `score` meta field,
+//! downgraded for generic "suspicious technique" rules so that one generic hit
+//! never marks a file malicious on its own.
 
 use std::collections::HashMap;
 use std::fs;
@@ -19,6 +24,7 @@ use crate::models::analysis_result::{
 };
 
 #[derive(Error, Debug)]
+#[allow(clippy::enum_variant_names)]
 pub enum YaraEngineError {
     #[error("YARA compilation failed: {0}")]
     CompilationError(String),
@@ -68,6 +74,7 @@ impl Default for YaraEngineConfig {
 struct CompiledRuleSet {
     namespace: String,
     source_file: String,
+    rule_count: usize,
     rules: Rules,
 }
 
@@ -89,6 +96,11 @@ impl YaraEngine {
     /// Number of loaded compiled rule files
     pub fn rule_count(&self) -> usize {
         self.rulesets.len()
+    }
+
+    /// Number of individual rules across all loaded rule files.
+    pub fn rules_loaded(&self) -> usize {
+        self.rulesets.iter().map(|s| s.rule_count).sum()
     }
 
     /// Discover and compile every rule file under the configured directory.
@@ -121,6 +133,9 @@ impl YaraEngine {
                 Ok(rules) => rulesets.push(CompiledRuleSet {
                     namespace,
                     source_file: path.display().to_string(),
+                    rule_count: fs::read_to_string(&path)
+                        .map(|src| count_rules(&src))
+                        .unwrap_or(0),
                     rules,
                 }),
                 Err(e) => {
@@ -131,7 +146,8 @@ impl YaraEngine {
         }
 
         info!(
-            "Compiled {} YARA rule file(s) from {:?}",
+            "Compiled {} YARA rule(s) in {} file(s) from {:?}",
+            rulesets.iter().map(|s| s.rule_count).sum::<usize>(),
             rulesets.len(),
             dir
         );
@@ -159,7 +175,7 @@ impl YaraEngine {
             if path.is_file()
                 && path
                     .extension()
-                    .map_or(false, |ext| ext == "yara" || ext == "yar")
+                    .is_some_and(|ext| ext == "yara" || ext == "yar")
             {
                 rule_files.push(path);
             } else if path.is_dir() {
@@ -313,29 +329,72 @@ impl YaraEngine {
         }
     }
 
-    /// Derive a severity from rule tags and the conventional `severity` meta
-    /// field, taking the most severe across all matches.
+    /// The most severe level across all matches.
     fn severity_from(matches: &[YaraMatch]) -> SeverityLevel {
         let mut best = SeverityLevel::Low;
         for m in matches {
-            let mut tokens: Vec<String> = m.tags.iter().map(|t| t.to_lowercase()).collect();
-            if let Some(sev) = m.meta.get("severity") {
-                tokens.push(sev.to_lowercase());
-            }
-            for token in tokens {
-                let level = match token.as_str() {
-                    "critical" => SeverityLevel::Critical,
-                    "high" => SeverityLevel::High,
-                    "medium" | "moderate" => SeverityLevel::Medium,
-                    "low" => SeverityLevel::Low,
-                    _ => continue,
-                };
-                if Self::severity_rank(&level) > Self::severity_rank(&best) {
-                    best = level;
-                }
+            let level = Self::match_severity(m);
+            if Self::severity_rank(&level) > Self::severity_rank(&best) {
+                best = level;
             }
         }
         best
+    }
+
+    /// Severity of one match: an explicit `severity` meta field or tag wins,
+    /// then the YARA-Forge `score` (0-100), else `Low`.
+    fn match_severity(m: &YaraMatch) -> SeverityLevel {
+        let mut tokens: Vec<String> = m.tags.iter().map(|t| t.to_lowercase()).collect();
+        if let Some(sev) = m.meta.get("severity") {
+            tokens.push(sev.to_lowercase());
+        }
+        let explicit = tokens
+            .iter()
+            .filter_map(|token| match token.as_str() {
+                "critical" => Some(SeverityLevel::Critical),
+                "high" => Some(SeverityLevel::High),
+                "medium" | "moderate" => Some(SeverityLevel::Medium),
+                "low" => Some(SeverityLevel::Low),
+                _ => None,
+            })
+            .max_by_key(Self::severity_rank);
+        if let Some(level) = explicit {
+            return level;
+        }
+
+        let Some(score) = m.meta.get("score").and_then(|s| s.parse::<u32>().ok()) else {
+            return SeverityLevel::Low;
+        };
+        let level = match score {
+            90.. => SeverityLevel::Critical,
+            75..=89 => SeverityLevel::High,
+            60..=74 => SeverityLevel::Medium,
+            _ => SeverityLevel::Low,
+        };
+        // Generic technique and hacktool rules flag behaviour that legitimate
+        // software also shows (e.g. jsPDF trips HTML smuggling), so a single
+        // hit stays suspicious.
+        if Self::is_generic_rule(m) && Self::severity_rank(&level) > 2 {
+            SeverityLevel::Medium
+        } else {
+            level
+        }
+    }
+
+    fn is_generic_rule(m: &YaraMatch) -> bool {
+        let name = m.rule_name.to_lowercase();
+        let description = m
+            .meta
+            .get("description")
+            .map(|d| d.to_lowercase())
+            .unwrap_or_default();
+        name.split('_').any(|t| {
+            matches!(
+                t,
+                "susp" | "suspicious" | "generic" | "gen" | "hktl" | "pua"
+            )
+        }) || description.contains("generic")
+            || description.contains("suspicious")
     }
 
     fn severity_rank(level: &SeverityLevel) -> u8 {
@@ -439,6 +498,7 @@ impl YaraEngine {
                 "rule_files_loaded".to_string(),
                 self.rulesets.len().to_string(),
             ),
+            ("rules_loaded".to_string(), self.rules_loaded().to_string()),
             (
                 "rules_directory".to_string(),
                 self.config.rules_directory.display().to_string(),
@@ -453,6 +513,23 @@ impl YaraEngine {
             ),
         ])
     }
+}
+
+/// Count rule declarations in YARA source (`rule`, `private rule`, `global rule`).
+fn count_rules(source: &str) -> usize {
+    source
+        .lines()
+        .filter(|line| {
+            let mut words = line.split_whitespace();
+            loop {
+                match words.next() {
+                    Some("private") | Some("global") => continue,
+                    Some("rule") => return words.next().is_some(),
+                    _ => return false,
+                }
+            }
+        })
+        .count()
 }
 
 #[cfg(test)]
@@ -501,6 +578,90 @@ rule DetectsEvil : trojan {
         // Non-matching input -> benign.
         let clean = engine
             .analyze_file_data(b"nothing to see here", "clean.bin")
+            .await
+            .unwrap();
+        assert_eq!(clean.verdict, ThreatVerdict::Benign);
+    }
+
+    fn forge_match(rule_name: &str, score: &str, description: &str) -> YaraMatch {
+        YaraMatch {
+            rule_name: rule_name.to_string(),
+            namespace: "yara-rules-core".to_string(),
+            tags: vec!["FILE".to_string()],
+            meta: HashMap::from([
+                ("score".to_string(), score.to_string()),
+                ("description".to_string(), description.to_string()),
+            ]),
+            matched_strings: 1,
+        }
+    }
+
+    #[test]
+    fn yara_forge_score_sets_severity() {
+        let family = forge_match("MALPEDIA_Win_Emotet_Auto", "75", "Detects win.emotet.");
+        assert!(matches!(
+            YaraEngine::match_severity(&family),
+            SeverityLevel::High
+        ));
+
+        let top = forge_match("SIGNATURE_BASE_APT_Thing", "90", "Detects a backdoor");
+        assert!(matches!(
+            YaraEngine::match_severity(&top),
+            SeverityLevel::Critical
+        ));
+
+        let low = forge_match("DITEKSHEN_INDICATOR_Thing", "65", "Detects an indicator");
+        assert!(matches!(
+            YaraEngine::match_severity(&low),
+            SeverityLevel::Medium
+        ));
+    }
+
+    #[test]
+    fn generic_forge_rules_stay_suspicious() {
+        for m in [
+            forge_match(
+                "ELCEEF_HTML_Smuggling_A",
+                "75",
+                "Generic detection for HTML smuggling (T1027.006)",
+            ),
+            forge_match("SIGNATURE_BASE_SUSP_Thing", "80", "Detects a thing"),
+            forge_match("SIGNATURE_BASE_HKTL_Mimikatz", "90", "Detects Mimikatz"),
+        ] {
+            assert!(matches!(
+                YaraEngine::match_severity(&m),
+                SeverityLevel::Medium
+            ));
+        }
+    }
+
+    #[test]
+    fn explicit_severity_beats_score() {
+        let mut m = forge_match("Local_Rule", "90", "x");
+        m.meta.insert("severity".to_string(), "low".to_string());
+        assert!(matches!(YaraEngine::match_severity(&m), SeverityLevel::Low));
+    }
+
+    #[test]
+    fn counts_rule_declarations() {
+        let src = "import \"pe\"\nrule A { condition: true }\nprivate rule B\n{ condition: true }\nglobal private rule C { condition: true }\n// rule D is a comment\n";
+        assert_eq!(count_rules(src), 3);
+    }
+
+    /// Compiles a real rule pack when `YARA_FORGE_RULES_DIR` points at one.
+    #[tokio::test]
+    async fn real_rule_pack_compiles_and_is_quiet_on_plain_text() {
+        let Ok(dir) = std::env::var("YARA_FORGE_RULES_DIR") else {
+            return;
+        };
+        let engine = YaraEngine::new(YaraEngineConfig {
+            rules_directory: PathBuf::from(dir),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(engine.rules_loaded() > 1000, "rule pack failed to compile");
+        let clean = engine
+            .analyze_file_data(b"Hello, this is an ordinary text file.\n", "a.txt")
             .await
             .unwrap();
         assert_eq!(clean.verdict, ThreatVerdict::Benign);

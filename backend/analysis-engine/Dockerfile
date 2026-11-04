@@ -44,6 +44,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cargo build --release --bin analysis-engine --features clamav,yara-engine,ml-engine && \
     cp /app/target/release/analysis-engine /app/app-bin
 
+# Fetch the pinned YARA-Forge rule pack and verify its checksum. Plain data, so
+# it runs on the build platform instead of under arm64 emulation.
+FROM --platform=$BUILDPLATFORM debian:trixie-slim AS yara-forge
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl unzip && \
+    rm -rf /var/lib/apt/lists/*
+COPY analysis-engine/rules/yara-forge.conf /tmp/yara-forge.conf
+RUN . /tmp/yara-forge.conf && \
+    curl -fsSL -o /tmp/rules.zip \
+      "https://github.com/YARAHQ/yara-forge/releases/download/${YARA_FORGE_VERSION}/yara-forge-rules-${YARA_FORGE_PACKAGE}.zip" && \
+    echo "${YARA_FORGE_SHA256}  /tmp/rules.zip" | sha256sum -c - && \
+    mkdir -p /out && unzip -j /tmp/rules.zip '*.yar' -d /out
+
 FROM debian:trixie-slim
 
 # Runtime dependencies. trixie provides the YARA 4.5.x shared library (libyara10)
@@ -68,6 +81,7 @@ COPY --from=builder /app/app-bin /usr/local/bin/app
 
 # Ship the signature/YARA rules, ONNX ML models, and writable working dirs
 COPY analysis-engine/rules ./rules
+COPY --from=yara-forge /out ./rules/yara/yara-forge
 COPY analysis-engine/ml_models ./ml_models
 RUN mkdir -p ./rules/signatures ./rules/yara ./ml_models ./temp/verdyx-uploads ./models ./logs && \
     chown -R app:app /usr/local/bin/app /app
