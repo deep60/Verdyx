@@ -1,3 +1,4 @@
+pub mod abuse_ch;
 pub mod archive_scanner;
 pub mod email_scanner;
 /// Scanner modules for different artifact types

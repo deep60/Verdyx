@@ -565,7 +565,7 @@ export default function AnalysisDetails() {
                                     variant={getVerdictColor(analysis.verdict ?? null)}
                                     className="mt-1 capitalize"
                                   >
-                                    {analysis.verdict === "unknown" ? "Clean (Verified)" : analysis.verdict}
+                                    {analysis.verdict === "unknown" ? "No verdict" : analysis.verdict}
                                   </Badge>
                                 </div>
                                 <div>
@@ -575,7 +575,7 @@ export default function AnalysisDetails() {
                                 <div>
                                   <div className="text-sm text-muted-foreground">Stake</div>
                                   <div className="text-lg font-semibold mt-1 text-primary">
-                                    {analysis.stakeAmount || "1.5"} ETH
+                                    {analysis.stakeAmount ? `${analysis.stakeAmount} ETH` : "—"}
                                   </div>
                                 </div>
                               </div>

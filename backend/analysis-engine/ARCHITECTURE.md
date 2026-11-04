@@ -69,11 +69,13 @@ The system distinguishes between *Scanners* (artifact-type specific parsing) and
     -   Integrates with local/remote ClamAV daemon via TCP.
     -   Maps virus names to `ThreatCategory` (e.g., "Worm", "Trojan").
 -   **`HashAnalyzer`** (`hash_analyzer.rs`):
-    -   Queries external threat intel (VirusTotal, MalwareBazaar, HybridAnalysis).
+    -   Queries external threat intel (VirusTotal, MalwareBazaar, HybridAnalysis) for each source with a key.
+    -   A hash no source knows gets no verdict; only the EICAR test file is recognised offline.
     -   Implements **Resilience**: Circuit Breakers, Rate Limiters, Retries.
--   **`NetworkAnalyzer`** (`network_analyzer.rs`):
-    -   Analyzes pcap data and URLs.
-    -   Detects suspicious domains, DGA patterns, and C2 traffic.
+-   **abuse.ch lookups** (`scanners/abuse_ch.rs`, used by the URL scanner):
+    -   URLhaus (exact URL, and hosts still serving malware) and ThreatFox (URL, domain, `ip:port` IOCs).
+    -   Needs `ABUSE_CH_API_KEY` (free, https://auth.abuse.ch/); without it these sources are skipped.
+    -   Results are cached for 30 minutes; a feed outage is reported, never fatal.
 
 ### 4. Sandbox Subsystem (`src/sandbox/`)
 Provides isolated execution for dynamic analysis.

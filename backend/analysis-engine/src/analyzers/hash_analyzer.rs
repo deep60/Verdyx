@@ -554,10 +554,10 @@ impl HashAnalyzer {
             }
         }
 
-        // Check against local threat database
-        match self.query_local_database(&hash_info.hash_value).await {
-            Ok(local_rep) => reputations.push(local_rep),
-            Err(e) => warn!("Local database query failed: {}", e),
+        // The EICAR test file is recognised offline. Any other hash only gets
+        // a verdict from a feed that actually knows it.
+        if let Some(test_rep) = self.eicar_test_reputation(&hash_info.hash_value) {
+            reputations.push(test_rep);
         }
 
         // Cache successful results
@@ -949,10 +949,12 @@ impl HashAnalyzer {
                     verdict: ThreatVerdict::Malicious,
                     confidence: 0.9,
                     reliability_score: 0.85, // High reliability for known malware repository
-                    first_seen: json["data"][0]["first_seen"]
-                        .as_str()
-                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                        .map(|dt| dt.with_timezone(&chrono::Utc)),
+                    // MalwareBazaar dates look like "2024-01-31 12:34:56" (UTC).
+                    first_seen: json["data"][0]["first_seen"].as_str().and_then(|s| {
+                        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                            .ok()
+                            .map(|dt| dt.and_utc())
+                    }),
                     last_seen: None,
                     detection_names: vec![json["data"][0]["signature"]
                         .as_str()
@@ -1098,56 +1100,33 @@ impl HashAnalyzer {
         }
     }
 
-    /// Enhanced local database query with known malware hash checks
-    async fn query_local_database(&self, hash: &str) -> Result<HashReputation, HashAnalysisError> {
-        let start_time = Instant::now();
-        debug!("Querying local database for hash: {}", hash);
-
-        let lower_hash = hash.trim().to_lowercase();
-        // Known EICAR & common test malware SHA-256 / MD5 hashes
-        let known_malicious = [
+    /// The EICAR anti-malware test file, recognised without a network call.
+    /// Returns `None` for every other hash: not being in this list says
+    /// nothing about whether a file is safe.
+    fn eicar_test_reputation(&self, hash: &str) -> Option<HashReputation> {
+        const EICAR_HASHES: [&str; 3] = [
             "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
             "44d88612fea8a8f36de82e1278abb02f",
             "3395856ce81f2b7382dee72602f798b642f14140",
         ];
-
-        let is_known_bad = known_malicious.contains(&lower_hash.as_str());
-        let query_time = start_time.elapsed().as_millis().max(1) as u64;
-
+        let lower_hash = hash.trim().to_lowercase();
+        if !EICAR_HASHES.contains(&lower_hash.as_str()) {
+            return None;
+        }
         let mut metadata = HashMap::new();
         metadata.insert("checked_hash".to_string(), serde_json::json!(lower_hash));
-        metadata.insert(
-            "feed".to_string(),
-            serde_json::json!("verdyx-local-threat-intel-v2"),
-        );
-
-        if is_known_bad {
-            Ok(HashReputation {
-                source: "Local Threat Intel DB".to_string(),
-                verdict: ThreatVerdict::Malicious,
-                confidence: 0.99,
-                reliability_score: 1.0,
-                first_seen: Some(chrono::Utc::now()),
-                last_seen: Some(chrono::Utc::now()),
-                detection_names: vec!["EICAR-Test-Signature".to_string()],
-                threat_types: vec!["trojan".to_string()],
-                metadata,
-                query_time_ms: query_time,
-            })
-        } else {
-            Ok(HashReputation {
-                source: "Local Threat Intel DB".to_string(),
-                verdict: ThreatVerdict::Benign,
-                confidence: 0.92,
-                reliability_score: 0.95,
-                first_seen: None,
-                last_seen: None,
-                detection_names: vec![],
-                threat_types: vec![],
-                metadata,
-                query_time_ms: query_time,
-            })
-        }
+        Some(HashReputation {
+            source: "EICAR test file".to_string(),
+            verdict: ThreatVerdict::Malicious,
+            confidence: 0.99,
+            reliability_score: 1.0,
+            first_seen: None,
+            last_seen: None,
+            detection_names: vec!["EICAR-Test-Signature".to_string()],
+            threat_types: vec!["test".to_string()],
+            metadata,
+            query_time_ms: 0,
+        })
     }
 
     /// Helper to create unknown reputation
@@ -1732,6 +1711,39 @@ mod tests {
         assert!(HashType::SHA256.is_secure());
         assert!(HashType::SHA3_256.is_secure());
         assert!(HashType::BLAKE2B.is_secure());
+    }
+
+    #[tokio::test]
+    async fn unknown_hash_gets_no_verdict_without_feeds() {
+        let analyzer = HashAnalyzer::new(HashAnalyzerConfig {
+            virustotal_api_key: None,
+            malwarebazaar_api_key: None,
+            hybrid_analysis_api_key: None,
+            ..Default::default()
+        })
+        .unwrap();
+        let unknown = HashInfo {
+            hash_type: HashType::SHA256,
+            hash_value: "a".repeat(64),
+            file_size: None,
+            computed_at: chrono::Utc::now(),
+        };
+        let result = analyzer.analyze_hash(&unknown, None).await.unwrap();
+        assert!(
+            result.detections.is_empty(),
+            "no source knows this hash, so nothing may vote benign"
+        );
+
+        let eicar = HashInfo {
+            hash_value: "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
+                .to_string(),
+            ..unknown
+        };
+        let result = analyzer.analyze_hash(&eicar, None).await.unwrap();
+        assert!(result
+            .detections
+            .iter()
+            .any(|d| d.engine_name == "EICAR test file" && d.verdict == ThreatVerdict::Malicious));
     }
 
     #[tokio::test]
