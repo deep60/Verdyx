@@ -18,22 +18,25 @@ concurrency:
 
 jobs:
   # ── Detect which components changed ────────────────────────────────────────
+  # A manual run (Actions → Deploy to Production → Run workflow) rebuilds and
+  # deploys every component from the current main, e.g. after a queued deploy
+  # was replaced by a newer push and its services were never built.
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      frontend:             ${{ steps.filter.outputs.frontend }}
-      api-gateway:          ${{ steps.filter.outputs.api-gateway }}
-      analysis-engine:      ${{ steps.filter.outputs.analysis-engine }}
-      bounty-manager:       ${{ steps.filter.outputs.bounty-manager }}
-      consensus-service:    ${{ steps.filter.outputs.consensus-service }}
-      notification-service: ${{ steps.filter.outputs.notification-service }}
-      payment-service:      ${{ steps.filter.outputs.payment-service }}
-      reputation-service:   ${{ steps.filter.outputs.reputation-service }}
-      submission-service:   ${{ steps.filter.outputs.submission-service }}
-      user-service:         ${{ steps.filter.outputs.user-service }}
-      shared:               ${{ steps.filter.outputs.shared }}
-      infrastructure:       ${{ steps.filter.outputs.infrastructure }}
+      frontend:             ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.frontend }}
+      api-gateway:          ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.api-gateway }}
+      analysis-engine:      ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.analysis-engine }}
+      bounty-manager:       ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.bounty-manager }}
+      consensus-service:    ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.consensus-service }}
+      notification-service: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.notification-service }}
+      payment-service:      ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.payment-service }}
+      reputation-service:   ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.reputation-service }}
+      submission-service:   ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.submission-service }}
+      user-service:         ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.user-service }}
+      shared:               ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.shared }}
+      infrastructure:       ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.infrastructure }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
