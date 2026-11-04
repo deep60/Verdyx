@@ -1,9 +1,9 @@
 {
   "_format": "hh-sol-cache-2",
   "files": {
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/Interfaces/IBountyManager.sol": {
-      "lastModificationDate": 1777263924164,
-      "contentHash": "9ce44410d7348b79e5af2b450104ab83",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/Interfaces/IBountyManager.sol": {
+      "lastModificationDate": 1793687569842,
+      "contentHash": "f7a925372601464376e70afff36bb2c0",
       "sourceName": "contracts/Interfaces/IBountyManager.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -38,9 +38,9 @@
         "IBountyManager"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/upgradeable/BountyManagerV2.sol": {
-      "lastModificationDate": 1782914583533,
-      "contentHash": "0faeecbdb904a798bf6f95839cdedb85",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/upgradeable/BountyManagerV2.sol": {
+      "lastModificationDate": 1793690133598,
+      "contentHash": "5c65cac6ed266e9912469e5927463d1e",
       "sourceName": "contracts/upgradeable/BountyManagerV2.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -85,9 +85,9 @@
         "BountyManagerV2"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/Interfaces/IReputationSystem.sol": {
-      "lastModificationDate": 1777263924165,
-      "contentHash": "857deea9c9c1c32cee7a53a2667008b1",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/Interfaces/IReputationSystem.sol": {
+      "lastModificationDate": 1793687569843,
+      "contentHash": "2303a8ddff43bd718785d59d8c12ed99",
       "sourceName": "contracts/Interfaces/IReputationSystem.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -122,8 +122,47 @@
         "IReputationSystem"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol": {
-      "lastModificationDate": 1764130641614,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol": {
+      "lastModificationDate": 1793651280638,
+      "contentHash": "24562076b21756e3358ede5e844008ce",
+      "sourceName": "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../proxy/utils/Initializable.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "ReentrancyGuardUpgradeable"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol": {
+      "lastModificationDate": 1793651280632,
       "contentHash": "1460918cfe408f7a514ff980f638fecc",
       "sourceName": "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol",
       "solcConfig": {
@@ -165,47 +204,8 @@
         "AccessControlUpgradeable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol": {
-      "lastModificationDate": 1764130641633,
-      "contentHash": "24562076b21756e3358ede5e844008ce",
-      "sourceName": "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [
-        "../proxy/utils/Initializable.sol"
-      ],
-      "versionPragmas": [
-        "^0.8.20"
-      ],
-      "artifacts": [
-        "ReentrancyGuardUpgradeable"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol": {
-      "lastModificationDate": 1764130641633,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol": {
+      "lastModificationDate": 1793651280637,
       "contentHash": "a77dad8312dfaddab72fab403ee0c0a6",
       "sourceName": "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol",
       "solcConfig": {
@@ -244,82 +244,8 @@
         "PausableUpgradeable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol": {
-      "lastModificationDate": 1764128865411,
-      "contentHash": "9261adf6457863de3e9892f51317ec89",
-      "sourceName": "@openzeppelin/contracts/token/ERC20/IERC20.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        ">=0.4.16"
-      ],
-      "artifacts": [
-        "IERC20"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol": {
-      "lastModificationDate": 1764130641632,
-      "contentHash": "2acae54ad209714bca07edf4bae32f72",
-      "sourceName": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        "^0.8.20"
-      ],
-      "artifacts": [
-        "Initializable"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol": {
-      "lastModificationDate": 1764130641635,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol": {
+      "lastModificationDate": 1793651280631,
       "contentHash": "08db0b4bea3d52072346c326c5b857b7",
       "sourceName": "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol",
       "solcConfig": {
@@ -359,8 +285,159 @@
         "UUPSUpgradeable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol": {
-      "lastModificationDate": 1764130641614,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol": {
+      "lastModificationDate": 1793651280489,
+      "contentHash": "9261adf6457863de3e9892f51317ec89",
+      "sourceName": "@openzeppelin/contracts/token/ERC20/IERC20.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.4.16"
+      ],
+      "artifacts": [
+        "IERC20"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol": {
+      "lastModificationDate": 1793651280489,
+      "contentHash": "1fb9edee1d763745a62d0b1954998792",
+      "sourceName": "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../IERC20.sol",
+        "../../../interfaces/IERC1363.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "SafeERC20"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol": {
+      "lastModificationDate": 1793651280631,
+      "contentHash": "2acae54ad209714bca07edf4bae32f72",
+      "sourceName": "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "Initializable"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/access/IAccessControl.sol": {
+      "lastModificationDate": 1793651280511,
+      "contentHash": "def1e8f7b6cac577cf2600655bf3bdf8",
+      "sourceName": "@openzeppelin/contracts/access/IAccessControl.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.8.4"
+      ],
+      "artifacts": [
+        "IAccessControl"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol": {
+      "lastModificationDate": 1793651280637,
       "contentHash": "c28aaa25d083a9a55bd9ec9e0b785122",
       "sourceName": "@openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol",
       "solcConfig": {
@@ -398,8 +475,45 @@
         "ContextUpgradeable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol": {
-      "lastModificationDate": 1764130641619,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/introspection/IERC165.sol": {
+      "lastModificationDate": 1793651280523,
+      "contentHash": "7074c93b1ea0a122063f26ddd1db1032",
+      "sourceName": "@openzeppelin/contracts/utils/introspection/IERC165.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.4.16"
+      ],
+      "artifacts": [
+        "IERC165"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol": {
+      "lastModificationDate": 1793651280638,
       "contentHash": "4d250f562322f9c023c5503064ffc12f",
       "sourceName": "@openzeppelin/contracts-upgradeable/utils/introspection/ERC165Upgradeable.sol",
       "solcConfig": {
@@ -438,82 +552,8 @@
         "ERC165Upgradeable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/access/IAccessControl.sol": {
-      "lastModificationDate": 1764128865407,
-      "contentHash": "def1e8f7b6cac577cf2600655bf3bdf8",
-      "sourceName": "@openzeppelin/contracts/access/IAccessControl.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        ">=0.8.4"
-      ],
-      "artifacts": [
-        "IAccessControl"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/introspection/IERC165.sol": {
-      "lastModificationDate": 1764128865409,
-      "contentHash": "7074c93b1ea0a122063f26ddd1db1032",
-      "sourceName": "@openzeppelin/contracts/utils/introspection/IERC165.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        ">=0.4.16"
-      ],
-      "artifacts": [
-        "IERC165"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/draft-IERC1822.sol": {
-      "lastModificationDate": 1764128865242,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/draft-IERC1822.sol": {
+      "lastModificationDate": 1793651280613,
       "contentHash": "9b2cafd2153b51bcfd7f4cb4cfc975aa",
       "sourceName": "@openzeppelin/contracts/interfaces/draft-IERC1822.sol",
       "solcConfig": {
@@ -549,8 +589,8 @@
         "IERC1822Proxiable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol": {
-      "lastModificationDate": 1764128865270,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol": {
+      "lastModificationDate": 1793651280506,
       "contentHash": "2741625b983eb412cfdd8aa55a7671c1",
       "sourceName": "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol",
       "solcConfig": {
@@ -591,8 +631,8 @@
         "ERC1967Utils"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC1967.sol": {
-      "lastModificationDate": 1764128865410,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC1967.sol": {
+      "lastModificationDate": 1793651280616,
       "contentHash": "3c9577899f440b0c66e880c96e9250bb",
       "sourceName": "@openzeppelin/contracts/interfaces/IERC1967.sol",
       "solcConfig": {
@@ -628,8 +668,45 @@
         "IERC1967"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Address.sol": {
-      "lastModificationDate": 1764128865166,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/StorageSlot.sol": {
+      "lastModificationDate": 1793651280523,
+      "contentHash": "e656d64c4ce918f3d13030b91c935134",
+      "sourceName": "@openzeppelin/contracts/utils/StorageSlot.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "StorageSlot"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Address.sol": {
+      "lastModificationDate": 1793651280522,
       "contentHash": "2a06d82f31f75087bf90231599da4f1c",
       "sourceName": "@openzeppelin/contracts/utils/Address.sol",
       "solcConfig": {
@@ -667,8 +744,8 @@
         "Address"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/proxy/beacon/IBeacon.sol": {
-      "lastModificationDate": 1764128865408,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/proxy/beacon/IBeacon.sol": {
+      "lastModificationDate": 1793651280507,
       "contentHash": "ee2e46607ed2be58bd554306d068acba",
       "sourceName": "@openzeppelin/contracts/proxy/beacon/IBeacon.sol",
       "solcConfig": {
@@ -704,45 +781,8 @@
         "IBeacon"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/StorageSlot.sol": {
-      "lastModificationDate": 1764128865549,
-      "contentHash": "e656d64c4ce918f3d13030b91c935134",
-      "sourceName": "@openzeppelin/contracts/utils/StorageSlot.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        "^0.8.20"
-      ],
-      "artifacts": [
-        "StorageSlot"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Errors.sol": {
-      "lastModificationDate": 1764128865279,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Errors.sol": {
+      "lastModificationDate": 1793651280513,
       "contentHash": "6b5eac2b85500c3012977849cfd633d8",
       "sourceName": "@openzeppelin/contracts/utils/Errors.sol",
       "solcConfig": {
@@ -778,10 +818,10 @@
         "Errors"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/introspection/ERC165.sol": {
-      "lastModificationDate": 1764128865250,
-      "contentHash": "0906d06dca25210d4696dcef6dad2909",
-      "sourceName": "@openzeppelin/contracts/utils/introspection/ERC165.sol",
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC1363.sol": {
+      "lastModificationDate": 1793651280617,
+      "contentHash": "a7fd0f05e36b0d0a21c75340c9c639ec",
+      "sourceName": "@openzeppelin/contracts/interfaces/IERC1363.sol",
       "solcConfig": {
         "version": "0.8.28",
         "settings": {
@@ -808,19 +848,20 @@
         }
       },
       "imports": [
+        "./IERC20.sol",
         "./IERC165.sol"
       ],
       "versionPragmas": [
-        "^0.8.20"
+        ">=0.6.2"
       ],
       "artifacts": [
-        "ERC165"
+        "IERC1363"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/access/AccessControl.sol": {
-      "lastModificationDate": 1764128865153,
-      "contentHash": "d0e2c05f09a3aea7cd299bbd4a435ee2",
-      "sourceName": "@openzeppelin/contracts/access/AccessControl.sol",
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC20.sol": {
+      "lastModificationDate": 1793651280612,
+      "contentHash": "68620db2da7583d9a4919096ac77f577",
+      "sourceName": "@openzeppelin/contracts/interfaces/IERC20.sol",
       "solcConfig": {
         "version": "0.8.28",
         "settings": {
@@ -847,58 +888,17 @@
         }
       },
       "imports": [
-        "./IAccessControl.sol",
-        "../utils/Context.sol",
-        "../utils/introspection/ERC165.sol"
+        "../token/ERC20/IERC20.sol"
       ],
       "versionPragmas": [
-        "^0.8.20"
+        ">=0.4.16"
       ],
-      "artifacts": [
-        "AccessControl"
-      ]
+      "artifacts": []
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Context.sol": {
-      "lastModificationDate": 1764128865176,
-      "contentHash": "67bfbc07588eb8683b3fd8f6f909563e",
-      "sourceName": "@openzeppelin/contracts/utils/Context.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [],
-      "versionPragmas": [
-        "^0.8.20"
-      ],
-      "artifacts": [
-        "Context"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Pausable.sol": {
-      "lastModificationDate": 1764128865473,
-      "contentHash": "0d47b53e10b1985efbb396f937626279",
-      "sourceName": "@openzeppelin/contracts/utils/Pausable.sol",
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC165.sol": {
+      "lastModificationDate": 1793651280620,
+      "contentHash": "947853028399b7de34bcc3704ee06e99",
+      "sourceName": "@openzeppelin/contracts/interfaces/IERC165.sol",
       "solcConfig": {
         "version": "0.8.28",
         "settings": {
@@ -925,19 +925,17 @@
         }
       },
       "imports": [
-        "../utils/Context.sol"
+        "../utils/introspection/IERC165.sol"
       ],
       "versionPragmas": [
-        "^0.8.20"
+        ">=0.4.16"
       ],
-      "artifacts": [
-        "Pausable"
-      ]
+      "artifacts": []
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol": {
-      "lastModificationDate": 1764128865272,
-      "contentHash": "a3ce035689a60e32921347c16a3fb786",
-      "sourceName": "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol",
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol": {
+      "lastModificationDate": 1793651280492,
+      "contentHash": "513778b30d2750f5d2b9b19bbcf748a5",
+      "sourceName": "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol",
       "solcConfig": {
         "version": "0.8.28",
         "settings": {
@@ -964,18 +962,17 @@
         }
       },
       "imports": [
-        "../ERC20.sol",
-        "../../../utils/Pausable.sol"
+        "../IERC20.sol"
       ],
       "versionPragmas": [
-        "^0.8.20"
+        ">=0.6.2"
       ],
       "artifacts": [
-        "ERC20Pausable"
+        "IERC20Metadata"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/ERC20.sol": {
-      "lastModificationDate": 1764128865271,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/ERC20.sol": {
+      "lastModificationDate": 1793651280489,
       "contentHash": "59dfce11284f2636db261df9b6a18f81",
       "sourceName": "@openzeppelin/contracts/token/ERC20/ERC20.sol",
       "solcConfig": {
@@ -1016,8 +1013,45 @@
         "ERC20"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/draft-IERC6093.sol": {
-      "lastModificationDate": 1764128865242,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Context.sol": {
+      "lastModificationDate": 1793651280530,
+      "contentHash": "67bfbc07588eb8683b3fd8f6f909563e",
+      "sourceName": "@openzeppelin/contracts/utils/Context.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "Context"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/draft-IERC6093.sol": {
+      "lastModificationDate": 1793651280615,
       "contentHash": "5041977bbe908de2e6ed0270447f79ad",
       "sourceName": "@openzeppelin/contracts/interfaces/draft-IERC6093.sol",
       "solcConfig": {
@@ -1055,10 +1089,10 @@
         "IERC721Errors"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol": {
-      "lastModificationDate": 1764128865412,
-      "contentHash": "513778b30d2750f5d2b9b19bbcf748a5",
-      "sourceName": "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol": {
+      "lastModificationDate": 1793651280492,
+      "contentHash": "a3ce035689a60e32921347c16a3fb786",
+      "sourceName": "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol",
       "solcConfig": {
         "version": "0.8.28",
         "settings": {
@@ -1085,17 +1119,57 @@
         }
       },
       "imports": [
-        "../IERC20.sol"
+        "../ERC20.sol",
+        "../../../utils/Pausable.sol"
       ],
       "versionPragmas": [
-        ">=0.6.2"
+        "^0.8.20"
       ],
       "artifacts": [
-        "IERC20Metadata"
+        "ERC20Pausable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol": {
-      "lastModificationDate": 1764128865271,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/Pausable.sol": {
+      "lastModificationDate": 1793651280514,
+      "contentHash": "0d47b53e10b1985efbb396f937626279",
+      "sourceName": "@openzeppelin/contracts/utils/Pausable.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "../utils/Context.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "Pausable"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol": {
+      "lastModificationDate": 1793651280491,
       "contentHash": "273d8d24b06f67207dd5f35c3a0c1086",
       "sourceName": "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol",
       "solcConfig": {
@@ -1134,9 +1208,9 @@
         "ERC20Burnable"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/core/ThreatToken.sol": {
-      "lastModificationDate": 1783977676041,
-      "contentHash": "a507bf14fe7b8bbecdca77b3316f441f",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/core/ThreatToken.sol": {
+      "lastModificationDate": 1793701930647,
+      "contentHash": "8642743d6741db17b95315675eda9c14",
       "sourceName": "contracts/core/ThreatToken.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -1178,8 +1252,49 @@
         "ThreatToken"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/ReentrancyGuard.sol": {
-      "lastModificationDate": 1764128865536,
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/access/AccessControl.sol": {
+      "lastModificationDate": 1793651280511,
+      "contentHash": "d0e2c05f09a3aea7cd299bbd4a435ee2",
+      "sourceName": "@openzeppelin/contracts/access/AccessControl.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./IAccessControl.sol",
+        "../utils/Context.sol",
+        "../utils/introspection/ERC165.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "AccessControl"
+      ]
+    },
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/ReentrancyGuard.sol": {
+      "lastModificationDate": 1793651280513,
       "contentHash": "190613e556d509d9e9a0ea43dc5d891d",
       "sourceName": "@openzeppelin/contracts/utils/ReentrancyGuard.sol",
       "solcConfig": {
@@ -1215,10 +1330,10 @@
         "ReentrancyGuard"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/core/Governance.sol": {
-      "lastModificationDate": 1777263924172,
-      "contentHash": "4af863970e68226bdc30b6c9dc05d672",
-      "sourceName": "contracts/core/Governance.sol",
+    "/Volumes/PD/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/utils/introspection/ERC165.sol": {
+      "lastModificationDate": 1793651280523,
+      "contentHash": "0906d06dca25210d4696dcef6dad2909",
+      "sourceName": "@openzeppelin/contracts/utils/introspection/ERC165.sol",
       "solcConfig": {
         "version": "0.8.28",
         "settings": {
@@ -1245,20 +1360,18 @@
         }
       },
       "imports": [
-        "@openzeppelin/contracts/access/AccessControl.sol",
-        "@openzeppelin/contracts/utils/ReentrancyGuard.sol",
-        "./ThreatToken.sol"
+        "./IERC165.sol"
       ],
       "versionPragmas": [
-        "^0.8.19"
+        "^0.8.20"
       ],
       "artifacts": [
-        "Governance"
+        "ERC165"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/core/BountyManager.sol": {
-      "lastModificationDate": 1782932784310,
-      "contentHash": "ce4c928b6f4c2ebd4fa5fd5c05dc98c5",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/core/BountyManager.sol": {
+      "lastModificationDate": 1793690133590,
+      "contentHash": "56fa693017f25d1aa13c429e78b8961c",
       "sourceName": "contracts/core/BountyManager.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -1299,10 +1412,10 @@
         "BountyManager"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/Interfaces/IThreatToken.sol": {
-      "lastModificationDate": 1763565621384,
-      "contentHash": "5403ff0b7594fbed23830057e3451a94",
-      "sourceName": "contracts/Interfaces/IThreatToken.sol",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/core/Governance.sol": {
+      "lastModificationDate": 1793687569843,
+      "contentHash": "e92a1692732aa6ed015708a14cf2ce9d",
+      "sourceName": "contracts/core/Governance.sol",
       "solcConfig": {
         "version": "0.8.28",
         "settings": {
@@ -1329,18 +1442,20 @@
         }
       },
       "imports": [
-        "@openzeppelin/contracts/token/ERC20/IERC20.sol"
+        "@openzeppelin/contracts/access/AccessControl.sol",
+        "@openzeppelin/contracts/utils/ReentrancyGuard.sol",
+        "./ThreatToken.sol"
       ],
       "versionPragmas": [
         "^0.8.19"
       ],
       "artifacts": [
-        "IThreatToken"
+        "Governance"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/core/ReputationSystem.sol": {
-      "lastModificationDate": 1777263924171,
-      "contentHash": "366b0a54b74ffe0d1c735d3f9468f95c",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/core/ReputationSystem.sol": {
+      "lastModificationDate": 1793690133591,
+      "contentHash": "48171719910b83a9f1a303ffc80a4295",
       "sourceName": "contracts/core/ReputationSystem.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -1378,9 +1493,9 @@
         "ReputationSystem"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/mocks/MockToken.sol": {
-      "lastModificationDate": 1764168021100,
-      "contentHash": "1866759e53e68391b43b42cb20e11760",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/mocks/MockToken.sol": {
+      "lastModificationDate": 1793687569846,
+      "contentHash": "a3d73a78354aa6b302d9adde33bf807e",
       "sourceName": "contracts/mocks/MockToken.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -1417,8 +1532,47 @@
         "MockToken"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/Lock.sol": {
-      "lastModificationDate": 1758016154876,
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/Interfaces/IThreatToken.sol": {
+      "lastModificationDate": 1793687569843,
+      "contentHash": "3208ed78cc702ef4fc9d1837a187793e",
+      "sourceName": "contracts/Interfaces/IThreatToken.sol",
+      "solcConfig": {
+        "version": "0.8.28",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "viaIR": true,
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "@openzeppelin/contracts/token/ERC20/IERC20.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.19"
+      ],
+      "artifacts": [
+        "IThreatToken"
+      ]
+    },
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/Lock.sol": {
+      "lastModificationDate": 1793687569843,
       "contentHash": "7eee587c347fe6b1de50c96688cb9477",
       "sourceName": "contracts/Lock.sol",
       "solcConfig": {
@@ -1454,9 +1608,9 @@
         "Lock"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/libraries/ReputationLib.sol": {
-      "lastModificationDate": 1763565621386,
-      "contentHash": "085e763f70e7c1fa5540a54a6173124e",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/libraries/ReputationLib.sol": {
+      "lastModificationDate": 1793690133597,
+      "contentHash": "539d60773396afbb95d0ba81b24277ba",
       "sourceName": "contracts/libraries/ReputationLib.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -1491,9 +1645,9 @@
         "ReputationLib"
       ]
     },
-    "/Users/arjun/Developer/Verdyx/blockchain/contracts/libraries/ValidationLib.sol": {
-      "lastModificationDate": 1777263924168,
-      "contentHash": "82d01461f955786073f81069d77acf16",
+    "/private/tmp/claude-501/-Volumes-PD-Developer-Verdyx/34bd1bcb-7821-450e-924a-e586a6c65310/scratchpad/wt/blockchain/contracts/libraries/ValidationLib.sol": {
+      "lastModificationDate": 1793687569846,
+      "contentHash": "7294f0ff1ca56325f3134d494fe9849f",
       "sourceName": "contracts/libraries/ValidationLib.sol",
       "solcConfig": {
         "version": "0.8.28",
@@ -1526,160 +1680,6 @@
       ],
       "artifacts": [
         "ValidationLib"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC165.sol": {
-      "lastModificationDate": 1764128865409,
-      "contentHash": "947853028399b7de34bcc3704ee06e99",
-      "sourceName": "@openzeppelin/contracts/interfaces/IERC165.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [
-        "../utils/introspection/IERC165.sol"
-      ],
-      "versionPragmas": [
-        ">=0.4.16"
-      ],
-      "artifacts": []
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC1363.sol": {
-      "lastModificationDate": 1764128865409,
-      "contentHash": "a7fd0f05e36b0d0a21c75340c9c639ec",
-      "sourceName": "@openzeppelin/contracts/interfaces/IERC1363.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [
-        "./IERC20.sol",
-        "./IERC165.sol"
-      ],
-      "versionPragmas": [
-        ">=0.6.2"
-      ],
-      "artifacts": [
-        "IERC1363"
-      ]
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/interfaces/IERC20.sol": {
-      "lastModificationDate": 1764128865410,
-      "contentHash": "68620db2da7583d9a4919096ac77f577",
-      "sourceName": "@openzeppelin/contracts/interfaces/IERC20.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [
-        "../token/ERC20/IERC20.sol"
-      ],
-      "versionPragmas": [
-        ">=0.4.16"
-      ],
-      "artifacts": []
-    },
-    "/Users/arjun/Developer/Verdyx/blockchain/node_modules/@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol": {
-      "lastModificationDate": 1764128865539,
-      "contentHash": "1fb9edee1d763745a62d0b1954998792",
-      "sourceName": "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol",
-      "solcConfig": {
-        "version": "0.8.28",
-        "settings": {
-          "optimizer": {
-            "enabled": true,
-            "runs": 200
-          },
-          "viaIR": true,
-          "evmVersion": "paris",
-          "outputSelection": {
-            "*": {
-              "*": [
-                "abi",
-                "evm.bytecode",
-                "evm.deployedBytecode",
-                "evm.methodIdentifiers",
-                "metadata"
-              ],
-              "": [
-                "ast"
-              ]
-            }
-          }
-        }
-      },
-      "imports": [
-        "../IERC20.sol",
-        "../../../interfaces/IERC1363.sol"
-      ],
-      "versionPragmas": [
-        "^0.8.20"
-      ],
-      "artifacts": [
-        "SafeERC20"
       ]
     }
   }
