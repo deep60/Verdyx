@@ -107,6 +107,9 @@ pub mod yara_stub {
         pub fn rule_count(&self) -> usize {
             0
         }
+        pub fn rules_loaded(&self) -> usize {
+            0
+        }
         pub fn reload_rules(&mut self) -> Result<()> {
             Ok(())
         }
@@ -1191,7 +1194,11 @@ impl AnalysisEngine {
                 (
                     "online",
                     "libyara",
-                    format!("Operational with {} compiled rule set(s)", rule_count),
+                    format!(
+                        "Operational with {} rules from {} file(s)",
+                        self.yara_engine.rules_loaded(),
+                        rule_count
+                    ),
                     None,
                 )
             } else {
