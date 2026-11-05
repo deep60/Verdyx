@@ -38,6 +38,14 @@ export function FileSubmissionForm() {
       } catch {
         throw new Error("Verdyx is temporarily unavailable, so this was not analyzed. Please try again.");
       }
+      if (response.status === 429) {
+        const body = await response.json().catch(() => null);
+        throw new Error(
+          typeof body?.message === "string"
+            ? body.message
+            : "You've reached the scan limit for now. Please wait and try again."
+        );
+      }
       if (!response.ok) {
         throw new Error(
           response.status >= 500

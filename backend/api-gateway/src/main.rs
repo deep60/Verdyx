@@ -52,6 +52,9 @@ pub struct AppState {
     pub prom_metrics: shared::MetricsRegistry,
     /// Shared so `/api` and `/api/v1` can't be used to double the limit.
     pub auth_rate_limit: Arc<middleware::rate_limiter::AuthRateLimit>,
+    /// Per-person limits on starting scans and on live site checks.
+    pub scan_rate_limit: Arc<middleware::rate_limiter::UsageLimit>,
+    pub site_check_rate_limit: Arc<middleware::rate_limiter::UsageLimit>,
 }
 
 // Session information for active users
@@ -257,14 +260,24 @@ async fn main() -> Result<()> {
             .context("Failed to initialize proxy service")?,
     );
 
-    let auth_rate_limit = Arc::new(middleware::rate_limiter::AuthRateLimit::from_env());
+    use middleware::rate_limiter::{AuthRateLimit, ClientIp, UsageLimit};
+    let client_ip = ClientIp::from_env();
+    let auth_rate_limit = Arc::new(AuthRateLimit::from_env(client_ip.clone()));
+    let scan_rate_limit = Arc::new(UsageLimit::scans_from_env(client_ip.clone()));
+    let site_check_rate_limit = Arc::new(UsageLimit::site_checks_from_env(client_ip));
     {
-        let auth_rate_limit = auth_rate_limit.clone();
+        let (auth, scans, site_checks) = (
+            auth_rate_limit.clone(),
+            scan_rate_limit.clone(),
+            site_check_rate_limit.clone(),
+        );
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
             loop {
                 interval.tick().await;
-                auth_rate_limit.cleanup().await;
+                auth.cleanup().await;
+                scans.cleanup().await;
+                site_checks.cleanup().await;
             }
         });
     }
@@ -272,6 +285,8 @@ async fn main() -> Result<()> {
     // Create application state
     let state = AppState {
         auth_rate_limit,
+        scan_rate_limit,
+        site_check_rate_limit,
         db: Arc::new(db),
         redis: Arc::new(redis),
         blockchain: Arc::new(blockchain),
