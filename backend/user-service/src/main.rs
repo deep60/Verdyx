@@ -72,6 +72,27 @@ async fn main() -> Result<()> {
     let config = Config::from_env()?;
     info!("Configuration loaded successfully");
 
+    // Say loudly at boot if password-reset email can't work. Otherwise the only
+    // trace is one log line per attempt, and users are silently locked out.
+    let frontend_url = std::env::var("FRONTEND_URL").ok();
+    let email_problems = services::mailer::setup_problems(&config.email, frontend_url.as_deref());
+    if email_problems.is_empty() {
+        info!(
+            "Password reset email enabled via {}:{} from {}",
+            config.email.smtp_host, config.email.smtp_port, config.email.from_address
+        );
+    } else if std::env::var("ENVIRONMENT").as_deref() == Ok("development") {
+        info!(
+            "Password reset email not configured ({}); reset links will be logged instead",
+            email_problems.join("; ")
+        );
+    } else {
+        tracing::error!(
+            "Password reset email is NOT working, so users who forget their password cannot recover their account: {}",
+            email_problems.join("; ")
+        );
+    }
+
     // Initialize database connection pool
     let db_pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(config.database.max_connections)
