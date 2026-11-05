@@ -312,6 +312,14 @@ impl YaraEngine {
             "matches".to_string(),
             serde_json::to_value(&matches).unwrap_or_default(),
         );
+        if verdict == ThreatVerdict::Malicious {
+            // A high-severity rule fired: other engines finding nothing can't
+            // clear the file.
+            metadata.insert(
+                crate::models::analysis_result::STRONG_SIGNAL_KEY.to_string(),
+                serde_json::json!(true),
+            );
+        }
 
         DetectionResult {
             detection_id: Uuid::new_v4(),

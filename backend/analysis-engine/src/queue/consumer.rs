@@ -7,6 +7,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::analyzers::{AnalysisEngine, AnalysisOptions, FileAnalysisRequest};
+use crate::models::analysis_result::without_nul;
 use crate::scanners::url_scanner::UrlScanner;
 use crate::scanners::url_verdicts::{url_detections, URL_CHECKS};
 use crate::scanners::Scanner;
@@ -542,6 +543,41 @@ fn calculate_verdict(
     (is_malicious, confidence)
 }
 
+/// Inserts one engine's row into `analysis_results`.
+async fn insert_detection_row(
+    db_pool: &PgPool,
+    submission_id: Uuid,
+    detection: &crate::models::analysis_result::DetectionResult,
+    metadata: serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    let conf_f64 = detection.confidence as f64;
+    sqlx::query(
+        r#"
+        INSERT INTO analysis_results (
+            id, submission_id, engine_name, engine_version,
+            verdict, confidence, confidence_score, severity, categories,
+            metadata, analysis_status, detected_at, processing_time_ms
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11, $12)
+        "#,
+    )
+    .bind(detection.detection_id)
+    .bind(submission_id)
+    .bind(detection.engine_name.replace('\0', ""))
+    .bind(detection.engine_version.replace('\0', ""))
+    .bind(format!("{:?}", detection.verdict).to_lowercase())
+    .bind(conf_f64)
+    .bind(conf_f64)
+    .bind(format!("{:?}", detection.severity))
+    .bind(serde_json::to_value(&detection.categories).unwrap_or_default())
+    .bind(metadata)
+    .bind(detection.detected_at)
+    .bind(detection.processing_time_ms as i64)
+    .execute(db_pool)
+    .await
+    .map(|_| ())
+}
+
 /// Store analysis results in database
 async fn store_analysis_results(
     db_pool: &PgPool,
@@ -550,7 +586,7 @@ async fn store_analysis_results(
     confidence_score: f64,
     analysis_result: &crate::models::analysis_result::AnalysisResult,
 ) -> Result<()> {
-    let consensus_meta = serde_json::json!({
+    let consensus_meta = without_nul(serde_json::json!({
         "consensus_verdict": format!("{:?}", analysis_result.consensus_verdict).to_lowercase(),
         "consensus_explanation": analysis_result.consensus_explanation,
         "agreement_score": analysis_result.agreement_score,
@@ -558,7 +594,7 @@ async fn store_analysis_results(
         "unavailable_engines": analysis_result.unavailable_engines,
         "vote_distribution": analysis_result.vote_distribution,
         "verdict_history": analysis_result.verdict_history,
-    });
+    }));
 
     // Update submission with final results and explainability metadata
     sqlx::query(
@@ -587,44 +623,45 @@ async fn store_analysis_results(
         .execute(db_pool)
         .await;
 
-    // Store individual detection results in analysis_results table
+    // Store individual detection results in analysis_results table. Every
+    // engine counted in the verdict must get a row, or the report shows a
+    // verdict built from engines it doesn't list.
     for detection in analysis_result
         .detections
         .iter()
         .filter(|d| !d.is_aggregate())
     {
-        let detection_meta = detection_metadata(detection);
-        let verdict_lower = format!("{:?}", detection.verdict).to_lowercase();
-        let conf_f64 = detection.confidence as f64;
-        if let Err(e) = sqlx::query(
-            r#"
-            INSERT INTO analysis_results (
-                id, submission_id, engine_name, engine_version,
-                verdict, confidence, confidence_score, severity, categories,
-                metadata, analysis_status, detected_at, processing_time_ms
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11, $12)
-            "#,
-        )
-        .bind(detection.detection_id)
-        .bind(submission_id)
-        .bind(&detection.engine_name)
-        .bind(&detection.engine_version)
-        .bind(&verdict_lower)
-        .bind(conf_f64)
-        .bind(conf_f64)
-        .bind(format!("{:?}", detection.severity))
-        .bind(serde_json::to_value(&detection.categories).unwrap_or_default())
-        .bind(detection_meta)
-        .bind(detection.detected_at)
-        .bind(detection.processing_time_ms as i64)
-        .execute(db_pool)
-        .await
+        let detection_meta = without_nul(detection_metadata(detection));
+        if let Err(e) =
+            insert_detection_row(db_pool, submission_id, detection, detection_meta).await
         {
-            warn!(
-                "Failed to store detection result for submission {}: {}",
-                submission_id, e
+            error!(
+                "Failed to store {} result for submission {}: {}; storing it without evidence",
+                detection.engine_name, submission_id, e
             );
+            // Keep the engine and its vote visible even if its evidence can't
+            // be stored.
+            let mut fallback = detection_metadata(detection)
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .filter(|(k, _)| matches!(k.as_str(), "engine_type" | "vote" | "reason"))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect::<serde_json::Map<_, _>>()
+                })
+                .unwrap_or_default();
+            fallback.insert(
+                "evidence_unavailable".to_string(),
+                serde_json::json!("The engine's details could not be saved."),
+            );
+            let fallback = without_nul(serde_json::Value::Object(fallback));
+            if let Err(e) = insert_detection_row(db_pool, submission_id, detection, fallback).await
+            {
+                error!(
+                    "Failed to store {} result for submission {} even without evidence: {}",
+                    detection.engine_name, submission_id, e
+                );
+            }
         }
     }
 

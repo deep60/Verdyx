@@ -248,6 +248,14 @@ pub const AGGREGATE_KEY: &str = "aggregate";
 /// verdict: engines that found nothing can't outvote a confirmed sample.
 pub const AUTHORITATIVE_KEY: &str = "authoritative";
 
+/// Metadata key marking a malicious vote backed by a specific rule match
+/// (a YARA rule, a signature, or heuristic patterns scoring high). Engines
+/// that found nothing are absence of evidence, so they can't turn it into a
+/// clean verdict: the result is at least Suspicious. Unlike
+/// [`AUTHORITATIVE_KEY`], it doesn't force Malicious, because a rule can
+/// misfire on a harmless file.
+pub const STRONG_SIGNAL_KEY: &str = "strong_signal";
+
 fn meta_flag(detection: &DetectionResult, key: &str) -> bool {
     detection.metadata.get(key).and_then(|v| v.as_bool()) == Some(true)
 }
@@ -405,6 +413,7 @@ impl AnalysisResult {
         let mut unavailable = Vec::new();
         let mut flagged_by = Vec::new();
         let mut confirmed_by = Vec::new();
+        let mut strong_by = Vec::new();
 
         for detection in self.detections.iter().filter(|d| !d.is_aggregate()) {
             if let Some((kind, reason)) = detection.non_vote() {
@@ -426,6 +435,8 @@ impl AnalysisResult {
                     flagged_by.push(detection.engine_name.clone());
                     if meta_flag(detection, AUTHORITATIVE_KEY) {
                         confirmed_by.push(detection.engine_name.clone());
+                    } else if meta_flag(detection, STRONG_SIGNAL_KEY) {
+                        strong_by.push(detection.engine_name.clone());
                     }
                 }
                 ThreatVerdict::Suspicious => {
@@ -490,9 +501,12 @@ impl AnalysisResult {
 
             let malicious_majority =
                 malicious_count > benign_count && malicious_count > suspicious_count;
+            let clean_majority = benign_count > malicious_count && benign_count > suspicious_count;
+            // A strong rule match is what stops clean votes winning outright.
+            let outvoted_strong = clean_majority && !strong_by.is_empty();
             self.consensus_verdict = if !confirmed_by.is_empty() || malicious_majority {
                 ThreatVerdict::Malicious
-            } else if benign_count > malicious_count && benign_count > suspicious_count {
+            } else if clean_majority && !outvoted_strong {
                 ThreatVerdict::Benign
             } else if malicious_count + suspicious_count > 0 {
                 ThreatVerdict::Suspicious
@@ -512,7 +526,12 @@ impl AnalysisResult {
                     flagged_by.join(", ")
                 )
             };
-            self.consensus_explanation = if confirmed_by.is_empty() {
+            self.consensus_explanation = if outvoted_strong {
+                format!(
+                    "Suspicious: {} matched specific malicious patterns. Engines that found nothing can't clear that, so the file needs a closer look. {flagged}{not_voting_note}",
+                    strong_by.join(", ")
+                )
+            } else if confirmed_by.is_empty() {
                 format!("{flagged}{not_voting_note}")
             } else {
                 format!(
@@ -601,6 +620,43 @@ impl Default for AnalysisResult {
     }
 }
 
+/// Removes NUL characters from every string and key in `value`.
+///
+/// Postgres refuses `\u0000` in jsonb, and engines that pull strings out of
+/// binaries (paths padded with NULs, for example) produce it. Without this,
+/// the row is rejected and the engine silently disappears from the report.
+pub fn without_nul(value: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::String(s) if s.contains('\0') => Value::String(s.replace('\0', "")),
+        Value::Array(items) => Value::Array(items.into_iter().map(without_nul).collect()),
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (k.replace('\0', ""), without_nul(v)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod nul_tests {
+    use super::without_nul;
+
+    #[test]
+    fn strips_nul_from_nested_strings_and_keys() {
+        let dirty = serde_json::json!({
+            "file_paths": ["/usr/lib/dyld\u{0}\u{0}\u{0}"],
+            "k\u{0}ey": {"inner": "a\u{0}b", "n": 3}
+        });
+        let clean = without_nul(dirty);
+        assert!(!clean.to_string().contains("\\u0000"));
+        assert_eq!(clean["file_paths"][0], "/usr/lib/dyld");
+        assert_eq!(clean["key"]["inner"], "ab");
+        assert_eq!(clean["key"]["n"], 3);
+    }
+}
+
 #[cfg(test)]
 mod consensus_tests {
     use super::*;
@@ -666,6 +722,37 @@ mod consensus_tests {
         assert!(r
             .consensus_explanation
             .contains("1 of 3 voting engines flagged it (Static)"));
+    }
+
+    #[test]
+    fn a_strong_rule_match_is_not_outvoted_into_clean() {
+        // The live case: heuristics found a miner and a ransom note, three
+        // engines found nothing, and the file was reported clean.
+        let r = result_of(vec![
+            det(
+                "Verdyx Heuristic Engine",
+                ThreatVerdict::Malicious,
+                &[(STRONG_SIGNAL_KEY, true.into())],
+            ),
+            det("YARA", ThreatVerdict::Benign, &[]),
+            det("Signature", ThreatVerdict::Benign, &[]),
+            det("Static", ThreatVerdict::Benign, &[]),
+        ]);
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Suspicious);
+        assert!(r
+            .consensus_explanation
+            .starts_with("Suspicious: Verdyx Heuristic Engine matched"));
+    }
+
+    #[test]
+    fn strong_matches_that_win_the_vote_stay_malicious() {
+        let strong = || [(STRONG_SIGNAL_KEY, serde_json::Value::from(true))];
+        let r = result_of(vec![
+            det("YARA", ThreatVerdict::Malicious, &strong()),
+            det("Signature", ThreatVerdict::Malicious, &strong()),
+            det("Static", ThreatVerdict::Benign, &[]),
+        ]);
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Malicious);
     }
 
     #[test]
