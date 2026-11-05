@@ -11,7 +11,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::models::analysis_result::{
-    ConfidenceLevel, DetectionResult, EngineType, SeverityLevel, ThreatCategory, ThreatVerdict,
+    DetectionResult, EngineType, SeverityLevel, ThreatCategory, ThreatVerdict,
 };
 
 /// File type enumeration based on magic bytes and headers
@@ -169,31 +169,24 @@ lazy_static! {
     static ref ETHEREUM_REGEX: Regex = Regex::new(r"\b0x[a-fA-F0-9]{40}\b").unwrap();
     static ref FILE_PATH_REGEX: Regex = Regex::new(r#"[A-Za-z]:\\[^<>:"|?*\r\n]+|/(?:usr|home|etc|var|tmp)/[^\s<>:"|?*\r\n]+"#).unwrap();
 
-    // Extended suspicious string patterns with severity ratings
+    // Strings worth recording. Only the categories in `string_points` count
+    // toward the verdict; the rest are evidence shown in the report.
+    //
+    // Tuned on the detection benchmark (benchmark/results): ordinary words such
+    // as "password", "system", "decode", "payload" and "c2" fired on 15-28% of
+    // clean files and were dropped. No pattern uses an unbounded `.*`, which
+    // matched across kilobytes of unrelated .NET metadata.
     static ref MALWARE_PATTERNS: Vec<(Regex, StringCategory, u8)> = vec![
-        // Critical patterns (severity 9-10)
-        (Regex::new(r"(?i)(CreateRemoteThread|VirtualAllocEx|WriteProcessMemory)").unwrap(), StringCategory::ProcessInjection, 10),
-        (Regex::new(r"(?i)(SetWindowsHookEx|WH_KEYBOARD|GetAsyncKeyState)").unwrap(), StringCategory::Keylogging, 9),
-        (Regex::new(r"(?i)(mimikatz|procdump|lsass\.exe)").unwrap(), StringCategory::CredentialTheft, 10),
-        (Regex::new(r"(?i)(\.encrypted|\.locked|\.crypto|HELP_instructions|DECRYPT_INSTRUCTIONS)").unwrap(), StringCategory::Ransomware, 10),
-
-        // High severity patterns (severity 7-8)
-        (Regex::new(r"(?i)(backdoor|rootkit|trojan|virus|worm)").unwrap(), StringCategory::Malware, 8),
-        (Regex::new(r"(?i)(IsDebuggerPresent|CheckRemoteDebuggerPresent|OutputDebugString)").unwrap(), StringCategory::AntiAnalysis, 8),
-        (Regex::new(r"(?i)(anti.*vm|sandbox.*detect|vmware|virtualbox|qemu)").unwrap(), StringCategory::AntiAnalysis, 7),
-        (Regex::new(r"(?i)(shellcode|payload|exploit|vulnerability|0day)").unwrap(), StringCategory::Vulnerability, 8),
-        (Regex::new(r"(?i)(c2|command.*control|exfiltrat|beacon)").unwrap(), StringCategory::C2Communication, 8),
-        (Regex::new(r"(?i)(process.*injection|dll.*injection|hollowing|reflective)").unwrap(), StringCategory::ProcessInjection, 8),
-
-        // Medium severity patterns (severity 5-6)
-        (Regex::new(r"(?i)(crypto.*mining|bitcoin|monero|wallet|mining.*pool)").unwrap(), StringCategory::CryptoMining, 6),
-        (Regex::new(r"(?i)(persistence|lateral|privilege.*escalation)").unwrap(), StringCategory::Malware, 6),
-        (Regex::new(r"(?i)(eval|exec|system|popen)").unwrap(), StringCategory::SystemCall, 5),
-        (Regex::new(r"(?i)(obfuscate|deobfuscate|unpack|decode)").unwrap(), StringCategory::Obfuscation, 5),
-
-        // Lower severity patterns (severity 3-4)
-        (Regex::new(r"(?i)(password|passwd|credential|login|auth|secret)").unwrap(), StringCategory::CredentialTheft, 3),
-        (Regex::new(r"(?i)(GetProcAddress|LoadLibrary|GetModuleHandle)").unwrap(), StringCategory::SystemCall, 4),
+        (Regex::new(r"\b(CreateRemoteThread|VirtualAllocEx|WriteProcessMemory|NtUnmapViewOfSection|ZwUnmapViewOfSection)\b").unwrap(), StringCategory::ProcessInjection, 10),
+        (Regex::new(r"\b(SetWindowsHookEx[AW]?|GetAsyncKeyState|WH_KEYBOARD_LL)\b").unwrap(), StringCategory::Keylogging, 9),
+        (Regex::new(r"(?i)\b(mimikatz|lsass\.exe)\b").unwrap(), StringCategory::CredentialTheft, 10),
+        // Lowercase file extensions only: ".Crypto" is the start of .NET's
+        // System.Security.Cryptography.
+        (Regex::new(r"\.(encrypted|locked|crypto|Encrypted|Locked)\b|DECRYPT_INSTRUCTIONS|HELP_instructions|YOUR_FILES_ARE_ENCRYPTED").unwrap(), StringCategory::Ransomware, 10),
+        (Regex::new(r"(?i)\b(backdoor|rootkit|keylogger)\b").unwrap(), StringCategory::Malware, 8),
+        (Regex::new(r"\b(IsDebuggerPresent|CheckRemoteDebuggerPresent)\b").unwrap(), StringCategory::AntiAnalysis, 8),
+        (Regex::new(r"(?i)\b(VBoxService|vmtoolsd|SbieDll\.dll|wine_get_unix_file_name)\b").unwrap(), StringCategory::AntiAnalysis, 7),
+        (Regex::new(r"(?i)\bshellcode\b").unwrap(), StringCategory::Vulnerability, 8),
     ];
 
     // Suspicious Windows API imports
@@ -246,6 +239,112 @@ lazy_static! {
     ];
 }
 
+const PACKED: &str = "packed";
+
+/// Evidence that counts toward the verdict. Each kind counts once, however
+/// many times it was seen, so one large file can't add up a verdict from
+/// repetition.
+#[derive(Default)]
+struct Evidence {
+    items: Vec<(&'static str, String, u8)>,
+}
+
+impl Evidence {
+    fn add(&mut self, key: &'static str, label: String, points: u8) {
+        if !self.items.iter().any(|(k, _, _)| *k == key) {
+            self.items.push((key, label, points));
+        }
+    }
+
+    fn points(&self) -> u32 {
+        self.items.iter().map(|(_, _, p)| *p as u32).sum()
+    }
+
+    fn labels(&self) -> Vec<String> {
+        self.items.iter().map(|(_, l, _)| l.clone()).collect()
+    }
+}
+
+/// Points at which a file is suspicious, and malicious. One strong indicator
+/// (packing, ransomware extensions, process injection) is suspicious; several
+/// together are malicious.
+const SUSPICIOUS_AT: u32 = 2;
+const MALICIOUS_AT: u32 = 5;
+
+fn verdict_for(points: u32) -> (ThreatVerdict, f32, SeverityLevel) {
+    if points >= MALICIOUS_AT {
+        (ThreatVerdict::Malicious, 0.8, SeverityLevel::High)
+    } else if points >= SUSPICIOUS_AT {
+        (ThreatVerdict::Suspicious, 0.6, SeverityLevel::Medium)
+    } else {
+        // Static analysis can't prove a file safe; it found nothing it trusts.
+        (ThreatVerdict::Benign, 0.6, SeverityLevel::Low)
+    }
+}
+
+/// Scored string evidence: (kind, label, points).
+fn string_points(sa: &StringAnalysis) -> Vec<(&'static str, String, u8)> {
+    let mut out = Vec::new();
+    let found = |cat: fn(&StringCategory) -> bool| -> Vec<String> {
+        let mut v: Vec<String> = sa
+            .suspicious_strings
+            .iter()
+            .filter(|s| cat(&s.category))
+            .map(|s| s.content.clone())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+
+    // Injection takes several calls together; one alone appears in ordinary
+    // programs (Git uses CreateRemoteThread).
+    let injection = found(|c| matches!(c, StringCategory::ProcessInjection));
+    if injection.len() >= 2 {
+        out.push((
+            "injection",
+            format!("Process injection APIs: {}", injection.join(", ")),
+            2,
+        ));
+    }
+    let ransom = found(|c| matches!(c, StringCategory::Ransomware));
+    if !ransom.is_empty() {
+        out.push((
+            "ransomware",
+            format!("Ransomware markers: {}", ransom.join(", ")),
+            2,
+        ));
+    }
+    let creds = found(|c| matches!(c, StringCategory::CredentialTheft));
+    if !creds.is_empty() {
+        out.push((
+            "credential_tools",
+            format!("Credential theft: {}", creds.join(", ")),
+            3,
+        ));
+    }
+    let keylog = found(|c| matches!(c, StringCategory::Keylogging));
+    if !keylog.is_empty() {
+        out.push((
+            "keylogging",
+            format!("Keylogging APIs: {}", keylog.join(", ")),
+            1,
+        ));
+    }
+    let ip_urls = sa.urls.iter().filter(|u| IP_URL_REGEX.is_match(u)).count();
+    if ip_urls > 0 {
+        out.push(("ip_urls", format!("{ip_urls} URLs to bare IP addresses"), 1));
+    }
+    if !sa.bitcoin_addresses.is_empty() || !sa.ethereum_addresses.is_empty() {
+        out.push((
+            "crypto_addresses",
+            "Cryptocurrency wallet addresses".to_string(),
+            1,
+        ));
+    }
+    out
+}
+
 /// Main static analyzer implementation
 pub struct StaticAnalyzer {
     config: StaticAnalyzerConfig,
@@ -282,40 +381,34 @@ impl StaticAnalyzer {
 
         let mut metadata = HashMap::new();
         metadata.insert("file_type".to_string(), serde_json::to_value(&file_type)?);
-        let mut threat_score = 0.0;
-        let mut threat_details = Vec::new();
+        // Evidence that counts toward the verdict, with its weight. Weights and
+        // thresholds come from the detection benchmark: each indicator kept
+        // fires on malware several times more often than on clean software.
+        let mut evidence = Evidence::default();
 
-        // Entropy analysis
-        let _entropy_analysis = if self.config.enable_entropy_analysis {
+        if self.config.enable_entropy_analysis {
             let analysis = self.analyze_entropy(file_data, &file_type);
             debug!(
                 "Overall entropy: {:.2}, Packed: {}",
                 analysis.overall_entropy, analysis.is_likely_packed
             );
-
-            if analysis.is_likely_packed {
-                threat_score += 0.25;
-                threat_details.push("File appears to be packed or encrypted".to_string());
+            if analysis.is_likely_packed || analysis.overall_entropy > self.config.entropy_threshold
+            {
+                evidence.add(
+                    PACKED,
+                    format!(
+                        "Packed or encrypted content (entropy {:.2})",
+                        analysis.overall_entropy
+                    ),
+                    2,
+                );
             }
-
-            if analysis.overall_entropy > self.config.entropy_threshold {
-                threat_score += 0.15;
-                threat_details.push(format!(
-                    "High entropy detected: {:.2}",
-                    analysis.overall_entropy
-                ));
-            }
-
             metadata.insert(
                 "entropy_analysis".to_string(),
                 serde_json::to_value(&analysis)?,
             );
-            Some(analysis)
-        } else {
-            None
-        };
+        }
 
-        // String analysis
         let string_analysis = if self.config.enable_string_analysis {
             let analysis = self.analyze_strings(file_data);
             debug!(
@@ -324,35 +417,9 @@ impl StaticAnalyzer {
                 analysis.urls.len(),
                 analysis.ips.len()
             );
-
-            // Score based on suspicious strings
-            for s in &analysis.suspicious_strings {
-                let weight = (s.severity as f64) / 100.0;
-                threat_score += weight;
-
-                if s.severity >= 8 {
-                    threat_details.push(format!("{:?}: {}", s.category, s.content));
-                }
+            for (key, label, points) in string_points(&analysis) {
+                evidence.add(key, label, points);
             }
-
-            // IP-based URLs are more suspicious
-            let ip_urls: Vec<_> = analysis
-                .urls
-                .iter()
-                .filter(|url| IP_URL_REGEX.is_match(url))
-                .collect();
-
-            if !ip_urls.is_empty() {
-                threat_score += 0.15;
-                threat_details.push(format!("{} IP-based URLs detected", ip_urls.len()));
-            }
-
-            // Cryptocurrency addresses
-            if !analysis.bitcoin_addresses.is_empty() || !analysis.ethereum_addresses.is_empty() {
-                threat_score += 0.10;
-                threat_details.push("Cryptocurrency addresses found".to_string());
-            }
-
             metadata.insert(
                 "string_analysis".to_string(),
                 serde_json::to_value(&analysis)?,
@@ -362,8 +429,7 @@ impl StaticAnalyzer {
             None
         };
 
-        // PE-specific analysis
-        let pe_analysis = if self.config.enable_pe_analysis && matches!(file_type, FileType::PE) {
+        if self.config.enable_pe_analysis && matches!(file_type, FileType::PE) {
             match self.analyze_pe(file_data).await {
                 Ok(analysis) => {
                     debug!(
@@ -372,54 +438,34 @@ impl StaticAnalyzer {
                         analysis.imports.len(),
                         analysis.is_packed
                     );
-
                     if analysis.is_packed {
-                        threat_score += 0.30;
-                        threat_details.push("Packed executable detected".to_string());
+                        evidence.add(PACKED, "Packed executable".to_string(), 2);
                     }
-
                     if !analysis.packer_signatures.is_empty() {
-                        threat_score += 0.20;
-                        threat_details.push(format!(
-                            "Packer detected: {}",
-                            analysis.packer_signatures.join(", ")
-                        ));
+                        evidence.add(
+                            "packer",
+                            format!("Packer detected: {}", analysis.packer_signatures.join(", ")),
+                            2,
+                        );
                     }
-
-                    // Score suspicious imports
-                    if !analysis.suspicious_imports.is_empty() {
-                        let import_score = analysis.suspicious_imports.len() as f64 * 0.05;
-                        threat_score += import_score;
-                        threat_details.push(format!(
-                            "{} suspicious imports",
-                            analysis.suspicious_imports.len()
-                        ));
+                    let suspicious_sections =
+                        analysis.sections.iter().filter(|s| s.is_suspicious).count();
+                    if suspicious_sections > 0 {
+                        evidence.add(
+                            "sections",
+                            format!("{suspicious_sections} suspicious sections"),
+                            1,
+                        );
                     }
-
-                    // Suspicious sections
-                    let suspicious_sections: Vec<_> = analysis
-                        .sections
-                        .iter()
-                        .filter(|s| s.is_suspicious)
-                        .collect();
-
-                    if !suspicious_sections.is_empty() {
-                        threat_score += 0.15;
-                        threat_details
-                            .push(format!("{} suspicious sections", suspicious_sections.len()));
-                    }
-
+                    // Imports alone are recorded, not scored: 12% of clean
+                    // programs import at least one of them.
                     metadata.insert("pe_analysis".to_string(), serde_json::to_value(&analysis)?);
-                    Some(analysis)
                 }
                 Err(e) => {
                     warn!("PE analysis failed: {}", e);
-                    None
                 }
             }
-        } else {
-            None
-        };
+        }
 
         if matches!(file_type, FileType::ELF) {
             match self.analyze_elf(file_data) {
@@ -431,16 +477,11 @@ impl StaticAnalyzer {
                         analysis.is_packed
                     );
                     if analysis.is_packed {
-                        threat_score += 0.25;
-                        threat_details
-                            .push("ELF entropy suggests packing or encryption".to_string());
-                    }
-                    if !analysis.suspicious_imports.is_empty() {
-                        threat_score += (analysis.suspicious_imports.len() as f64 * 0.05).min(0.30);
-                        threat_details.push(format!(
-                            "{} suspicious ELF imports",
-                            analysis.suspicious_imports.len()
-                        ));
+                        evidence.add(
+                            PACKED,
+                            "ELF entropy suggests packing or encryption".to_string(),
+                            2,
+                        );
                     }
                     metadata.insert("elf_analysis".to_string(), serde_json::to_value(&analysis)?);
                 }
@@ -450,30 +491,18 @@ impl StaticAnalyzer {
             }
         }
 
-        // Calculate final threat assessment
-        threat_score = threat_score.min(1.0);
-        let (verdict, confidence_level, severity) = self.determine_verdict(
-            threat_score,
-            &threat_details,
-            string_analysis.as_ref(),
-            pe_analysis.as_ref(),
-        );
+        let points = evidence.points();
+        let threat_details = evidence.labels();
+        let threat_score = (points as f64 / 10.0).min(1.0);
+        let (verdict, confidence, severity) = verdict_for(points);
 
         // Record why: the score and the indicators behind it.
         metadata.insert("threat_score".to_string(), serde_json::json!(threat_score));
+        metadata.insert("evidence_points".to_string(), serde_json::json!(points));
         metadata.insert(
             "threat_details".to_string(),
             serde_json::json!(&threat_details),
         );
-
-        let confidence = match verdict {
-            ThreatVerdict::Benign => (0.93 - (threat_score * 0.25) as f32).clamp(0.85, 0.95),
-            _ => match confidence_level {
-                ConfidenceLevel::High => 0.92,
-                ConfidenceLevel::Medium => 0.78,
-                ConfidenceLevel::Low => 0.65,
-            },
-        };
 
         // Categorize threats
         let categories = self.categorize_threats(&threat_details, string_analysis.as_ref());
@@ -838,66 +867,6 @@ impl StaticAnalyzer {
         })
     }
 
-    fn determine_verdict(
-        &self,
-        threat_score: f64,
-        threats: &[String],
-        string_analysis: Option<&StringAnalysis>,
-        pe_analysis: Option<&PEAnalysis>,
-    ) -> (ThreatVerdict, ConfidenceLevel, SeverityLevel) {
-        // Count high-severity indicators
-        let high_severity_count = string_analysis
-            .map(|sa| {
-                sa.suspicious_strings
-                    .iter()
-                    .filter(|s| s.severity >= 8)
-                    .count()
-            })
-            .unwrap_or(0);
-
-        let has_critical_imports = pe_analysis
-            .map(|pa| {
-                pa.suspicious_imports.iter().any(|imp| {
-                    imp.contains("CreateRemoteThread") || imp.contains("WriteProcessMemory")
-                })
-            })
-            .unwrap_or(false);
-
-        // Determine verdict
-        let verdict = if threat_score > 0.8 || high_severity_count > 3 || has_critical_imports {
-            ThreatVerdict::Malicious
-        } else if threat_score > 0.5
-            || high_severity_count > 1
-            || threats.len() > 5
-            || threat_score > 0.2
-            || !threats.is_empty()
-        {
-            ThreatVerdict::Suspicious
-        } else {
-            ThreatVerdict::Benign
-        };
-
-        // Determine confidence
-        let confidence = if threat_score > 0.8 && high_severity_count > 2 {
-            ConfidenceLevel::High
-        } else if threat_score > 0.5 || high_severity_count > 0 {
-            ConfidenceLevel::Medium
-        } else {
-            ConfidenceLevel::Low
-        };
-
-        // Determine severity
-        let severity = if threat_score > 0.8 {
-            SeverityLevel::High
-        } else if threat_score > 0.5 {
-            SeverityLevel::Medium
-        } else {
-            SeverityLevel::Low
-        };
-
-        (verdict, confidence, severity)
-    }
-
     fn categorize_threats(
         &self,
         threats: &[String],
@@ -1218,8 +1187,8 @@ mod tests {
         // Verify malware patterns are loaded
         assert!(!MALWARE_PATTERNS.is_empty(), "Should have malware patterns");
         assert!(
-            MALWARE_PATTERNS.len() >= 15,
-            "Should have comprehensive pattern set"
+            MALWARE_PATTERNS.len() >= 6,
+            "Should keep the strong patterns"
         );
 
         // Check severity distribution
@@ -1252,5 +1221,69 @@ mod tests {
             categories.len() >= 3,
             "Should detect multiple threat categories"
         );
+    }
+
+    #[tokio::test]
+    async fn ordinary_words_no_longer_flag_a_file() {
+        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        // Each of these used to add to the score or count as high severity.
+        let data = b"Enter your password to login. system exec decode payload c2 \
+                     System.Security.Cryptography.Aes vulnerability worm credential";
+        let d = analyzer.analyze(data, Some("notes.txt")).await.unwrap();
+        assert_eq!(
+            d.verdict,
+            ThreatVerdict::Benign,
+            "{:?}",
+            d.metadata.get("threat_details")
+        );
+    }
+
+    #[tokio::test]
+    async fn one_injection_api_is_not_enough_but_several_are() {
+        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        let one = analyzer
+            .analyze(b"CreateRemoteThread", Some("a.bin"))
+            .await
+            .unwrap();
+        assert_eq!(one.verdict, ThreatVerdict::Benign);
+        let three = analyzer
+            .analyze(
+                b"VirtualAllocEx WriteProcessMemory CreateRemoteThread",
+                Some("a.bin"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(three.verdict, ThreatVerdict::Suspicious);
+    }
+
+    #[test]
+    fn dotnet_cryptography_is_not_a_ransomware_extension() {
+        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        let sa = analyzer.analyze_strings(b"System.Security.Cryptography .Crypto namespace");
+        assert!(string_points(&sa).is_empty());
+        let sa = analyzer.analyze_strings(b"files renamed to *.locked and report.encrypted");
+        assert_eq!(string_points(&sa)[0].0, "ransomware");
+    }
+
+    #[test]
+    fn patterns_do_not_span_unrelated_text() {
+        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        let data = b"Processed\0IsFlowSuppressed\0get_ActivityStarted\0reflective\0injection";
+        let sa = analyzer.analyze_strings(data);
+        assert!(sa.suspicious_strings.iter().all(|s| s.content.len() < 64));
+        assert!(string_points(&sa).is_empty());
+    }
+
+    #[test]
+    fn evidence_counts_each_kind_once_and_sets_the_verdict() {
+        let mut e = Evidence::default();
+        e.add(PACKED, "a".into(), 2);
+        e.add(PACKED, "b".into(), 2);
+        assert_eq!(e.points(), 2);
+        assert_eq!(verdict_for(e.points()).0, ThreatVerdict::Suspicious);
+        e.add("ransomware", "c".into(), 2);
+        e.add("keylogging", "d".into(), 1);
+        assert_eq!(verdict_for(e.points()).0, ThreatVerdict::Malicious);
+        assert_eq!(verdict_for(1).0, ThreatVerdict::Benign);
     }
 }
