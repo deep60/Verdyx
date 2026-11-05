@@ -97,10 +97,18 @@ impl Config {
                 smtp_port: std::env::var("SMTP_PORT")
                     .unwrap_or_else(|_| "587".to_string())
                     .parse()?,
-                smtp_username: std::env::var("SMTP_USERNAME").unwrap_or_default(),
+                // SMTP_USER is accepted too: the env template lists both, and
+                // notification-service already reads either one.
+                smtp_username: std::env::var("SMTP_USERNAME")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .or_else(|| std::env::var("SMTP_USER").ok())
+                    .unwrap_or_default(),
                 smtp_password: std::env::var("SMTP_PASSWORD").unwrap_or_default(),
                 from_address: std::env::var("EMAIL_FROM")
-                    .unwrap_or_else(|_| "noreply@verdyx.io".to_string()),
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+                    .unwrap_or_else(|| "noreply@verdyx.dev".to_string()),
             },
         })
     }

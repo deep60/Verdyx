@@ -14,6 +14,39 @@ fn smtp_configured(config: &EmailConfig) -> bool {
     !config.smtp_host.trim().is_empty() && !config.smtp_username.trim().is_empty()
 }
 
+/// Everything that stops a reset email from being sent, in plain words.
+///
+/// Empty means email is set up. Logged at startup so a missing setting shows
+/// up when the service boots, not only when someone is locked out. The reset
+/// endpoint can't report it to the caller: it answers the same way whether or
+/// not an account exists.
+pub fn setup_problems(config: &EmailConfig, frontend_url: Option<&str>) -> Vec<String> {
+    let mut problems = Vec::new();
+    if config.smtp_host.trim().is_empty() {
+        problems.push("SMTP_HOST is empty".to_string());
+    }
+    if config.smtp_username.trim().is_empty() {
+        problems.push("SMTP_USERNAME (or SMTP_USER) is empty".to_string());
+    }
+    if config.smtp_password.is_empty() {
+        problems.push("SMTP_PASSWORD is empty".to_string());
+    }
+    if config
+        .from_address
+        .parse::<lettre::message::Mailbox>()
+        .is_err()
+    {
+        problems.push(format!(
+            "EMAIL_FROM {:?} is not a valid address",
+            config.from_address
+        ));
+    }
+    if frontend_url.is_none_or(|u| u.trim().is_empty()) {
+        problems.push("FRONTEND_URL is empty, so no reset link can be built".to_string());
+    }
+    problems
+}
+
 fn reset_link(frontend_url: &str, token: &str) -> String {
     format!(
         "{}/reset-password?token={token}",
@@ -97,6 +130,30 @@ mod tests {
             reset_link("https://verdyx.pages.dev/", "abc"),
             "https://verdyx.pages.dev/reset-password?token=abc"
         );
+    }
+
+    #[test]
+    fn setup_problems_names_each_missing_setting() {
+        let ok = config("smtp.example.com", "user");
+        assert!(setup_problems(&ok, Some("https://verdyx.dev")).is_empty());
+
+        let mut bad = config("", "");
+        bad.smtp_password = String::new();
+        bad.from_address = "not an address".to_string();
+        let problems = setup_problems(&bad, None).join("; ");
+        for needle in [
+            "SMTP_HOST",
+            "SMTP_USERNAME",
+            "SMTP_PASSWORD",
+            "EMAIL_FROM",
+            "FRONTEND_URL",
+        ] {
+            assert!(
+                problems.contains(needle),
+                "{needle} missing from: {problems}"
+            );
+        }
+        assert!(!setup_problems(&ok, Some(" ")).is_empty());
     }
 
     #[test]

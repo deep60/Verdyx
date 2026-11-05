@@ -175,8 +175,19 @@ pub async fn forgot_password(
                 }
             });
         }
+        // Logged without the address, so the log can't be mined for which
+        // emails have accounts. "No account" is the usual answer when someone
+        // types a different address from the one they signed up with.
+        Err(crate::models::UserError::NotFound) => {
+            tracing::info!("Password reset requested for an address with no account");
+        }
+        Err(crate::models::UserError::TooManyAttempts) => {
+            tracing::warn!(
+                "Password reset not sent: more than 3 requests for one account this hour"
+            );
+        }
         Err(e) => {
-            tracing::debug!("Password reset not issued: {}", e);
+            tracing::error!("Password reset not issued: {}", e);
         }
     }
 
