@@ -8,6 +8,8 @@ use uuid::Uuid;
 
 use crate::analyzers::{AnalysisEngine, AnalysisOptions, FileAnalysisRequest};
 use crate::scanners::url_scanner::UrlScanner;
+use crate::scanners::url_verdicts::{url_detections, URL_CHECKS};
+use crate::scanners::Scanner;
 use crate::storage::S3Client;
 
 /// Redis queue key for analysis tasks
@@ -277,7 +279,10 @@ async fn process_submission(
     )
     .await?;
 
-    // Step 3: Load artifact bytes (from disk/S3 for files, or the page for URL submissions)
+    // Step 3: Load artifact bytes (from disk/S3 for files, or the page for URL
+    // submissions). A URL also gets the URL engines: URLhaus, ThreatFox and
+    // Verdyx's own URL checks.
+    let mut url_votes = Vec::new();
     let file_data = match submission.file_path.as_deref() {
         Some(fp) if !fp.is_empty() => load_artifact(s3_client, fp).await?,
         _ if submission.submission_type == "url" => {
@@ -288,10 +293,12 @@ async fn process_submission(
                 .ok_or_else(|| anyhow!("URL submission has no url"))?;
             // A failed fetch must fail the job: scanning only the URL's text
             // would report every unreachable page as clean.
-            url_scanner
+            let page = url_scanner
                 .fetch_page(target_url)
                 .await
-                .map_err(|e| anyhow!("Could not fetch {target_url}: {e}"))?
+                .map_err(|e| anyhow!("Could not fetch {target_url}: {e}"))?;
+            url_votes = url_engine_votes(url_scanner, target_url).await;
+            page
         }
         _ => return Err(anyhow!("Submission has no file_path")),
     };
@@ -317,12 +324,16 @@ async fn process_submission(
     };
 
     let mut engine = analysis_engine.lock().await;
-    let analysis_result = engine
+    let mut analysis_result = engine
         .analyze_file(analysis_request)
         .await
         .map_err(|e| anyhow!("Analysis failed: {e}"))?;
 
     drop(engine); // Release lock
+
+    for vote in url_votes {
+        analysis_result.add_detection(vote);
+    }
 
     info!(
         "Analysis completed for submission {}: status={:?}, detections={}",
@@ -450,13 +461,72 @@ async fn record_job_status(
     Ok(())
 }
 
-/// The static and heuristic analyzers read program files. Given a web page they
-/// flag ordinary minified JavaScript, so a github.com scan drew a "malicious" vote.
+/// Engine metadata plus how the engine took part in the vote, so the report
+/// can say "not listed on URLhaus" instead of a blank.
+fn detection_metadata(
+    detection: &crate::models::analysis_result::DetectionResult,
+) -> serde_json::Value {
+    let mut meta = serde_json::to_value(&detection.metadata)
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    meta.insert(
+        "engine_type".to_string(),
+        serde_json::json!(format!("{:?}", detection.engine_type).to_lowercase()),
+    );
+    match detection.non_vote() {
+        None => {
+            meta.insert("vote".to_string(), serde_json::json!("counted"));
+        }
+        Some((kind, reason)) => {
+            meta.insert("vote".to_string(), serde_json::json!(kind));
+            meta.insert("reason".to_string(), serde_json::json!(reason));
+        }
+    }
+    serde_json::Value::Object(meta)
+}
+
+/// Runs the URL engines. If the URL scan itself fails, "URL checks" is
+/// reported as unavailable rather than silently dropped.
+async fn url_engine_votes(
+    url_scanner: &UrlScanner,
+    target_url: &str,
+) -> Vec<crate::models::analysis_result::DetectionResult> {
+    match url_scanner.scan(target_url.as_bytes(), None).await {
+        Ok(scan) => {
+            let trusted = url_scanner.is_trusted_domain(&scan.url_info.parsed_url.domain);
+            url_detections(&scan, trusted)
+        }
+        Err(e) => {
+            warn!("URL checks failed for {}: {}", target_url, e);
+            vec![AnalysisEngine::create_unavailable_detection(
+                URL_CHECKS,
+                "live",
+                crate::models::analysis_result::EngineType::Static,
+                e.to_string(),
+            )]
+        }
+    }
+}
+
+/// Which file engines read a URL's page.
+///
+/// - Static and heuristic analysis read program files. Given a web page they
+///   flag ordinary minified JavaScript, so a github.com scan drew a
+///   "malicious" vote.
+/// - Hash reputation looks the page's hash up in malware-file databases. A
+///   page is regenerated on every load, so its hash is never there.
+/// - The ML model scores executables, so its output on HTML means nothing.
+///
+/// YARA and the signature matcher still read the HTML, where they can find
+/// phishing kits and web shells.
 fn analysis_options_for(submission_type: &str) -> AnalysisOptions {
     let is_page = submission_type == "url";
     AnalysisOptions {
         enable_static_analysis: !is_page,
         enable_heuristic_analysis: !is_page,
+        enable_hash_analysis: !is_page,
+        enable_ml_analysis: !is_page,
         ..AnalysisOptions::default()
     }
 }
@@ -481,6 +551,7 @@ async fn store_analysis_results(
     analysis_result: &crate::models::analysis_result::AnalysisResult,
 ) -> Result<()> {
     let consensus_meta = serde_json::json!({
+        "consensus_verdict": format!("{:?}", analysis_result.consensus_verdict).to_lowercase(),
         "consensus_explanation": analysis_result.consensus_explanation,
         "agreement_score": analysis_result.agreement_score,
         "participating_engines": analysis_result.participating_engines,
@@ -517,8 +588,12 @@ async fn store_analysis_results(
         .await;
 
     // Store individual detection results in analysis_results table
-    for detection in &analysis_result.detections {
-        let detection_meta = serde_json::to_value(&detection.metadata).unwrap_or_default();
+    for detection in analysis_result
+        .detections
+        .iter()
+        .filter(|d| !d.is_aggregate())
+    {
+        let detection_meta = detection_metadata(detection);
         let verdict_lower = format!("{:?}", detection.verdict).to_lowercase();
         let conf_f64 = detection.confidence as f64;
         if let Err(e) = sqlx::query(
@@ -585,7 +660,40 @@ async fn publish_ws_event(
 
 #[cfg(test)]
 mod analysis_options_tests {
-    use super::analysis_options_for;
+    use super::{analysis_options_for, detection_metadata};
+    use crate::models::analysis_result::{
+        DetectionResult, EngineType, SeverityLevel, ThreatVerdict,
+    };
+
+    #[test]
+    fn stored_metadata_says_how_the_engine_voted() {
+        let mut d = DetectionResult {
+            detection_id: uuid::Uuid::new_v4(),
+            engine_name: "URLhaus".to_string(),
+            engine_version: "live".to_string(),
+            engine_type: EngineType::Hash,
+            verdict: ThreatVerdict::Unknown,
+            confidence: 0.0,
+            severity: SeverityLevel::Info,
+            categories: vec![],
+            metadata: [(
+                "reason".to_string(),
+                serde_json::json!("Not listed on URLhaus"),
+            )]
+            .into(),
+            detected_at: chrono::Utc::now(),
+            processing_time_ms: 1,
+            error_message: None,
+        };
+        let meta = detection_metadata(&d);
+        assert_eq!(meta["vote"], "no_record");
+        assert_eq!(meta["reason"], "Not listed on URLhaus");
+        assert_eq!(meta["engine_type"], "hash");
+
+        d.verdict = ThreatVerdict::Benign;
+        d.metadata.clear();
+        assert_eq!(detection_metadata(&d)["vote"], "counted");
+    }
 
     #[test]
     fn web_pages_skip_analyzers_built_for_program_files() {
@@ -593,7 +701,10 @@ mod analysis_options_tests {
         assert!(!options.enable_static_analysis);
         assert!(!options.enable_heuristic_analysis);
         assert!(options.enable_signature_analysis);
-        assert!(options.enable_ml_analysis);
+        // A page's hash is never in a malware-file database, and the ML
+        // model scores executables.
+        assert!(!options.enable_hash_analysis);
+        assert!(!options.enable_ml_analysis);
     }
 
     #[test]

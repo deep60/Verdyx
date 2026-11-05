@@ -3,11 +3,7 @@ import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Navigation } from "@/components/navigation";
 import { SEO } from "@/components/seo";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExportReport } from "@/components/export-report";
 import { CommitRevealPanel } from "@/components/commit-reveal-panel";
@@ -19,35 +15,99 @@ import { mapAttackTechniques } from "@/lib/attack-mapping";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import {
-  FileText,
-  Clock,
-  CheckCircle2,
-  Shield,
-  Share2,
-  TrendingUp,
-  Bot,
-  User,
-  Brain,
-  FileSearch,
-  Info,
-  AlertCircle,
-  Play,
-  Globe,
-  Cpu,
-  Mail,
-} from "lucide-react";
+import { Copy, Loader2, Play } from "lucide-react";
 import { StatCardSkeleton, SubmissionSkeleton } from "@/components/loading-skeleton";
 import { ErrorState } from "@/components/error-state";
 import type { ApiSubmission, ApiAnalysis, ApiConsensus } from "@/lib/api-types";
+import {
+  decidedBy,
+  engineFacts,
+  engineRole,
+  notVotingSummary,
+  flaggedSummary,
+  formatBytes,
+  formatDuration,
+  sortEngines,
+  verdictLabel,
+  type Tone,
+} from "@/lib/report";
+
+const TONE_TEXT: Record<Tone, string> = {
+  danger: "text-destructive",
+  warning: "text-warning",
+  ok: "text-success",
+  muted: "text-muted-foreground",
+};
+
+const TONE_BADGE: Record<Tone, string> = {
+  danger: "border-destructive/50 bg-destructive/10 text-destructive",
+  warning: "border-warning/50 bg-warning/10 text-warning",
+  ok: "border-success/50 bg-success/10 text-success",
+  muted: "border-border text-muted-foreground",
+};
+
+const TONE_BAR: Record<Tone, string> = {
+  danger: "bg-destructive",
+  warning: "bg-warning",
+  ok: "bg-success",
+  muted: "bg-muted-foreground/40",
+};
+
+function RoleBadge({ label, tone }: { label: string; tone: Tone }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center border px-2 py-0.5 font-mono text-[11px] uppercase tracking-[0.08em] ${TONE_BADGE[tone]}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function formatTime(iso?: string) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleString();
+}
+
+function EngineRow({ analysis }: { analysis: ApiAnalysis }) {
+  const role = engineRole(analysis);
+  const facts = engineFacts(analysis);
+  const time = formatDuration(analysis.processingTimeMs);
+  return (
+    <li className="py-4" data-testid="engine-row">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="font-medium text-foreground">{analysis.engine?.name ?? "Engine"}</span>
+        {analysis.engine?.version && (
+          <span className="font-mono text-xs text-muted-foreground">{analysis.engine.version}</span>
+        )}
+        <span className="ml-auto flex items-center gap-3">
+          {typeof analysis.confidence === "number" && (
+            <span className="font-mono text-xs text-muted-foreground">{analysis.confidence}% confidence</span>
+          )}
+          {time && <span className="font-mono text-xs text-muted-foreground">{time}</span>}
+          <RoleBadge label={role.label} tone={role.tone} />
+        </span>
+      </div>
+      {facts.length > 0 && (
+        <dl className="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
+          {facts.map((f, i) => (
+            <div key={i} className="contents">
+              <dt className="text-muted-foreground">{f.label}</dt>
+              <dd className={`break-words ${f.tone ? TONE_TEXT[f.tone] : "text-foreground/90"}`}>{f.value || "—"}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </li>
+  );
+}
 
 export default function AnalysisDetails() {
   const [, params] = useRoute("/analysis/:id");
   const submissionId = params?.id;
   const { toast } = useToast();
-  const [hideAnalystTally, setHideAnalystTally] = useState(false);
+  const [, setHideAnalystTally] = useState(false);
 
-  // Fetch submission details (auto-poll while pending/analyzing)
   const {
     data: submission,
     isLoading: submissionLoading,
@@ -63,8 +123,8 @@ export default function AnalysisDetails() {
   });
 
   const currentStatus = submission?.status || submission?.analysisStatus || "pending";
+  const inProgress = currentStatus === "pending" || currentStatus === "analyzing";
 
-  // Fetch analyses (auto-poll while pending/analyzing)
   const {
     data: analyses = [],
     isLoading: analysesLoading,
@@ -73,10 +133,9 @@ export default function AnalysisDetails() {
   } = useQuery<ApiAnalysis[]>({
     queryKey: [`/api/submissions/${submissionId}/analyses`],
     enabled: !!submissionId,
-    refetchInterval: currentStatus === "pending" || currentStatus === "analyzing" ? 3000 : false,
+    refetchInterval: inProgress ? 3000 : false,
   });
 
-  // Fetch consensus result once completed or once engine analyses exist
   const { data: consensus, refetch: refetchConsensus } = useQuery<ApiConsensus>({
     queryKey: [`/api/submissions/${submissionId}/consensus`],
     enabled: !!submissionId && (currentStatus === "completed" || analyses.length > 0),
@@ -88,85 +147,80 @@ export default function AnalysisDetails() {
       return res.json();
     },
     onSuccess: () => {
-      toast({
-        title: "Analysis triggered",
-        description: "Submission queued for security engines.",
-      });
+      toast({ title: "Scan started", description: "The engines will report here as they finish." });
       refetchSubmission();
       refetchAnalyses();
     },
     onError: (err) => {
       toast({
-        title: "Failed to start analysis",
+        title: "Couldn't start the scan",
         description: err instanceof Error ? err.message : "Please try again",
         variant: "destructive",
       });
     },
   });
 
-  // Real-time updates via WebSocket
   const { lastMessage } = useWebSocket();
-
   useEffect(() => {
-    if (lastMessage && submissionId) {
-      try {
-        const data = JSON.parse(lastMessage.data);
-        if (
-          data.type === "analysis_updated" ||
-          (data.type === "analysis_completed" && data.data?.submissionId === submissionId)
-        ) {
-          refetchSubmission();
-          refetchAnalyses();
-          refetchConsensus();
-        }
-      } catch (_e) {
-        // Ignore non-JSON frames
+    if (!lastMessage || !submissionId) return;
+    try {
+      const data = JSON.parse(lastMessage.data);
+      if (
+        data.type === "analysis_updated" ||
+        (data.type === "analysis_completed" && data.data?.submissionId === submissionId)
+      ) {
+        refetchSubmission();
+        refetchAnalyses();
+        refetchConsensus();
       }
+    } catch {
+      // Ignore non-JSON frames
     }
   }, [lastMessage, submissionId, refetchSubmission, refetchAnalyses, refetchConsensus]);
 
-  const targetLabel =
+  const target =
+    submission?.url ||
     submission?.originalFilename ||
     submission?.filename ||
     submission?.fileName ||
-    submission?.url ||
+    submission?.id ||
     "";
   const isUrlTarget = Boolean(
-    submission &&
-      (submission.submissionType === "url" ||
-        submission.url ||
-        targetLabel.startsWith("http://") ||
-        targetLabel.startsWith("https://")),
+    submission && (submission.submissionType === "url" || target.startsWith("http://") || target.startsWith("https://")),
   );
   const isEmailTarget = Boolean(
     submission &&
       (submission.submissionType === "email" ||
-        targetLabel.toLowerCase().endsWith(".eml") ||
-        targetLabel.toLowerCase().endsWith(".mime") ||
+        target.toLowerCase().endsWith(".eml") ||
         analyses.some((a) => (a.engine?.name || "").toLowerCase().includes("email"))),
   );
+  const targetType = isUrlTarget ? "url" : isEmailTarget ? "email" : "file";
 
   const { data: recentSubmissions = [] } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
     enabled: Boolean(submission),
   });
-
   const { data: pageIntel } = useQuery<Record<string, unknown>>({
     queryKey: [`/api/submissions/${submissionId}/web-intel`],
     enabled: Boolean(submissionId) && isUrlTarget,
   });
 
   const attackTechniques = useMemo(() => mapAttackTechniques(analyses), [analyses]);
+  const engines = useMemo(() => sortEngines(analyses), [analyses]);
+  const finishedAt = useMemo(() => {
+    const times = analyses.map((a) => a.completedAt).filter((t): t is string => Boolean(t));
+    return times.sort().at(-1);
+  }, [analyses]);
 
   if (submissionError || analysesError) {
     return (
       <div className="min-h-screen bg-background text-foreground">
-        <SEO title="Error Loading Analysis" description="Failed to load analysis details." />
+        <SEO title="Scan not found" description="This scan couldn't be loaded." />
         <Navigation />
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
           <ErrorState
-            title="Failed to load analysis"
-            message="Could not fetch analysis details. Please try again."
+            title="Scan not found"
+            message="It doesn't exist, or it belongs to another account. Sign in with the account that ran it."
             onRetry={() => {
               refetchSubmission();
               refetchAnalyses();
@@ -180,90 +234,58 @@ export default function AnalysisDetails() {
   if (submissionLoading || !submission) {
     return (
       <div className="min-h-screen bg-background text-foreground">
-        <SEO title="Loading Analysis" description="Loading analysis details." />
+        <SEO title="Loading scan" description="Loading scan results." />
         <Navigation />
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid md:grid-cols-3 gap-6 mb-8">
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
+          <div className="mb-8 grid gap-6 md:grid-cols-3">
             {[1, 2, 3].map((i) => (
               <StatCardSkeleton key={i} />
             ))}
           </div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <SubmissionSkeleton key={i} />
-            ))}
-          </div>
+          {[1, 2, 3].map((i) => (
+            <SubmissionSkeleton key={i} />
+          ))}
         </div>
       </div>
     );
   }
 
-  const displayName =
-    submission.originalFilename ||
-    submission.filename ||
-    submission.fileName ||
-    submission.url ||
-    submission.id;
+  const verdict = verdictLabel(consensus?.finalVerdict);
+  const submitted = formatTime(submission.createdAt);
+  const finished = formatTime(finishedAt);
 
-  const completedAnalyses = analyses.filter((a) => (a.status || a.analysisStatus) === "completed");
-  const progress = analyses.length > 0 ? (completedAnalyses.length / analyses.length) * 100 : 0;
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "completed":
-        return <CheckCircle2 className="h-5 w-5 text-success" />;
-      case "analyzing":
-        return <Clock className="h-5 w-5 text-warning animate-spin" />;
-      case "pending":
-        return <Clock className="h-5 w-5 text-muted-foreground" />;
-      default:
-        return <FileText className="h-5 w-5" />;
-    }
-  };
-
-  const getVerdictColor = (verdict: string | null) => {
-    switch (verdict?.toLowerCase()) {
-      case "malicious":
-        return "destructive";
-      case "suspicious":
-        return "secondary";
-      case "clean":
-      case "benign":
-        return "default";
-      default:
-        return "outline";
-    }
-  };
-
-  const getEngineIcon = (type: string) => {
-    switch (type) {
-      case "ml":
-        return <Brain className="h-5 w-5" />;
-      case "human":
-        return <User className="h-5 w-5" />;
-      case "signature":
-        return <FileSearch className="h-5 w-5" />;
-      default:
-        return <Bot className="h-5 w-5" />;
-    }
+  const copyId = () => {
+    navigator.clipboard?.writeText(submission.id).then(
+      () => toast({ title: "Scan ID copied" }),
+      () => undefined,
+    );
   };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SEO
-        title={displayName ? `Analysis: ${displayName}` : "Analysis Details"}
-        description={submission.description || "Detailed malware analysis results and consensus score."}
-      />
+      <SEO title={`Scan: ${target}`} description="Verdyx scan results: verdict, per-engine evidence and checks." />
       <Navigation />
 
-      <div id="main-content" tabIndex={-1} className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <main id="main-content" tabIndex={-1} className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
         {/* Header */}
-        <div className="flex flex-wrap items-start justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-4xl md:text-5xl font-bold font-display tracking-[-0.03em] mb-2">
-              Analysis Results
-            </h1>
-            <p className="text-muted-foreground break-all font-mono">{displayName}</p>
+        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+              {targetType === "url" ? "URL scan" : targetType === "email" ? "Email scan" : "File scan"}
+            </div>
+            <h1 className="break-all font-mono text-xl font-medium text-foreground sm:text-2xl">{target}</h1>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+              {submitted && <span>Submitted {submitted}</span>}
+              <button
+                type="button"
+                onClick={copyId}
+                className="inline-flex items-center gap-1.5 font-mono text-xs hover:text-foreground"
+                title="Copy scan ID"
+              >
+                {submission.id}
+                <Copy className="h-3 w-3" aria-hidden />
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             {currentStatus === "pending" && (
@@ -272,424 +294,200 @@ export default function AnalysisDetails() {
                 disabled={startAnalysisMutation.isPending}
                 data-testid="button-trigger-analysis"
               >
-                <Play className="h-4 w-4 mr-2" />
-                {startAnalysisMutation.isPending ? "Starting..." : "Run Scan Now"}
+                <Play className="mr-2 h-4 w-4" />
+                {startAnalysisMutation.isPending ? "Starting…" : "Run scan"}
               </Button>
             )}
             <ExportReport
-              submissionId={submissionId || ""}
-              fileName={displayName}
-              consensus={consensus as Record<string, unknown> | undefined}
-              analyses={analyses as unknown as import("@/components/export-report").AnalysisRecord[]}
+              submissionId={submission.id}
+              target={target}
+              targetType={targetType}
+              submittedAt={submission.createdAt}
+              consensus={consensus}
+              analyses={analyses}
               attackTechniques={attackTechniques}
-              sha256={submission.fileHash}
-              targetUrl={isUrlTarget ? submission.url || displayName : undefined}
+              sha256={targetType === "url" ? undefined : submission.fileHash}
+              targetUrl={isUrlTarget ? target : undefined}
             />
           </div>
-        </div>
+        </header>
 
-        {/* Status Overview */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
-          <Card className="glassmorphism border-primary/20">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Status</CardTitle>
-              {getStatusIcon(currentStatus)}
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold capitalize">{currentStatus}</div>
-              {currentStatus === "analyzing" && <Progress value={progress} className="mt-2" />}
-              <p className="text-xs text-muted-foreground mt-2">
-                {completedAnalyses.length} / {analyses.length} engines completed
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="glassmorphism border-primary/20">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Bounty</CardTitle>
-              <TrendingUp className="h-4 w-4 text-accent" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-accent">{submission.bountyAmount ?? "0.1"} ETH</div>
-              <p className="text-xs text-muted-foreground mt-2">
-                {submission.priority ? "Priority Analysis" : "Standard"}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="glassmorphism border-primary/20">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Analysis Type</CardTitle>
-              <Shield className="h-4 w-4 text-primary" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold capitalize">{submission.analysisType || "full"}</div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Submitted {new Date(submission.createdAt ?? "").toLocaleDateString()}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Consensus Result */}
-        {(currentStatus === "completed" || analyses.length > 0) && consensus && (
-          <Card className="glassmorphism neon-border mb-8">
-            <CardHeader>
-              <CardTitle className="text-2xl">Consensus Result</CardTitle>
-              <CardDescription>Aggregated verdict from all security engines and analysts</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <div className="text-sm text-muted-foreground mb-2">Final Verdict</div>
-                  <Badge
-                    variant={getVerdictColor(consensus.finalVerdict ?? null)}
-                    className="text-lg px-4 py-2 capitalize"
-                  >
-                    {consensus.finalVerdict}
-                  </Badge>
-                </div>
-                <div className="text-center">
-                  <div className="text-4xl font-bold font-display tracking-tight text-primary">
-                    {consensus.confidenceScore}%
-                  </div>
-                  <div className="text-sm text-muted-foreground">Confidence</div>
-                </div>
+        {/* Verdict */}
+        {inProgress ? (
+          <section className="mb-8 flex items-center gap-3 border border-border bg-card/50 p-6" aria-live="polite">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden />
+            <div>
+              <div className="font-medium text-foreground">
+                {currentStatus === "pending" ? "Queued" : "Scanning"}
               </div>
-
-              <Separator className="my-6" />
-
-              {hideAnalystTally ? (
-                <p className="text-sm text-muted-foreground text-center" data-testid="text-tally-hidden">
-                  Analyst tallies stay hidden while votes are sealed. You can see how many people committed, not which verdict is ahead.
-                </p>
-              ) : (
-                <div className="grid grid-cols-3 gap-6">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold font-display tracking-tight text-destructive">
-                      {consensus.maliciousVotes ?? 0}
+              <p className="text-sm text-muted-foreground">
+                {analyses.length > 0
+                  ? `${analyses.length} ${analyses.length === 1 ? "engine has" : "engines have"} reported so far.`
+                  : "Engines report here as they finish. This usually takes under a minute."}
+              </p>
+            </div>
+          </section>
+        ) : currentStatus === "failed" ? (
+          <section className="mb-8 border border-destructive/40 bg-destructive/10 p-6">
+            <div className="font-medium text-destructive">The scan failed</div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isUrlTarget
+                ? "The page couldn't be fetched or analysed. Check the address is public and reachable, then scan it again."
+                : "The file couldn't be analysed. Try uploading it again."}
+            </p>
+          </section>
+        ) : (
+          consensus && (
+            <section className="mb-8 border border-border bg-card/50" aria-labelledby="verdict-heading">
+              <div className="flex">
+                <div className={`w-1 shrink-0 ${TONE_BAR[verdict.tone]}`} aria-hidden />
+                <div className="grid flex-1 gap-6 p-6 sm:p-8 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+                  <div>
+                    <div className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                      Verdict
                     </div>
-                    <div className="text-sm text-muted-foreground">Malicious Votes</div>
+                    <h2
+                      id="verdict-heading"
+                      className={`mt-1 text-3xl font-medium tracking-[-0.03em] sm:text-4xl ${TONE_TEXT[verdict.tone]}`}
+                      data-testid="text-verdict"
+                    >
+                      {verdict.label}
+                    </h2>
+                    <p className="mt-2 text-foreground/90">{flaggedSummary(consensus)}.</p>
+                    {decidedBy(consensus) && (
+                      <p className="mt-2 text-sm text-destructive">
+                        {decidedBy(consensus)} A match in a curated malware list decides the verdict.
+                      </p>
+                    )}
+                    {notVotingSummary(consensus) && (
+                      <p className="mt-2 text-sm text-muted-foreground">{notVotingSummary(consensus)}</p>
+                    )}
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold font-display tracking-tight text-secondary">
-                      {consensus.suspiciousVotes ?? 0}
-                    </div>
-                    <div className="text-sm text-muted-foreground">Suspicious Votes</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold font-display tracking-tight text-success">
-                      {consensus.cleanVotes ?? consensus.benignVotes ?? 0}
-                    </div>
-                    <div className="text-sm text-muted-foreground">Clean Votes</div>
-                  </div>
-                </div>
-              )}
-
-              {consensus.explanation && (
-                <div className="mt-6 p-4 rounded-lg bg-card/60 border border-primary/20 text-sm">
-                  <div className="flex items-center gap-2 font-semibold text-primary mb-1">
-                    <Info className="h-4 w-4" />
-                    <span>Consensus Formulation</span>
-                  </div>
-                  <p className="text-muted-foreground leading-relaxed">{consensus.explanation}</p>
-                </div>
-              )}
-
-              {consensus.unavailableEngines && consensus.unavailableEngines.length > 0 && (
-                <div className="mt-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 text-xs">
-                  <div className="flex items-center gap-2 font-semibold text-destructive mb-2">
-                    <AlertCircle className="h-4 w-4" />
-                    <span>Excluded Unavailable Engines ({consensus.unavailableEngines.length})</span>
-                  </div>
-                  <div className="space-y-1 text-muted-foreground">
-                    {consensus.unavailableEngines.map((unavail, idx) => (
-                      <div key={idx} className="flex items-center justify-between">
-                        <span className="font-medium text-foreground">{unavail.engineName}</span>
-                        <span>{unavail.reason}</span>
+                  <dl className="divide-y divide-border self-start border-y border-border text-sm">
+                    {[
+                      ["Engines run", consensus.engineCount ?? analyses.length],
+                      ["Voted", consensus.totalVotes ?? 0],
+                      ["Malicious", consensus.maliciousVotes ?? 0],
+                      ["Suspicious", consensus.suspiciousVotes ?? 0],
+                      ["Found nothing", consensus.cleanVotes ?? 0],
+                    ].map(([label, value]) => (
+                      <div key={label} className="flex justify-between gap-4 py-2">
+                        <dt className="text-muted-foreground">{label}</dt>
+                        <dd className="font-mono text-foreground">{value}</dd>
                       </div>
                     ))}
-                  </div>
+                    {finished && (
+                      <div className="flex justify-between gap-4 py-2">
+                        <dt className="text-muted-foreground">Finished</dt>
+                        <dd className="text-right font-mono text-xs text-foreground">{finished}</dd>
+                      </div>
+                    )}
+                  </dl>
                 </div>
-              )}
-
-              <Separator className="my-6" />
-
-              <CommitRevealPanel
-                bountyId={submission.bountyId}
-                submissionId={submission.id}
-                currentVerdict={consensus.finalVerdict}
-                onCommitPhase={setHideAnalystTally}
-              />
-
-              <p className="mt-4 text-xs text-muted-foreground italic text-center">
-                {consensus.confidenceNote ||
-                  "Confidence reflects calibrated engine agreement concordance (0-100%), not a statistical posterior probability."}
-              </p>
-            </CardContent>
-          </Card>
+              </div>
+            </section>
+          )
         )}
 
-        {/* Analysis Details & Website Intelligence Tabs */}
+        {/* Engines */}
+        <section className="mb-10" aria-labelledby="engines-heading">
+          <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+            <h2 id="engines-heading" className="text-lg font-medium text-foreground">
+              Engines
+            </h2>
+            <span className="text-xs text-muted-foreground">
+              Only engines that vote decide the verdict. No record and advisory engines are shown for reference.
+            </span>
+          </div>
+          {analysesLoading ? (
+            [1, 2, 3].map((i) => <SubmissionSkeleton key={i} />)
+          ) : engines.length === 0 ? (
+            <div className="border border-border p-6 text-sm text-muted-foreground">
+              {inProgress ? "Waiting for the first engine to report." : "No engine results were recorded for this scan."}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border border-y border-border">
+              {engines.map((a) => (
+                <EngineRow key={a.id} analysis={a} />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Further detail */}
         <Tabs
-          defaultValue={isUrlTarget ? "web-intel" : isEmailTarget ? "email-forensics" : "engines"}
+          defaultValue={isUrlTarget ? "web-intel" : isEmailTarget ? "email-forensics" : "details"}
           className="space-y-6"
         >
-          <TabsList className="flex flex-wrap h-auto">
-            {isUrlTarget && (
-              <TabsTrigger value="web-intel" className="flex items-center gap-1.5">
-                <Globe className="h-4 w-4" />
-                Website Intelligence (36 Modules)
-              </TabsTrigger>
-            )}
+          <TabsList className="flex h-auto flex-wrap">
+            {isUrlTarget && <TabsTrigger value="web-intel">Website checks</TabsTrigger>}
             {isEmailTarget && (
-              <TabsTrigger
-                value="email-forensics"
-                className="flex items-center gap-1.5"
-                data-testid="tab-email-forensics"
-              >
-                <Mail className="h-4 w-4" />
-                Email Forensics
+              <TabsTrigger value="email-forensics" data-testid="tab-email-forensics">
+                Email forensics
               </TabsTrigger>
             )}
-            <TabsTrigger value="engines" className="flex items-center gap-1.5">
-              <Cpu className="h-4 w-4" />
-              Engine Analysis ({analyses.length})
-            </TabsTrigger>
-            <TabsTrigger value="attack" className="flex items-center gap-1.5">
-              <Shield className="h-4 w-4" />
-              ATT&amp;CK ({attackTechniques.length})
-            </TabsTrigger>
-            <TabsTrigger value="infrastructure" className="flex items-center gap-1.5">
-              <Share2 className="h-4 w-4" />
-              Infrastructure
-            </TabsTrigger>
-            <TabsTrigger value="details">Artifact Details</TabsTrigger>
-            <TabsTrigger value="timeline">Execution Timeline</TabsTrigger>
+            {!isUrlTarget && <TabsTrigger value="attack">ATT&amp;CK ({attackTechniques.length})</TabsTrigger>}
+            <TabsTrigger value="infrastructure">Infrastructure</TabsTrigger>
+            <TabsTrigger value="details">Details</TabsTrigger>
           </TabsList>
 
           {isUrlTarget && (
             <TabsContent value="web-intel">
-              <WebsiteIntelligencePanel
-                submissionId={submissionId}
-                initialUrl={submission.url || displayName}
-              />
+              <WebsiteIntelligencePanel submissionId={submission.id} initialUrl={target} />
             </TabsContent>
           )}
-
           {isEmailTarget && (
             <TabsContent value="email-forensics">
               <EmailForensicsPanel analyses={analyses} />
             </TabsContent>
           )}
-
-          <TabsContent value="attack">
-            <AttackMatrix techniques={attackTechniques} />
-          </TabsContent>
-
+          {!isUrlTarget && (
+            <TabsContent value="attack">
+              <AttackMatrix techniques={attackTechniques} />
+            </TabsContent>
+          )}
           <TabsContent value="infrastructure">
-            <IocGraph
-              submission={submission}
-              analyses={analyses}
-              webIntel={pageIntel}
-              submissions={recentSubmissions}
-            />
+            <IocGraph submission={submission} analyses={analyses} webIntel={pageIntel} submissions={recentSubmissions} />
           </TabsContent>
-
-          <TabsContent value="engines" className="space-y-4">
-            {analysesLoading ? (
-              <div className="space-y-4">
-                {[1, 2, 3].map((i) => (
-                  <SubmissionSkeleton key={i} />
-                ))}
-              </div>
-            ) : analyses.length === 0 ? (
-              <Card className="glassmorphism">
-                <CardContent className="p-12 text-center space-y-4">
-                  <p className="text-muted-foreground">
-                    {currentStatus === "analyzing"
-                      ? "Security engines are currently scanning this artifact..."
-                      : "No engine detections recorded yet."}
-                  </p>
-                  {currentStatus === "pending" && (
-                    <Button onClick={() => startAnalysisMutation.mutate()} disabled={startAnalysisMutation.isPending}>
-                      <Play className="h-4 w-4 mr-2" />
-                      Start Engine Scan
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            ) : (
-              analyses.map((analysis) => {
-                const aStatus = analysis.status || analysis.analysisStatus || "completed";
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const rawAnalysis = analysis as Record<string, any>;
-                const metaObj =
-                  rawAnalysis.metadata && typeof rawAnalysis.metadata === "object"
-                    ? (rawAnalysis.metadata as Record<string, unknown>)
-                    : {};
-                const metaEntries = Object.entries(metaObj).filter(
-                  ([k, v]) => k !== "matches" && v !== null && v !== undefined && String(v) !== ""
-                );
-
-                return (
-                  <Card key={analysis.id} className="glassmorphism border-primary/20">
-                    <CardContent className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-4 flex-1">
-                          <div className="p-3 bg-primary/10 rounded-lg">
-                            {getEngineIcon(analysis.engine?.type ?? "")}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex flex-wrap items-center gap-3 mb-2">
-                              <h3 className="text-lg font-semibold">
-                                {analysis.engine?.name || "Automated Engine"}
-                              </h3>
-                              <Badge variant="outline">{analysis.engine?.type || "scanner"}</Badge>
-                              {rawAnalysis.processingTimeMs !== undefined && (
-                                <Badge variant="secondary" className="font-mono text-xs">
-                                  {rawAnalysis.processingTimeMs} ms
-                                </Badge>
-                              )}
-                              {getStatusIcon(aStatus)}
-                            </div>
-                            <p className="text-sm text-muted-foreground mb-4">
-                              {analysis.engine?.description || "Security analysis engine"}
-                            </p>
-
-                            {aStatus === "completed" && (
-                              <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border">
-                                <div>
-                                  <div className="text-sm text-muted-foreground">Verdict</div>
-                                  <Badge
-                                    variant={getVerdictColor(analysis.verdict ?? null)}
-                                    className="mt-1 capitalize"
-                                  >
-                                    {analysis.verdict === "unknown" ? "No verdict" : analysis.verdict}
-                                  </Badge>
-                                </div>
-                                <div>
-                                  <div className="text-sm text-muted-foreground">Confidence</div>
-                                  <div className="text-lg font-semibold mt-1">{analysis.confidence}%</div>
-                                </div>
-                                <div>
-                                  <div className="text-sm text-muted-foreground">Stake</div>
-                                  <div className="text-lg font-semibold mt-1 text-primary">
-                                    {analysis.stakeAmount ? `${analysis.stakeAmount} ETH` : "—"}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {metaEntries.length > 0 && (
-                              <div className="mt-4 pt-3 border-t border-border/40 flex flex-wrap gap-2">
-                                {metaEntries.slice(0, 6).map(([k, v]) => (
-                                  <span
-                                    key={k}
-                                    className="inline-flex items-center gap-1 rounded bg-muted/30 px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
-                                  >
-                                    <span className="text-foreground">{k}:</span>
-                                    <span>
-                                      {typeof v === "object" ? JSON.stringify(v) : String(v)}
-                                    </span>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-          </TabsContent>
-
           <TabsContent value="details">
-            <Card className="glassmorphism">
-              <CardHeader>
-                <CardTitle>Artifact Information</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <div className="text-sm text-muted-foreground mb-1">Filename / Target</div>
-                    <div className="font-mono break-all">{displayName}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground mb-1">SHA-256 Hash</div>
-                    <div className="font-mono text-sm break-all">{submission.fileHash || "N/A"}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground mb-1">Size</div>
-                    <div>
-                      {submission.fileSize ? `${(submission.fileSize / 1024).toFixed(2)} KB` : "N/A"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-muted-foreground mb-1">Submission Type</div>
-                    <div className="capitalize">{submission.submissionType || "file"}</div>
-                  </div>
-                  <div className="md:col-span-2">
-                    <div className="text-sm text-muted-foreground mb-1">Description</div>
-                    <div>{submission.description || "No description provided"}</div>
-                  </div>
+            <dl className="grid gap-x-6 gap-y-4 border border-border p-6 text-sm sm:grid-cols-2">
+              {(
+                [
+                  [isUrlTarget ? "URL" : "File name", target],
+                  ["Type", targetType],
+                  !isUrlTarget && ["SHA-256", submission.fileHash],
+                  !isUrlTarget && submission.fileSize ? ["Size", formatBytes(submission.fileSize)] : null,
+                  !isUrlTarget && ["MIME type", submission.mimeType],
+                  ["Submitted", submitted],
+                  ["Finished", finished],
+                  ["Scan ID", submission.id],
+                  submission.description ? ["Note", submission.description] : null,
+                ].filter(Boolean) as Array<[string, string | null | undefined]>
+              ).map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="mt-0.5 break-all font-mono text-foreground">{value || "—"}</dd>
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="timeline">
-            <Card className="glassmorphism">
-              <CardHeader>
-                <CardTitle>Backend Execution Timeline</CardTitle>
-                <CardDescription>Step-by-step trace of this submission across Verdyx services</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-2.5 h-2.5 bg-primary rounded-full" />
-                    <div>
-                      <div className="font-semibold">1. Gateway Ingestion &amp; SHA-256 Hashing</div>
-                      <div className="text-sm text-muted-foreground">
-                        {new Date(submission.createdAt ?? "").toLocaleString()} · Queued to Redis `analysis_queue`
-                      </div>
-                    </div>
-                  </div>
-                  {currentStatus !== "pending" && (
-                    <div className="flex items-center gap-4">
-                      <div className="w-2.5 h-2.5 bg-warning rounded-full" />
-                      <div>
-                        <div className="font-semibold">
-                          2. Parallel Multi-Engine Analysis ({analyses.length} Engines)
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          ClamAV, YARA, Goblin Static, ONNX ML, Heuristic, Signature &amp; Hash Threat Intel
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {currentStatus === "completed" && (
-                    <div className="flex items-center gap-4">
-                      <div className="w-2.5 h-2.5 bg-success rounded-full" />
-                      <div>
-                        <div className="font-semibold">3. Consensus &amp; OSINT Finalization</div>
-                        <div className="text-sm text-muted-foreground">
-                          {submission.completedAt || submission.updatedAt
-                            ? new Date(submission.completedAt || submission.updatedAt || "").toLocaleString()
-                            : "Completed"}{" "}
-                          · Verdict broadcast via WebSocket
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+              ))}
+            </dl>
           </TabsContent>
         </Tabs>
-      </div>
+
+        {/* Analyst review exists only for scans posted with a bounty. */}
+        {submission.bountyId && consensus && (
+          <section className="mt-10 border border-border bg-card/50 p-6" aria-labelledby="review-heading">
+            <h2 id="review-heading" className="mb-4 text-lg font-medium text-foreground">
+              Analyst review
+            </h2>
+            <CommitRevealPanel
+              bountyId={submission.bountyId}
+              submissionId={submission.id}
+              currentVerdict={consensus.finalVerdict}
+              onCommitPhase={setHideAnalystTally}
+            />
+          </section>
+        )}
+      </main>
     </div>
   );
 }

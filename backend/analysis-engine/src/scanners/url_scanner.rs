@@ -570,7 +570,7 @@ impl UrlScanner {
         }
     }
 
-    fn is_trusted_domain(&self, domain: &str) -> bool {
+    pub fn is_trusted_domain(&self, domain: &str) -> bool {
         self.trusted_domains
             .iter()
             .any(|d| domain_matches(domain, d))

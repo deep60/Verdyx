@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import {
   Globe,
   Shield,
@@ -76,7 +75,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
     ? `/api/submissions/${submissionId}/web-intel`
     : `/api/analysis/web-intel?url=${encodeURIComponent(activeTargetUrl)}`;
 
-  const { data: intel, isLoading, isError, refetch, isFetching } = useQuery<IntelData>({
+  const { data: intel, isLoading, isError, error, refetch, isFetching } = useQuery<IntelData>({
     queryKey: [queryEndpoint, activeTargetUrl],
     queryFn: async () => {
       if (submissionId) {
@@ -211,10 +210,15 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
         <Card className="bento-card border-destructive/30">
           <CardContent className="p-8 text-center space-y-3">
             <AlertTriangle className="h-8 w-8 text-destructive mx-auto" />
-            <div className="font-semibold">Website Reconnaissance Unavailable</div>
+            <div className="font-semibold">Website checks unavailable</div>
             <p className="text-sm text-muted-foreground">
-              This artifact may be a binary file rather than a domain/URL, or the target host could not be reached.
+              {error instanceof Error
+                ? error.message
+                : "The checks couldn't run for this target. Nothing is shown rather than a guess."}
             </p>
+            <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+              Try again
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -245,9 +249,13 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
               </div>
             </div>
             <div className="rounded-lg border border-border/60 bg-card/50 p-3">
-              <div className="text-xs text-muted-foreground">TLS Audit Grade</div>
-              <div className="text-sm font-bold text-emerald-400">
-                Grade {intel.tlsSecurityAudit?.grade || "A"}
+              <div className="text-xs text-muted-foreground">HTTPS</div>
+              <div className="text-sm font-bold">
+                {intel.tlsSecurityAudit?.httpsEnforced
+                  ? intel.tlsSecurityAudit?.hstsPresent
+                    ? "HTTPS + HSTS"
+                    : "HTTPS, no HSTS"
+                  : "No HTTPS"}
               </div>
             </div>
             <div className="rounded-lg border border-border/60 bg-card/50 p-3">
@@ -561,15 +569,15 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Protocol</span>
-                    <Badge variant="default" className="font-mono">{intel.tlsConnection?.protocol}</Badge>
+                    <span className="font-mono text-xs">{intel.tlsConnection?.protocol ?? "Not measured"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Cipher Family</span>
-                    <span className="font-mono text-xs">{intel.tlsConnection?.cipherSuite}</span>
+                    <span className="font-mono text-xs">{intel.tlsConnection?.cipherSuite ?? "Not measured"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">ALPN</span>
-                    <span className="font-mono text-xs">{intel.tlsConnection?.alpn}</span>
+                    <span className="font-mono text-xs">{intel.tlsConnection?.alpn ?? "Not measured"}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -583,21 +591,15 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                     <Award className="h-4 w-4 text-primary" />
                     TLS Security Audit
                   </CardTitle>
-                  <CardDescription>Audit grade for the server's TLS configuration</CardDescription>
+                  <CardDescription>What this check observed about HTTPS on the site</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Overall TLS Grade</span>
-                    <span className="text-2xl font-bold text-emerald-400">
-                      {intel.tlsSecurityAudit?.grade}
-                    </span>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">HTTPS</span>
+                    <span>{intel.tlsSecurityAudit?.httpsEnforced ? "Yes" : "No"}</span>
                   </div>
                   <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Forward Secrecy</span>
-                    <span>{intel.tlsSecurityAudit?.forwardSecrecy ? "Supported" : "No"}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">HSTS Preload Ready</span>
+                    <span className="text-muted-foreground">HSTS header</span>
                     <span>{intel.tlsSecurityAudit?.hstsPresent ? "Yes" : "No"}</span>
                   </div>
                   <div className="flex justify-between text-xs">
@@ -609,7 +611,8 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
             )}
 
             {/* 12. TLS Client Compatibility */}
-            {showCategory("tls", "TLS Client Compatibility") && (
+            {showCategory("tls", "TLS Client Compatibility") &&
+              (intel.tlsClientCompatibility?.clients?.length ?? 0) > 0 && (
               <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
@@ -1238,23 +1241,30 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                     <Award className="h-4 w-4 text-primary" />
                     Quality Metrics
                   </CardTitle>
-                  <CardDescription>Performance, accessibility, SEO and best practice scores</CardDescription>
+                  <CardDescription>Basic page facts from the fetched HTML</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-2.5 text-xs">
+                <CardContent className="space-y-1.5 text-xs">
                   {(
                     [
-                      ["Performance", intel.qualityMetrics?.performance ?? 90],
-                      ["Accessibility", intel.qualityMetrics?.accessibility ?? 85],
-                      ["Best Practices", intel.qualityMetrics?.bestPractices ?? 90],
-                      ["SEO", intel.qualityMetrics?.seo ?? 90],
+                      [
+                        "Response time",
+                        typeof intel.qualityMetrics?.responseTimeMs === "number"
+                          ? `${intel.qualityMetrics.responseTimeMs} ms`
+                          : "—",
+                      ],
+                      ["Page title", intel.qualityMetrics?.hasTitle ? "Yes" : "No"],
+                      ["Meta description", intel.qualityMetrics?.hasMetaDescription ? "Yes" : "No"],
+                      ["Mobile viewport", intel.qualityMetrics?.hasViewport ? "Yes" : "No"],
+                      ["Language set", intel.qualityMetrics?.hasLang ? "Yes" : "No"],
+                      [
+                        "Images without alt text",
+                        String(intel.qualityMetrics?.imagesMissingAlt ?? "—"),
+                      ],
                     ] as const
                   ).map(([label, val]) => (
-                    <div key={label} className="space-y-1">
-                      <div className="flex justify-between">
-                        <span>{label}</span>
-                        <span className="font-mono font-semibold">{val}/100</span>
-                      </div>
-                      <Progress value={Number(val)} className="h-1.5" />
+                    <div key={label} className="flex justify-between border-b border-border/30 py-1">
+                      <span>{label}</span>
+                      <span className="font-mono">{val}</span>
                     </div>
                   ))}
                 </CardContent>

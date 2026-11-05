@@ -244,7 +244,7 @@ sub_id = submission["id"]
 
 # 2. Fetch 8-engine detections & Bayesian consensus
 consensus = requests.get(f"{BASE}/submissions/{sub_id}/consensus", headers=HEADERS).json()
-print("Verdict:", consensus["finalVerdict"], "Confidence:", consensus["confidenceScore"])
+print("Verdict:", consensus["finalVerdict"], "Flagged by:", consensus["flaggedVotes"], "of", consensus["totalVotes"])
 
 # 3. Seal a Commit-Reveal vote on a bounty
 salt = secrets.token_hex(16)

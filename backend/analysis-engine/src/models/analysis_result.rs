@@ -214,11 +214,83 @@ pub enum AnalysisStatus {
     Failed,
 }
 
+/// Why an engine took no part in the vote.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NonVoteKind {
+    /// The engine failed, timed out or isn't running.
+    #[default]
+    Unavailable,
+    /// The engine ran and had nothing to say, e.g. a reputation feed that has
+    /// never seen this file. That is a result, not a failure.
+    NoRecord,
+    /// The engine ran, but by design its prediction doesn't vote (ML today).
+    Advisory,
+}
+
+/// An engine that ran (or tried to) without casting a vote.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnavailableEngineInfo {
     pub engine_name: String,
     pub engine_type: EngineType,
     pub reason: String,
+    #[serde(default)]
+    pub kind: NonVoteKind,
+}
+
+/// Metadata key marking a detection that summarises other detections, such as
+/// the hash analyzer's roll-up of its feeds. It never votes, so a feed match
+/// isn't counted twice.
+pub const AGGREGATE_KEY: &str = "aggregate";
+
+/// Metadata key marking an exact match in a curated known-malware list
+/// (MalwareBazaar, URLhaus, ThreatFox, EICAR). Such a match decides the
+/// verdict: engines that found nothing can't outvote a confirmed sample.
+pub const AUTHORITATIVE_KEY: &str = "authoritative";
+
+fn meta_flag(detection: &DetectionResult, key: &str) -> bool {
+    detection.metadata.get(key).and_then(|v| v.as_bool()) == Some(true)
+}
+
+impl DetectionResult {
+    /// True for roll-up rows that must not vote or be shown as an engine.
+    pub fn is_aggregate(&self) -> bool {
+        meta_flag(self, AGGREGATE_KEY)
+    }
+
+    /// Why this detection doesn't vote, or `None` if it does.
+    pub fn non_vote(&self) -> Option<(NonVoteKind, String)> {
+        let meta_reason = || {
+            self.metadata
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        if self.metadata.contains_key("advisory_verdict") {
+            let reason = self
+                .error_message
+                .clone()
+                .or_else(meta_reason)
+                .unwrap_or_else(|| "Advisory only; does not vote".to_string());
+            return Some((NonVoteKind::Advisory, reason));
+        }
+        let failed = self.error_message.is_some()
+            || self.metadata.get("status").and_then(|v| v.as_str()) == Some("unavailable");
+        if failed {
+            let reason = self
+                .error_message
+                .clone()
+                .or_else(meta_reason)
+                .unwrap_or_else(|| "Engine unavailable".to_string());
+            return Some((NonVoteKind::Unavailable, reason));
+        }
+        if self.verdict == ThreatVerdict::Unknown {
+            let reason =
+                meta_reason().unwrap_or_else(|| "Ran; no match and no opinion".to_string());
+            return Some((NonVoteKind::NoRecord, reason));
+        }
+        None
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -331,40 +403,43 @@ impl AnalysisResult {
 
         let mut participating = Vec::new();
         let mut unavailable = Vec::new();
+        let mut flagged_by = Vec::new();
+        let mut confirmed_by = Vec::new();
 
-        for detection in &self.detections {
-            let is_unavailable = detection.error_message.is_some()
-                || detection.metadata.get("status").and_then(|v| v.as_str()) == Some("unavailable")
-                || matches!(detection.verdict, ThreatVerdict::Unknown);
-
-            if is_unavailable {
+        for detection in self.detections.iter().filter(|d| !d.is_aggregate()) {
+            if let Some((kind, reason)) = detection.non_vote() {
                 unknown_count += 1;
-                let reason = detection.error_message.clone().unwrap_or_else(|| {
-                    "Engine unavailable or did not produce a verdict".to_string()
-                });
-
                 unavailable.push(UnavailableEngineInfo {
                     engine_name: detection.engine_name.clone(),
                     engine_type: detection.engine_type.clone(),
                     reason,
+                    kind,
                 });
-            } else {
-                participating.push(detection.engine_name.clone());
-                total_confidence += detection.confidence;
-
-                match detection.verdict {
-                    ThreatVerdict::Malicious => malicious_count += 1,
-                    ThreatVerdict::Benign => benign_count += 1,
-                    ThreatVerdict::Suspicious => suspicious_count += 1,
-                    ThreatVerdict::Unknown => {}
-                }
-
-                max_severity = max_severity.max(detection.severity.clone());
+                continue;
             }
+
+            participating.push(detection.engine_name.clone());
+            total_confidence += detection.confidence;
+            match detection.verdict {
+                ThreatVerdict::Malicious => {
+                    malicious_count += 1;
+                    flagged_by.push(detection.engine_name.clone());
+                    if meta_flag(detection, AUTHORITATIVE_KEY) {
+                        confirmed_by.push(detection.engine_name.clone());
+                    }
+                }
+                ThreatVerdict::Suspicious => {
+                    suspicious_count += 1;
+                    flagged_by.push(detection.engine_name.clone());
+                }
+                ThreatVerdict::Benign => benign_count += 1,
+                ThreatVerdict::Unknown => {}
+            }
+            max_severity = max_severity.max(detection.severity.clone());
         }
 
         let total_participating = malicious_count + benign_count + suspicious_count;
-        let total_engines = self.detections.len();
+        let total_engines = total_participating + unknown_count;
 
         self.participating_engines = participating.clone();
         self.unavailable_engines = unavailable.clone();
@@ -378,55 +453,73 @@ impl AnalysisResult {
         };
         self.consensus_severity = max_severity;
 
+        let not_voting_note = {
+            let group = |k: NonVoteKind, label: &str| {
+                let names: Vec<&str> = unavailable
+                    .iter()
+                    .filter(|u| u.kind == k)
+                    .map(|u| u.engine_name.as_str())
+                    .collect();
+                (!names.is_empty()).then(|| format!("{label} ({})", names.join(", ")))
+            };
+            let parts: Vec<String> = [
+                group(NonVoteKind::NoRecord, "no record"),
+                group(NonVoteKind::Advisory, "advisory"),
+                group(NonVoteKind::Unavailable, "unavailable"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            if parts.is_empty() {
+                String::new()
+            } else {
+                format!(" Not voting: {}.", parts.join("; "))
+            }
+        };
+
         if total_participating == 0 {
             self.consensus_verdict = ThreatVerdict::Unknown;
             self.consensus_confidence = 0.0;
             self.agreement_score = 0.0;
             self.consensus_explanation = format!(
-                "Consensus verdict is Unknown. All {} engines were unavailable or reported errors.",
-                total_engines
+                "No verdict: none of the {total_engines} engines gave one.{not_voting_note}"
             );
         } else {
-            // Confidence is calculated strictly across active participating engines
             self.consensus_confidence =
                 (total_confidence / total_participating as f32).clamp(0.0, 1.0);
 
-            // Verdict resolution
-            if malicious_count > benign_count && malicious_count > suspicious_count {
-                self.consensus_verdict = ThreatVerdict::Malicious;
+            let malicious_majority =
+                malicious_count > benign_count && malicious_count > suspicious_count;
+            self.consensus_verdict = if !confirmed_by.is_empty() || malicious_majority {
+                ThreatVerdict::Malicious
             } else if benign_count > malicious_count && benign_count > suspicious_count {
-                self.consensus_verdict = ThreatVerdict::Benign;
-            } else if suspicious_count > 0 {
-                self.consensus_verdict = ThreatVerdict::Suspicious;
+                ThreatVerdict::Benign
+            } else if malicious_count + suspicious_count > 0 {
+                ThreatVerdict::Suspicious
             } else {
-                self.consensus_verdict = ThreatVerdict::Unknown;
-            }
+                ThreatVerdict::Unknown
+            };
 
             let max_votes = malicious_count.max(benign_count).max(suspicious_count);
             self.agreement_score = (max_votes as f32 / total_participating as f32) * 100.0;
 
-            let unavailable_note = if !unavailable.is_empty() {
-                let unavail_names: Vec<String> =
-                    unavailable.iter().map(|u| u.engine_name.clone()).collect();
-                format!(
-                    " {} engine(s) ({}) were unavailable and excluded from consensus.",
-                    unavailable.len(),
-                    unavail_names.join(", ")
-                )
+            let flagged = if flagged_by.is_empty() {
+                format!("None of the {total_participating} voting engines flagged it.")
             } else {
-                String::new()
+                format!(
+                    "{} of {total_participating} voting engines flagged it ({}).",
+                    flagged_by.len(),
+                    flagged_by.join(", ")
+                )
             };
-
-            self.consensus_explanation = format!(
-                "Verdict: {:?} with {:.1}% agreement ({}/{} active engines: {}). Weighted confidence index: {:.2}.{}",
-                self.consensus_verdict,
-                self.agreement_score,
-                max_votes,
-                total_participating,
-                participating.join(", "),
-                self.consensus_confidence,
-                unavailable_note
-            );
+            self.consensus_explanation = if confirmed_by.is_empty() {
+                format!("{flagged}{not_voting_note}")
+            } else {
+                format!(
+                    "Known malicious: listed by {}. A match in a curated malware list decides the verdict. {flagged}{not_voting_note}",
+                    confirmed_by.join(", ")
+                )
+            };
         }
 
         // Record auditable history entry if verdict differs or history is empty
@@ -505,5 +598,142 @@ impl Default for AnalysisResult {
                 executable_info: None,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod consensus_tests {
+    use super::*;
+
+    fn det(
+        name: &str,
+        verdict: ThreatVerdict,
+        meta: &[(&str, serde_json::Value)],
+    ) -> DetectionResult {
+        DetectionResult {
+            detection_id: Uuid::new_v4(),
+            engine_name: name.to_string(),
+            engine_version: "1".to_string(),
+            engine_type: EngineType::Static,
+            verdict,
+            confidence: 0.9,
+            severity: SeverityLevel::Info,
+            categories: vec![],
+            metadata: meta
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            detected_at: Utc::now(),
+            processing_time_ms: 1,
+            error_message: None,
+        }
+    }
+
+    fn result_of(dets: Vec<DetectionResult>) -> AnalysisResult {
+        let mut r = AnalysisResult::default();
+        for d in dets {
+            r.add_detection(d);
+        }
+        r
+    }
+
+    #[test]
+    fn a_known_malware_listing_is_not_outvoted() {
+        let r = result_of(vec![
+            det(
+                "MalwareBazaar",
+                ThreatVerdict::Malicious,
+                &[(AUTHORITATIVE_KEY, true.into())],
+            ),
+            det("YARA", ThreatVerdict::Benign, &[]),
+            det("Signature", ThreatVerdict::Benign, &[]),
+            det("Static", ThreatVerdict::Benign, &[]),
+        ]);
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Malicious);
+        assert!(r
+            .consensus_explanation
+            .starts_with("Known malicious: listed by MalwareBazaar"));
+    }
+
+    #[test]
+    fn an_unconfirmed_malicious_vote_is_still_outvoted() {
+        let r = result_of(vec![
+            det("Static", ThreatVerdict::Malicious, &[]),
+            det("YARA", ThreatVerdict::Benign, &[]),
+            det("Signature", ThreatVerdict::Benign, &[]),
+        ]);
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Benign);
+        assert!(r
+            .consensus_explanation
+            .contains("1 of 3 voting engines flagged it (Static)"));
+    }
+
+    #[test]
+    fn a_tie_between_malicious_and_clean_is_suspicious() {
+        let r = result_of(vec![
+            det("Static", ThreatVerdict::Malicious, &[]),
+            det("YARA", ThreatVerdict::Benign, &[]),
+        ]);
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Suspicious);
+    }
+
+    #[test]
+    fn aggregates_never_vote_or_appear() {
+        let r = result_of(vec![
+            det("MalwareBazaar", ThreatVerdict::Malicious, &[]),
+            det(
+                "Hash Analyzer Consensus",
+                ThreatVerdict::Malicious,
+                &[(AGGREGATE_KEY, true.into())],
+            ),
+            det("YARA", ThreatVerdict::Benign, &[]),
+        ]);
+        assert_eq!(r.vote_distribution.malicious, 1);
+        assert_eq!(r.vote_distribution.total_engines, 2);
+        assert!(!r
+            .participating_engines
+            .contains(&"Hash Analyzer Consensus".to_string()));
+    }
+
+    #[test]
+    fn non_votes_say_why() {
+        let mut failed = det("ClamAV", ThreatVerdict::Unknown, &[]);
+        failed.error_message = Some("connection refused".to_string());
+        let mut ml = det(
+            "ML Engine",
+            ThreatVerdict::Unknown,
+            &[("advisory_verdict", "benign".into())],
+        );
+        ml.error_message = Some("Advisory only".to_string());
+        let r = result_of(vec![
+            det(
+                "MalwareBazaar",
+                ThreatVerdict::Unknown,
+                &[("reason", "Not in MalwareBazaar".into())],
+            ),
+            failed,
+            ml,
+            det("YARA", ThreatVerdict::Benign, &[]),
+        ]);
+        let kind = |name: &str| {
+            r.unavailable_engines
+                .iter()
+                .find(|u| u.engine_name == name)
+                .unwrap()
+                .kind
+        };
+        assert_eq!(kind("MalwareBazaar"), NonVoteKind::NoRecord);
+        assert_eq!(kind("ClamAV"), NonVoteKind::Unavailable);
+        assert_eq!(kind("ML Engine"), NonVoteKind::Advisory);
+        assert!(r.consensus_explanation.ends_with(
+            "Not voting: no record (MalwareBazaar); advisory (ML Engine); unavailable (ClamAV)."
+        ));
+    }
+
+    #[test]
+    fn nothing_voting_is_no_verdict() {
+        let r = result_of(vec![det("MalwareBazaar", ThreatVerdict::Unknown, &[])]);
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Unknown);
+        assert!(r.consensus_explanation.starts_with("No verdict"));
     }
 }

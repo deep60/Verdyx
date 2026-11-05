@@ -944,6 +944,10 @@ impl HashAnalyzer {
                     }
                 }
 
+                metadata.insert(
+                    crate::models::analysis_result::AUTHORITATIVE_KEY.to_string(),
+                    serde_json::Value::Bool(true),
+                );
                 Ok(HashReputation {
                     source: "MalwareBazaar".to_string(),
                     verdict: ThreatVerdict::Malicious,
@@ -973,17 +977,20 @@ impl HashAnalyzer {
                     query_time_ms: query_time,
                 })
             } else {
-                // Hash not found - unknown
+                // Not in MalwareBazaar: says nothing about whether it's safe.
                 Ok(HashReputation {
                     source: "MalwareBazaar".to_string(),
                     verdict: ThreatVerdict::Unknown,
-                    confidence: 0.1,
+                    confidence: 0.0,
                     reliability_score: 0.85,
                     first_seen: None,
                     last_seen: None,
                     detection_names: vec![],
                     threat_types: vec![],
-                    metadata: HashMap::new(),
+                    metadata: HashMap::from([(
+                        "reason".to_string(),
+                        serde_json::json!("Not in MalwareBazaar's known-malware database"),
+                    )]),
                     query_time_ms: query_time,
                 })
             }
@@ -1115,6 +1122,10 @@ impl HashAnalyzer {
         }
         let mut metadata = HashMap::new();
         metadata.insert("checked_hash".to_string(), serde_json::json!(lower_hash));
+        metadata.insert(
+            crate::models::analysis_result::AUTHORITATIVE_KEY.to_string(),
+            serde_json::Value::Bool(true),
+        );
         Some(HashReputation {
             source: "EICAR test file".to_string(),
             verdict: ThreatVerdict::Malicious,
@@ -1298,6 +1309,24 @@ impl HashAnalyzer {
                 ThreatVerdict::Unknown
             };
 
+        // A source that failed while others answered still shows up as unavailable.
+        for (source, error) in &query_errors {
+            result.add_detection(DetectionResult {
+                detection_id: Uuid::new_v4(),
+                engine_name: source.clone(),
+                engine_version: "1.0.0".to_string(),
+                engine_type: EngineType::Hash,
+                verdict: ThreatVerdict::Unknown,
+                confidence: 0.0,
+                severity: SeverityLevel::Info,
+                categories: vec![],
+                metadata: std::collections::HashMap::new(),
+                detected_at: Utc::now(),
+                processing_time_ms: 0,
+                error_message: Some(error.to_string()),
+            });
+        }
+
         // Create detection results for each reputation source
         let total_sources = reputations.len();
         for reputation in reputations {
@@ -1324,7 +1353,7 @@ impl HashAnalyzer {
                 engine_version: "1.0.0".to_string(),
                 engine_type: EngineType::Hash,
                 verdict: reputation.verdict,
-                confidence: weighted_confidence,
+                confidence: reputation.confidence,
                 severity,
                 categories: reputation
                     .threat_types
@@ -1363,6 +1392,10 @@ impl HashAnalyzer {
             categories: vec![],
             metadata: {
                 let mut meta = std::collections::HashMap::new();
+                meta.insert(
+                    crate::models::analysis_result::AGGREGATE_KEY.to_string(),
+                    serde_json::Value::Bool(true),
+                );
                 meta.insert(
                     "total_sources".to_string(),
                     serde_json::Value::Number(total_sources.into()),
