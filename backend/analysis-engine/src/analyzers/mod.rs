@@ -705,7 +705,8 @@ impl AnalysisEngine {
         }
 
         // Add detections to result
-        for det in detections {
+        for mut det in detections {
+            no_match_is_no_record(&mut det);
             result.add_detection(det);
         }
 
@@ -804,18 +805,20 @@ impl AnalysisEngine {
             .map_err(|e| anyhow!("Heuristic analysis error: {e}"))?;
         let risk_score = self.heuristic_engine.calculate_risk_score(&matches);
 
-        let verdict = if risk_score >= 50.0 {
+        // Points from distinct rules: one strong rule (3) is suspicious, two
+        // or more together are malicious. Thresholds match the static analyzer
+        // and come from the detection benchmark.
+        let verdict = if risk_score >= 5.0 {
             ThreatVerdict::Malicious
-        } else if risk_score >= 15.0 {
+        } else if risk_score >= 2.0 {
             ThreatVerdict::Suspicious
         } else {
             ThreatVerdict::Benign
         };
         let calibrated_confidence = match verdict {
-            ThreatVerdict::Malicious => (0.80 + (risk_score / 500.0)).clamp(0.80, 0.99),
-            ThreatVerdict::Suspicious => (0.65 + (risk_score / 250.0)).clamp(0.65, 0.89),
-            ThreatVerdict::Benign => ((95.0 - risk_score * 1.2) / 100.0).clamp(0.88, 0.96),
-            ThreatVerdict::Unknown => 0.50,
+            ThreatVerdict::Malicious => 0.8,
+            ThreatVerdict::Suspicious => 0.6,
+            _ => 0.6,
         };
 
         Ok(DetectionResult {
@@ -1346,6 +1349,23 @@ impl AnalysisEngine {
     }
 }
 
+/// Engines that only look for known-bad patterns.
+const MATCH_ONLY_ENGINES: [&str; 3] = ["YARA", "ClamAV", "Verdyx Signature Matcher"];
+
+/// A pattern engine that matched nothing has no opinion: it can only say a
+/// file contains something known-bad, never that it's safe. Counting "no
+/// match" as a clean vote let two such engines outvote the engines that did
+/// flag a file; in the detection benchmark that hid most of the malware.
+pub(crate) fn no_match_is_no_record(d: &mut DetectionResult) {
+    if d.verdict == ThreatVerdict::Benign && MATCH_ONLY_ENGINES.contains(&d.engine_name.as_str()) {
+        d.verdict = ThreatVerdict::Unknown;
+        d.confidence = 0.0;
+        d.metadata
+            .entry("reason".to_string())
+            .or_insert_with(|| serde_json::json!("No known-bad pattern matched"));
+    }
+}
+
 fn looks_like_email(filename: &str, data: &[u8]) -> bool {
     let name = filename.to_ascii_lowercase();
     if name.ends_with(".eml") || name.ends_with(".mime") {
@@ -1397,5 +1417,31 @@ mod tests {
         assert!(!options.enable_hash_analysis);
         assert_eq!(options.priority, AnalysisPriority::High);
         assert_eq!(options.custom_metadata.get("source").unwrap(), "unit_test");
+    }
+
+    #[test]
+    fn pattern_engines_that_match_nothing_do_not_vote_clean() {
+        let mut yara = AnalysisEngine::create_unavailable_detection(
+            "YARA",
+            "libyara",
+            EngineType::Yara,
+            String::new(),
+        );
+        yara.error_message = None;
+        yara.metadata.clear();
+        yara.verdict = ThreatVerdict::Benign;
+        no_match_is_no_record(&mut yara);
+        assert_eq!(yara.verdict, ThreatVerdict::Unknown);
+        assert_eq!(
+            yara.non_vote().map(|(k, _)| k),
+            Some(crate::models::analysis_result::NonVoteKind::NoRecord)
+        );
+
+        // An engine that inspects the whole file keeps its clean vote.
+        let mut stat = yara.clone();
+        stat.engine_name = "Verdyx Static Analyzer".to_string();
+        stat.verdict = ThreatVerdict::Benign;
+        no_match_is_no_record(&mut stat);
+        assert_eq!(stat.verdict, ThreatVerdict::Benign);
     }
 }
