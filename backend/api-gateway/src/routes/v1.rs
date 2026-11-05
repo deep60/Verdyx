@@ -23,10 +23,10 @@ pub fn create_routes(state: AppState) -> Router {
     // ── Mixed routes (optional auth) ─────────────────────
     let mixed_routes = Router::new()
         .nest("/bounties", bounty_routes())
-        .nest("/analysis", analysis_routes())
+        .nest("/analysis", analysis_routes(state.clone()))
         .nest("/engines", engine_routes())
         .nest("/reputation", reputation_routes())
-        .nest("/submissions", submission_routes())
+        .nest("/submissions", submission_routes(state.clone()))
         .route(
             "/voting/bounty/{bounty_id}/phase",
             get(consensus_proxy::get_phase),
@@ -120,11 +120,25 @@ fn bounty_routes() -> Router<AppState> {
         .route("/{bounty_id}/finalize", put(bounty::finalize_bounty))
 }
 
-fn analysis_routes() -> Router<AppState> {
+fn analysis_routes(state: AppState) -> Router<AppState> {
+    let scans = Router::new()
+        .route("/submit", post(analysis::submit_analysis))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limiter::scan_rate_limit_middleware,
+        ));
+    let site_checks = Router::new()
+        .route("/web-intel", get(web_intel::inspect_url_web_intel))
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            rate_limiter::site_check_rate_limit_middleware,
+        ));
+
     Router::new()
+        .merge(scans)
+        .merge(site_checks)
         .route("/", get(analysis::list_analyses))
         .route("/stats", get(analysis::get_analysis_stats))
-        .route("/web-intel", get(web_intel::inspect_url_web_intel))
         .route("/{analysis_id}", get(analysis::get_analysis))
         .route(
             "/{analysis_id}/details",
@@ -135,7 +149,6 @@ fn analysis_routes() -> Router<AppState> {
             get(analysis::get_analyses_by_bounty),
         )
         .route("/by-hash/{file_hash}", get(analysis::get_analyses_by_hash))
-        .route("/submit", post(analysis::submit_analysis))
         .route("/{analysis_id}/dispute", post(analysis::dispute_analysis))
 }
 
@@ -180,12 +193,34 @@ fn wallet_routes() -> Router<AppState> {
         .route("/claim-rewards", post(wallet::claim_rewards))
 }
 
-fn submission_routes() -> Router<AppState> {
-    Router::new()
-        .route("/", get(submission::list_submissions))
-        .route("/{submission_id}", get(submission::get_submission))
+fn submission_routes(state: AppState) -> Router<AppState> {
+    // Each of these starts an analysis.
+    let scans = Router::new()
         .route("/", post(submission::create_submission))
         .route("/file", post(submission::create_file_submission))
+        .route(
+            "/{submission_id}/start-analysis",
+            post(submission::start_analysis),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limiter::scan_rate_limit_middleware,
+        ));
+    let site_checks = Router::new()
+        .route(
+            "/{submission_id}/web-intel",
+            get(web_intel::get_submission_web_intel),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            state,
+            rate_limiter::site_check_rate_limit_middleware,
+        ));
+
+    Router::new()
+        .merge(scans)
+        .merge(site_checks)
+        .route("/", get(submission::list_submissions))
+        .route("/{submission_id}", get(submission::get_submission))
         .route(
             "/{submission_id}/vote",
             post(submission::vote_on_submission),
@@ -195,20 +230,12 @@ fn submission_routes() -> Router<AppState> {
             post(submission::verify_submission),
         )
         .route(
-            "/{submission_id}/start-analysis",
-            post(submission::start_analysis),
-        )
-        .route(
             "/{submission_id}/analyses",
             get(submission::get_submission_analyses),
         )
         .route(
             "/{submission_id}/consensus",
             get(submission::get_submission_consensus),
-        )
-        .route(
-            "/{submission_id}/web-intel",
-            get(web_intel::get_submission_web_intel),
         )
         .route("/my-submissions", get(submission::get_my_submissions))
 }
