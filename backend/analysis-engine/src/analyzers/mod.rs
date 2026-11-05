@@ -544,6 +544,7 @@ impl AnalysisEngine {
                 signature_future
             );
 
+            let opts = &request.analysis_options;
             // Collect results and errors
             match hash_res {
                 Ok(mut dets) => detections.append(&mut dets),
@@ -553,6 +554,8 @@ impl AnalysisEngine {
                 }
             }
             match static_res {
+                // Switched off for this kind of target, so it took no part.
+                Err(_) if !opts.enable_static_analysis => {}
                 Ok(det) => detections.push(det),
                 Err(e) => {
                     warn!("Static analysis failed: {}", e);
@@ -560,6 +563,8 @@ impl AnalysisEngine {
                 }
             }
             match yara_res {
+                // Switched off for this kind of target, so it took no part.
+                Err(_) if !opts.enable_yara_analysis => {}
                 Ok(det) => detections.push(det),
                 Err(e) => {
                     warn!("Yara analysis unavailable: {}", e);
@@ -577,6 +582,8 @@ impl AnalysisEngine {
                 }
             }
             match clamav_res {
+                // Switched off for this kind of target, so it took no part.
+                Err(_) if !opts.enable_clamav_analysis => {}
                 // Turned off by config, so it took no part in this analysis.
                 Ok(det) if det.engine_version == "Disabled" => {}
                 Ok(det) => detections.push(det),
@@ -596,6 +603,8 @@ impl AnalysisEngine {
                 }
             }
             match ml_res {
+                // Switched off for this kind of target, so it took no part.
+                Err(_) if !opts.enable_ml_analysis => {}
                 Ok(det) => detections.push(det),
                 Err(e) => {
                     warn!("ML analysis unavailable: {}", e);
@@ -613,6 +622,8 @@ impl AnalysisEngine {
                 }
             }
             match heuristic_res {
+                // Switched off for this kind of target, so it took no part.
+                Err(_) if !opts.enable_heuristic_analysis => {}
                 Ok(det) => detections.push(det),
                 Err(e) => {
                     warn!("Heuristic analysis failed: {}", e);
@@ -620,6 +631,8 @@ impl AnalysisEngine {
                 }
             }
             match signature_res {
+                // Switched off for this kind of target, so it took no part.
+                Err(_) if !opts.enable_signature_analysis => {}
                 Ok(det) => detections.push(det),
                 Err(e) => {
                     warn!("Signature matching failed: {}", e);

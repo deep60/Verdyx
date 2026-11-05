@@ -1059,10 +1059,43 @@ pub async fn list_submissions(
 /// GET /api/v1/submissions/:id
 pub async fn get_submission(
     State(state): State<AppState>,
-    _claims: Option<crate::middleware::auth::Claims>,
+    claims: Option<crate::middleware::auth::Claims>,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<FileSubmissionListItem>, StatusCode> {
-    state
+    load_visible_submission(&state, submission_id, claims.as_ref())
+        .await
+        .map(Json)
+}
+
+/// Who may read a scan and its results.
+///
+/// - A signed-out upload has no owner, so its unguessable link is the only key.
+/// - A scan with a bounty is posted for analysts, so any signed-in user may.
+/// - Otherwise only the person who submitted it, or an admin.
+pub(crate) fn can_view(
+    submission: &FileSubmissionListItem,
+    claims: Option<&crate::middleware::auth::Claims>,
+) -> bool {
+    if submission.submitter_id.is_nil() {
+        return true;
+    }
+    let Some(claims) = claims else {
+        return false;
+    };
+    submission.bounty_id.is_some()
+        || claims.sub == submission.submitter_id
+        || claims.is_admin
+        || claims.role == "admin"
+}
+
+/// Loads a scan the caller may read. A scan they may not read answers 404,
+/// the same as one that doesn't exist, so ids can't be probed.
+pub(crate) async fn load_visible_submission(
+    state: &AppState,
+    submission_id: Uuid,
+    claims: Option<&crate::middleware::auth::Claims>,
+) -> Result<FileSubmissionListItem, StatusCode> {
+    let submission = state
         .db
         .get_file_submission_any(submission_id)
         .await
@@ -1070,21 +1103,12 @@ pub async fn get_submission(
             tracing::error!("Failed to load submission {}: {}", submission_id, e);
             StatusCode::INTERNAL_SERVER_ERROR
         })?
-        .ok_or(StatusCode::NOT_FOUND)
-        .map(Json)
-}
-
-async fn require_existing_submission(
-    state: &AppState,
-    submission_id: Uuid,
-) -> Result<(), StatusCode> {
-    state
-        .db
-        .get_file_submission_any(submission_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .map(|_| ())
-        .ok_or(StatusCode::NOT_FOUND)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    if can_view(&submission, claims) {
+        Ok(submission)
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }
 
 /// Vote on a submission
@@ -1386,16 +1410,20 @@ pub async fn get_my_submissions(
 /// for engine analysis.
 pub async fn start_analysis(
     State(state): State<AppState>,
-    _claims: Option<crate::middleware::auth::Claims>,
+    claims: Option<crate::middleware::auth::Claims>,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let exists = state
+    let found = state
         .db
         .get_file_submission_any(submission_id)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .is_some();
-    if exists {
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let Some(sub) = &found {
+        if !can_view(sub, claims.as_ref()) {
+            return Err(StatusCode::NOT_FOUND);
+        }
+    }
+    if found.is_some() {
         sqlx::query(
             "UPDATE submissions SET analysis_status = 'analyzing', updated_at = NOW() WHERE id = $1",
         )
@@ -1441,11 +1469,13 @@ pub async fn start_analysis(
 /// Returns analysis results associated with the submission's bounty.
 pub async fn get_submission_analyses(
     State(state): State<AppState>,
-    _claims: Option<crate::middleware::auth::Claims>,
+    claims: Option<crate::middleware::auth::Claims>,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    require_existing_submission(&state, submission_id).await?;
+    load_visible_submission(&state, submission_id, claims.as_ref()).await?;
 
+    // Every value comes from what the engine recorded. An engine that gave no
+    // verdict has no confidence, and nothing is filled in.
     let rows: Vec<serde_json::Value> = sqlx::query_scalar(
         r#"SELECT row_to_json(t) FROM (
              SELECT
@@ -1453,42 +1483,36 @@ pub async fn get_submission_analyses(
                submission_id,
                submission_id AS "submissionId",
                CASE WHEN LOWER(verdict) = 'benign' THEN 'clean' ELSE LOWER(verdict) END AS verdict,
-               ROUND((
-                 CASE
-                   WHEN LOWER(verdict) IN ('benign', 'clean') AND COALESCE(confidence, confidence_score, 0.0) <= 0.35 THEN 94.0
-                   WHEN LOWER(verdict) = 'unknown' AND COALESCE(confidence, confidence_score, 0.0) <= 0.15 THEN 88.0
-                   ELSE COALESCE(confidence, confidence_score, 0.92) * CASE WHEN COALESCE(confidence, confidence_score, 0.92) <= 1.0 THEN 100.0 ELSE 1.0 END
-                 END
-               )::numeric, 1)::float8 AS confidence,
-               COALESCE(confidence_score, confidence, 0.92)::float8 AS confidence_score,
+               CASE
+                 WHEN LOWER(verdict) IN ('unknown', 'unavailable') THEN NULL
+                 WHEN COALESCE(confidence, confidence_score) IS NULL THEN NULL
+                 WHEN COALESCE(confidence, confidence_score) <= 1.0
+                   THEN ROUND((COALESCE(confidence, confidence_score) * 100.0)::numeric, 0)::float8
+                 ELSE ROUND(COALESCE(confidence, confidence_score)::numeric, 0)::float8
+               END AS confidence,
+               COALESCE(metadata ->> 'vote',
+                 CASE WHEN LOWER(verdict) IN ('unknown', 'unavailable') THEN 'no_verdict' ELSE 'counted' END
+               ) AS vote,
+               metadata ->> 'reason' AS reason,
                LOWER(COALESCE(analysis_status, 'completed')) AS status,
                COALESCE(analysis_status, 'completed') AS analysis_status,
-               CASE
-                 WHEN LOWER(COALESCE(engine_name, '')) LIKE '%yara%' THEN '3.0'
-                 WHEN LOWER(COALESCE(engine_name, '')) LIKE '%clamav%' THEN '2.5'
-                 WHEN LOWER(COALESCE(engine_name, '')) LIKE '%ml%' OR LOWER(COALESCE(engine_name, '')) LIKE '%heuristic%' THEN '2.0'
-                 ELSE '1.5'
-               END AS "stakeAmount",
-               COALESCE(processing_time_ms, 12) AS "processingTimeMs",
-               COALESCE(severity, 'Low') AS severity,
-               COALESCE(metadata, '{}'::jsonb) AS metadata,
+               processing_time_ms AS "processingTimeMs",
+               severity,
+               COALESCE(metadata, '{}'::jsonb) - 'vote' - 'reason' - 'engine_type' AS metadata,
                created_at,
                created_at AS "createdAt",
                COALESCE(completed_at, detected_at, created_at) AS completed_at,
                COALESCE(completed_at, detected_at, created_at) AS "completedAt",
                json_build_object(
-                 'name', CASE WHEN engine_name = 'ML Engine' THEN 'Verdyx ML Classifier' ELSE COALESCE(engine_name, 'Verdyx Scanner') END,
-                 'type', CASE
-                   WHEN LOWER(COALESCE(engine_name, '')) LIKE '%ml%' OR LOWER(COALESCE(engine_name, '')) LIKE '%onnx%' THEN 'ml'
-                   WHEN LOWER(COALESCE(engine_name, '')) LIKE '%yara%' OR LOWER(COALESCE(engine_name, '')) LIKE '%clamav%' OR LOWER(COALESCE(engine_name, '')) LIKE '%sig%' THEN 'signature'
-                   ELSE 'hybrid'
-                 END,
-                 'version', CASE WHEN engine_version = 'not compiled' THEN '2.1.0-gbdt' ELSE COALESCE(engine_version, '1.0.0') END,
-                 'description', CONCAT('Engine v', CASE WHEN engine_version = 'not compiled' THEN '2.1.0-gbdt' ELSE COALESCE(engine_version, '1.0.0') END, ' · ', COALESCE(severity, 'Standard analysis'), ' · ', COALESCE(processing_time_ms, 12), 'ms')
+                 'name', engine_name,
+                 'type', COALESCE(metadata ->> 'engine_type', 'scanner'),
+                 'version', engine_version
                ) AS engine
              FROM analysis_results
              WHERE submission_id = $1
-             ORDER BY created_at DESC
+               AND engine_name <> 'Hash Analyzer Consensus'
+               AND COALESCE((metadata ->> 'aggregate')::boolean, false) = false
+             ORDER BY engine_name
            ) t"#,
     )
     .bind(submission_id)
@@ -1509,129 +1533,210 @@ pub async fn get_submission_analyses(
 /// Returns the aggregated verdict across all analyses.
 pub async fn get_submission_consensus(
     State(state): State<AppState>,
-    _claims: Option<crate::middleware::auth::Claims>,
+    claims: Option<crate::middleware::auth::Claims>,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    require_existing_submission(&state, submission_id).await?;
+    load_visible_submission(&state, submission_id, claims.as_ref()).await?;
 
-    let malicious: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM analysis_results WHERE submission_id = $1 AND LOWER(verdict) = 'malicious'",
-    )
-    .bind(submission_id)
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
-
-    let suspicious: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM analysis_results WHERE submission_id = $1 AND LOWER(verdict) = 'suspicious'",
-    )
-    .bind(submission_id)
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
-
-    let clean: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM analysis_results WHERE submission_id = $1 AND LOWER(verdict) IN ('benign', 'clean')",
-    )
-    .bind(submission_id)
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
-
-    let total = malicious + suspicious + clean;
-    if total == 0 {
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    // Determine consensus verdict
-    let final_verdict = if malicious >= suspicious && malicious >= clean {
-        "malicious"
-    } else if suspicious >= clean {
-        "suspicious"
-    } else {
-        "clean"
-    };
-
-    let max_votes = malicious.max(suspicious).max(clean);
-    let confidence = if total > 0 {
-        (max_votes as f64 / total as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    let submission_meta: Option<serde_json::Value> =
-        sqlx::query_scalar("SELECT metadata FROM submissions WHERE id = $1")
-            .bind(submission_id)
-            .fetch_optional(state.db.pool())
-            .await
-            .unwrap_or_default()
-            .flatten();
-
-    let participating_engines: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT engine_name FROM analysis_results WHERE submission_id = $1 AND verdict NOT IN ('Unavailable', 'unavailable', 'Unknown', 'unknown')",
+    let votes: Vec<String> = sqlx::query_scalar(
+        "SELECT LOWER(verdict) FROM analysis_results
+         WHERE submission_id = $1
+           AND engine_name <> 'Hash Analyzer Consensus'
+           AND COALESCE((metadata ->> 'aggregate')::boolean, false) = false",
     )
     .bind(submission_id)
     .fetch_all(state.db.pool())
     .await
-    .unwrap_or_default();
+    .map_err(|e| {
+        tracing::error!("Failed to load votes for {}: {}", submission_id, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if votes.is_empty() {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
-    let default_explanation = format!(
-        "Verdict: {} determined with {:.1}% engine agreement across {} participating analyzers ({} malicious, {} suspicious, {} clean).",
-        final_verdict,
-        (confidence * 10.0).round() / 10.0,
-        total,
-        malicious,
-        suspicious,
-        clean
-    );
+    let meta: serde_json::Value = sqlx::query_scalar::<_, Option<serde_json::Value>>(
+        "SELECT metadata FROM submissions WHERE id = $1",
+    )
+    .bind(submission_id)
+    .fetch_optional(state.db.pool())
+    .await
+    .unwrap_or_default()
+    .flatten()
+    .unwrap_or(serde_json::Value::Null);
 
-    let explanation = submission_meta
-        .as_ref()
-        .and_then(|m| m.get("consensus_explanation"))
+    Ok(Json(consensus_body(submission_id, &votes, &meta)))
+}
+
+/// The consensus as the analysis engine decided it. Scans stored before the
+/// engine recorded its verdict fall back to a count of the stored votes.
+fn consensus_body(
+    submission_id: Uuid,
+    votes: &[String],
+    meta: &serde_json::Value,
+) -> serde_json::Value {
+    let count = |names: &[&str]| votes.iter().filter(|v| names.contains(&v.as_str())).count();
+    let malicious = count(&["malicious"]);
+    let suspicious = count(&["suspicious"]);
+    let clean = count(&["benign", "clean"]);
+    let voting = malicious + suspicious + clean;
+
+    let final_verdict = match meta.get("consensus_verdict").and_then(|v| v.as_str()) {
+        Some("benign") => "clean".to_string(),
+        Some(v) => v.to_string(),
+        None if voting == 0 => "unknown".to_string(),
+        None if malicious > suspicious && malicious > clean => "malicious".to_string(),
+        None if clean > malicious && clean > suspicious => "clean".to_string(),
+        None => "suspicious".to_string(),
+    };
+
+    let not_voting: Vec<serde_json::Value> = meta
+        .get("unavailable_engines")
+        .and_then(|v| v.as_array())
+        .map(|list| {
+            list.iter()
+                .filter(|u| {
+                    u.get("engine_name").and_then(|n| n.as_str()) != Some("Hash Analyzer Consensus")
+                })
+                .map(|u| {
+                    serde_json::json!({
+                        "engineName": u.get("engine_name"),
+                        "engineType": u.get("engine_type"),
+                        "reason": u.get("reason"),
+                        "kind": u.get("kind").and_then(|k| k.as_str()).unwrap_or("unavailable"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let explanation = meta
+        .get("consensus_explanation")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or(default_explanation);
-
-    let unavailable_engines = submission_meta
-        .as_ref()
-        .and_then(|m| m.get("unavailable_engines"))
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!([]));
-
-    let vote_dist = submission_meta
-        .as_ref()
-        .and_then(|m| m.get("vote_distribution"))
-        .cloned()
+        .map(str::to_string)
         .unwrap_or_else(|| {
-            serde_json::json!({
-                "malicious": malicious,
-                "suspicious": suspicious,
-                "clean": clean,
-                "totalParticipating": total,
-                "totalEngines": total,
-            })
+            format!(
+                "{} of {voting} voting engines flagged it.",
+                malicious + suspicious
+            )
         });
 
-    let verdict_history = submission_meta
-        .as_ref()
-        .and_then(|m| m.get("verdict_history"))
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!([]));
+    let max_votes = malicious.max(suspicious).max(clean);
+    let agreement = if voting == 0 {
+        0.0
+    } else {
+        max_votes as f64 / voting as f64
+    };
 
-    Ok(Json(serde_json::json!({
+    serde_json::json!({
         "submissionId": submission_id,
         "finalVerdict": final_verdict,
-        "confidenceScore": (confidence * 10.0).round() / 10.0,
-        "agreementScore": (confidence / 100.0),
-        "confidenceNote": "Agreement score reflects weighted concordance across participating engines (0-100%), not an uncalibrated Bayesian posterior probability.",
+        "explanation": explanation,
         "maliciousVotes": malicious,
         "suspiciousVotes": suspicious,
         "cleanVotes": clean,
-        "totalVotes": total,
-        "participatingEngines": participating_engines,
-        "unavailableEngines": unavailable_engines,
-        "voteDistribution": vote_dist,
-        "explanation": explanation,
-        "verdictHistory": verdict_history,
-    })))
+        "totalVotes": voting,
+        "flaggedVotes": malicious + suspicious,
+        "engineCount": votes.len(),
+        "agreementScore": agreement,
+        "unavailableEngines": not_voting,
+        "verdictHistory": meta.get("verdict_history").cloned().unwrap_or_else(|| serde_json::json!([])),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::auth::Claims;
+
+    fn sub(owner: Uuid, bounty: Option<Uuid>) -> FileSubmissionListItem {
+        FileSubmissionListItem {
+            id: Uuid::new_v4(),
+            submitter_id: owner,
+            user_id: owner,
+            original_filename: None,
+            filename: None,
+            file_name: None,
+            file_hash: None,
+            url: Some("https://example.com".to_string()),
+            file_size: None,
+            mime_type: None,
+            submission_type: "url".to_string(),
+            analysis_status: "completed".to_string(),
+            status: "completed".to_string(),
+            is_malicious: None,
+            description: None,
+            analysis_type: None,
+            bounty_amount: None,
+            priority: None,
+            bounty_id: bounty,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn claims(user: Uuid, role: &str) -> Claims {
+        serde_json::from_value(serde_json::json!({
+            "sub": user, "email": "a@example.com", "role": role, "exp": 0
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn only_the_owner_or_an_admin_can_read_a_private_scan() {
+        let (owner, other) = (Uuid::new_v4(), Uuid::new_v4());
+        let s = sub(owner, None);
+        assert!(!can_view(&s, None), "signed out");
+        assert!(!can_view(&s, Some(&claims(other, "user"))), "someone else");
+        assert!(can_view(&s, Some(&claims(owner, "user"))));
+        assert!(can_view(&s, Some(&claims(other, "admin"))));
+    }
+
+    #[test]
+    fn ownerless_and_bounty_scans_are_shared_as_documented() {
+        assert!(can_view(&sub(Uuid::nil(), None), None));
+        let bounty = sub(Uuid::new_v4(), Some(Uuid::new_v4()));
+        assert!(!can_view(&bounty, None));
+        assert!(can_view(&bounty, Some(&claims(Uuid::new_v4(), "user"))));
+    }
+
+    #[test]
+    fn consensus_uses_the_engine_verdict_and_names_non_voters() {
+        let votes: Vec<String> = ["malicious", "benign", "benign", "unknown"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let meta = serde_json::json!({
+            "consensus_verdict": "malicious",
+            "consensus_explanation": "Known malicious: listed by URLhaus.",
+            "unavailable_engines": [
+                {"engine_name": "ThreatFox", "engine_type": "Hash", "reason": "Not listed on ThreatFox", "kind": "no_record"},
+                {"engine_name": "Hash Analyzer Consensus", "engine_type": "Hash", "reason": "x"}
+            ]
+        });
+        let body = consensus_body(Uuid::nil(), &votes, &meta);
+        assert_eq!(body["finalVerdict"], "malicious");
+        assert_eq!(body["flaggedVotes"], 1);
+        assert_eq!(body["totalVotes"], 3);
+        assert_eq!(body["engineCount"], 4);
+        let non_voters = body["unavailableEngines"].as_array().unwrap();
+        assert_eq!(non_voters.len(), 1);
+        assert_eq!(non_voters[0]["engineName"], "ThreatFox");
+        assert_eq!(non_voters[0]["kind"], "no_record");
+        assert!(body.get("confidenceScore").is_none());
+    }
+
+    #[test]
+    fn old_scans_fall_back_to_counting_without_favouring_malicious() {
+        let votes: Vec<String> = ["malicious", "benign"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let body = consensus_body(Uuid::nil(), &votes, &serde_json::Value::Null);
+        assert_eq!(body["finalVerdict"], "suspicious");
+        let none: Vec<String> = vec!["unknown".to_string()];
+        assert_eq!(
+            consensus_body(Uuid::nil(), &none, &serde_json::Value::Null)["finalVerdict"],
+            "unknown"
+        );
+    }
 }

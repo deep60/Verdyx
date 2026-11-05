@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { flaggedSummary } from "@/lib/report";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
@@ -88,7 +89,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
                     </span>
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Confidence: {consensus.confidenceScore}%
+                    {flaggedSummary(consensus)}
                   </p>
                   <button
                     onClick={() => setLocation(`/analysis/${submissionId}`)}

@@ -57,14 +57,20 @@ export interface ApiEngine {
 export interface ApiAnalysis {
   id: string;
   engineId?: string;
-  engine?: { name?: string; type?: string; description?: string };
+  engine?: { name?: string; type?: string; version?: string; description?: string };
   submissionId?: string;
   verdict?: string;
-  confidence?: number;
-  confidenceScore?: string;
+  /** Percent, only when the engine gave a verdict. */
+  confidence?: number | null;
+  /** How the engine took part: "counted", "no_record", "advisory", "unavailable". */
+  vote?: string;
+  /** Why it didn't vote, when it didn't. */
+  reason?: string | null;
+  severity?: string | null;
+  processingTimeMs?: number | null;
+  metadata?: Record<string, unknown>;
   status?: string;
   analysisStatus?: string;
-  stakeAmount?: string;
   createdAt?: string;
   completedAt?: string;
 }
@@ -73,19 +79,20 @@ export interface ApiConsensus {
   id?: string;
   submissionId?: string;
   finalVerdict?: string;
-  confidenceScore?: number | string;
+  /** Share of voting engines that agree with the top verdict (0-1). */
   agreementScore?: number;
-  confidenceNote?: string;
   maliciousVotes?: number;
   suspiciousVotes?: number;
   cleanVotes?: number;
-  benignVotes?: number;
   totalVotes?: number;
+  flaggedVotes?: number;
+  engineCount?: number;
   participatingEngines?: string[];
   unavailableEngines?: Array<{
     engineName: string;
     engineType?: string;
     reason: string;
+    kind?: "unavailable" | "no_record" | "advisory";
   }>;
   explanation?: string;
   voteDistribution?: {

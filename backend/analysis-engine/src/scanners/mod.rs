@@ -11,6 +11,7 @@ pub mod email_scanner;
 pub mod file_scanner;
 pub mod url_policy;
 pub mod url_scanner;
+pub mod url_verdicts;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

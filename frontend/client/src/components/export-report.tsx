@@ -11,30 +11,39 @@ import { Download, FileJson, FileText, Share2, Printer, Shield } from "lucide-re
 import { useToast } from "@/hooks/use-toast";
 import type { AttackTechnique } from "@/lib/attack-mapping";
 import { buildStixBundle } from "@/lib/stix";
-
-export interface AnalysisRecord {
-  engineId?: string;
-  engine?: { name?: string };
-  verdict?: string;
-  confidence?: number;
-  status: string;
-  stakeAmount?: string;
-  completedAt?: string;
-}
+import type { ApiAnalysis, ApiConsensus } from "@/lib/api-types";
+import { engineFacts, engineRole, markdownReport, sortEngines } from "@/lib/report";
 
 interface ExportReportProps {
   submissionId: string;
-  fileName: string;
-  consensus?: Record<string, unknown>;
-  analyses?: AnalysisRecord[];
+  target: string;
+  targetType: string;
+  submittedAt?: string;
+  consensus?: ApiConsensus | null;
+  analyses?: ApiAnalysis[];
   attackTechniques?: AttackTechnique[];
   sha256?: string;
   targetUrl?: string;
 }
 
+function download(content: string, type: string, name: string) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+const csvCell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+
 export function ExportReport({
   submissionId,
-  fileName,
+  target,
+  targetType,
+  submittedAt,
   consensus,
   analyses = [],
   attackTechniques = [],
@@ -42,156 +51,85 @@ export function ExportReport({
   targetUrl,
 }: ExportReportProps) {
   const { toast } = useToast();
+  const fileName = target;
+  const stamp = () => new Date().toISOString().replace(/[:.]/g, "-");
+
+  const done = (what: string, icon = <FileText className="h-4 w-4 flex-shrink-0 text-success" />) =>
+    toast({
+      title: "Exported",
+      description: (
+        <div className="flex items-center gap-2">
+          {icon}
+          <span>{what}</span>
+        </div>
+      ),
+    });
+  const failed = (what: string) =>
+    toast({ title: "Export failed", description: `Couldn't export ${what}`, variant: "destructive" });
 
   const exportAsJSON = () => {
     try {
-      const reportData = {
-        submissionId,
-        fileName,
+      const report = {
+        scanId: submissionId,
+        target,
+        targetType,
+        sha256: sha256 ?? null,
+        submittedAt: submittedAt ?? null,
         exportedAt: new Date().toISOString(),
-        consensus: consensus || null,
-        analyses: analyses.map((analysis) => ({
-          engineId: analysis.engineId,
-          engineName: analysis.engine?.name,
-          verdict: analysis.verdict,
-          confidence: analysis.confidence,
-          status: analysis.status,
-          stakeAmount: analysis.stakeAmount,
-          completedAt: analysis.completedAt,
+        consensus: consensus ?? null,
+        engines: sortEngines(analyses).map((a) => ({
+          name: a.engine?.name,
+          version: a.engine?.version,
+          result: engineRole(a).label,
+          verdict: a.verdict,
+          confidence: a.confidence ?? null,
+          vote: a.vote ?? null,
+          reason: a.reason ?? null,
+          processingTimeMs: a.processingTimeMs ?? null,
+          evidence: a.metadata ?? {},
+          completedAt: a.completedAt,
         })),
-        summary: {
-          totalEngines: analyses.length,
-          completedAnalyses: analyses.filter((a) => a.status === "completed").length,
-          finalVerdict: consensus?.finalVerdict || "pending",
-          confidenceScore: consensus?.confidenceScore || "0",
-        },
       };
-
-      const dataStr = JSON.stringify(reportData, null, 2);
-      const dataBlob = new Blob([dataStr], { type: "application/json" });
-      const url = URL.createObjectURL(dataBlob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `verdyx-report-${submissionId}-${Date.now()}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: "Export Successful",
-        description: (
-          <div className="flex items-center gap-2">
-            <FileJson className="h-4 w-4 text-success flex-shrink-0" />
-            <span>Report exported as JSON</span>
-          </div>
-        ),
-      });
-    } catch (_error) {
-      toast({
-        title: "Export Failed",
-        description: "Failed to export report as JSON",
-        variant: "destructive",
-      });
+      download(JSON.stringify(report, null, 2), "application/json", `verdyx-scan-${submissionId}-${stamp()}.json`);
+      done("Report exported as JSON", <FileJson className="h-4 w-4 flex-shrink-0 text-success" />);
+    } catch {
+      failed("JSON");
     }
   };
 
   const exportAsMarkdown = () => {
     try {
-      let markdown = `# Verdyx Analysis Report\n\n`;
-      markdown += `**File:** ${fileName}\n`;
-      markdown += `**Submission ID:** ${submissionId}\n`;
-      markdown += `**Generated:** ${new Date().toLocaleString()}\n\n`;
-
-      if (consensus) {
-        markdown += `## Consensus Result\n\n`;
-        markdown += `- **Final Verdict:** ${consensus.finalVerdict}\n`;
-        markdown += `- **Confidence Score:** ${consensus.confidenceScore}%\n`;
-        markdown += `- **Total Engines:** ${consensus.totalEngines}\n`;
-        markdown += `- **Malicious Votes:** ${consensus.maliciousVotes}\n`;
-        markdown += `- **Suspicious Votes:** ${consensus.suspiciousVotes}\n`;
-        markdown += `- **Clean Votes:** ${consensus.cleanVotes}\n\n`;
-      }
-
-      if (analyses.length > 0) {
-        markdown += `## Individual Engine Analysis\n\n`;
-        markdown += `| Engine | Verdict | Confidence | Status | Stake |\n`;
-        markdown += `|--------|---------|------------|--------|-------|\n`;
-
-        analyses.forEach((analysis) => {
-          markdown += `| ${analysis.engine?.name || "Unknown"} | ${analysis.verdict || "Pending"} | ${analysis.confidence || "N/A"}% | ${analysis.status} | ${analysis.stakeAmount} ETH |\n`;
-        });
-      }
-
-      markdown += `\n---\n\n`;
-      markdown += `*Generated by Verdyx Platform*\n`;
-
-      const dataBlob = new Blob([markdown], { type: "text/markdown" });
-      const url = URL.createObjectURL(dataBlob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `verdyx-report-${submissionId}-${Date.now()}.md`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: "Export Successful",
-        description: (
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-success flex-shrink-0" />
-            <span>Report exported as Markdown</span>
-          </div>
-        ),
-      });
-    } catch (_error) {
-      toast({
-        title: "Export Failed",
-        description: "Failed to export report as Markdown",
-        variant: "destructive",
-      });
+      const md = markdownReport({ submissionId, target, targetType, sha256, submittedAt, consensus, analyses });
+      download(md, "text/markdown", `verdyx-scan-${submissionId}-${stamp()}.md`);
+      done("Report exported as Markdown");
+    } catch {
+      failed("Markdown");
     }
   };
 
   const exportAsCSV = () => {
     try {
-      let csv = "Engine Name,Verdict,Confidence,Status,Stake Amount,Completed At\n";
-
-      analyses.forEach((analysis) => {
-        csv += `"${analysis.engine?.name || "Unknown"}",`;
-        csv += `"${analysis.verdict || "Pending"}",`;
-        csv += `"${analysis.confidence || "N/A"}",`;
-        csv += `"${analysis.status}",`;
-        csv += `"${analysis.stakeAmount}",`;
-        csv += `"${analysis.completedAt ? new Date(analysis.completedAt).toLocaleString() : "N/A"}"\n`;
-      });
-
-      const dataBlob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(dataBlob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `verdyx-analysis-${submissionId}-${Date.now()}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: "Export Successful",
-        description: (
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-success flex-shrink-0" />
-            <span>Analysis data exported as CSV</span>
-          </div>
-        ),
-      });
-    } catch (_error) {
-      toast({
-        title: "Export Failed",
-        description: "Failed to export as CSV",
-        variant: "destructive",
-      });
+      const rows = [["Engine", "Version", "Result", "Confidence %", "Time ms", "Evidence"].map(csvCell).join(",")];
+      for (const a of sortEngines(analyses)) {
+        rows.push(
+          [
+            a.engine?.name,
+            a.engine?.version,
+            engineRole(a).label,
+            a.confidence ?? "",
+            a.processingTimeMs ?? "",
+            engineFacts(a)
+              .map((f) => `${f.label}: ${f.value}`)
+              .join("; "),
+          ]
+            .map(csvCell)
+            .join(","),
+        );
+      }
+      download(rows.join("\n") + "\n", "text/csv", `verdyx-engines-${submissionId}-${stamp()}.csv`);
+      done("Engine results exported as CSV");
+    } catch {
+      failed("CSV");
     }
   };
 

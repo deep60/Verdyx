@@ -85,15 +85,15 @@ fn extract_root_domain(host: &str) -> String {
 /// `GET /api/v1/submissions/:submission_id/web-intel`
 pub async fn get_submission_web_intel(
     State(state): State<AppState>,
-    _claims: Option<crate::middleware::auth::Claims>,
+    claims: Option<crate::middleware::auth::Claims>,
     Path(submission_id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
-    let sub = state
-        .db
-        .get_file_submission_any(submission_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let sub = crate::handlers::submission::load_visible_submission(
+        &state,
+        submission_id,
+        claims.as_ref(),
+    )
+    .await?;
 
     let target_raw = sub
         .url
@@ -597,54 +597,6 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         "E"
     };
 
-    let perf_score = if !is_up {
-        0
-    } else if response_time_ms < 250 {
-        98
-    } else if response_time_ms < 600 {
-        91
-    } else if response_time_ms < 1200 {
-        82
-    } else {
-        68
-    };
-    let seo_score = {
-        let mut s = 60;
-        if html_analysis["hasTitle"].as_bool().unwrap_or(false) {
-            s += 15;
-        }
-        if html_analysis["hasMetaDescription"]
-            .as_bool()
-            .unwrap_or(false)
-        {
-            s += 15;
-        }
-        if html_analysis["hasViewport"].as_bool().unwrap_or(false) {
-            s += 10;
-        }
-        s
-    };
-    let a11y_score = {
-        let mut s = 70;
-        if html_analysis["hasLang"].as_bool().unwrap_or(false) {
-            s += 15;
-        }
-        if html_analysis["imagesMissingAlt"].as_u64().unwrap_or(0) == 0 {
-            s += 15;
-        }
-        s
-    };
-    let best_practices_score = {
-        let mut s = 65;
-        if parsed_url.scheme() == "https" {
-            s += 20;
-        }
-        if html_analysis["mixedContentCount"].as_u64().unwrap_or(0) == 0 {
-            s += 15;
-        }
-        s
-    };
-
     // ── Archive History (Wayback Machine) ─────────────────────────────────
     let closest = &wayback_json["archived_snapshots"]["closest"];
     let archive_info = json!({
@@ -726,13 +678,6 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         .unwrap_or("Unknown");
 
     let tls_enabled = final_url.starts_with("https://") || parsed_url.scheme() == "https";
-    let tls_grade = if !tls_enabled {
-        "F"
-    } else if hsts_header.is_some() {
-        "A+"
-    } else {
-        "A"
-    };
 
     let encoded_shot_url = urlencoding::encode(&full_url_str);
     let screenshot_url = format!("https://s0.wp.com/mshots/v1/{encoded_shot_url}?w=1280");
@@ -902,33 +847,27 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         // 22. SSL Certificate
         "sslCertificate": ssl_cert_info,
 
-        // 23. TLS Connection
+        // 23. TLS Connection. This check doesn't inspect the handshake, so the
+        // negotiated protocol, cipher and ALPN are not reported rather than guessed.
         "tlsConnection": {
             "tlsEnabled": tls_enabled,
-            "protocol": if tls_enabled { "TLSv1.3 / TLSv1.2" } else { "Plain HTTP" },
-            "cipherSuite": if tls_enabled { "TLS_AES_256_GCM_SHA384 / ECDHE_RSA" } else { "None" },
-            "alpn": if tls_enabled { "h2, http/1.1" } else { "http/1.1" },
+            "protocol": null,
+            "cipherSuite": null,
+            "alpn": null,
+            "measured": false,
         },
 
-        // 24. TLS Security Audit
+        // 24. TLS Security Audit: only facts this check observed.
         "tlsSecurityAudit": {
-            "grade": tls_grade,
             "httpsEnforced": tls_enabled,
             "hstsPresent": hsts_header.is_some(),
             "caaPresent": !caa_records.is_empty(),
-            "forwardSecrecy": tls_enabled,
         },
 
-        // 25. TLS Client Compatibility
+        // 25. TLS Client Compatibility: not tested, so no client list.
         "tlsClientCompatibility": {
-            "clients": [
-                { "client": "Chrome 120+ / Edge", "supported": tls_enabled, "protocol": "TLS 1.3" },
-                { "client": "Safari 17+ (macOS / iOS)", "supported": tls_enabled, "protocol": "TLS 1.3" },
-                { "client": "Firefox 120+", "supported": tls_enabled, "protocol": "TLS 1.3" },
-                { "client": "Android 10+ / OkHttp", "supported": tls_enabled, "protocol": "TLS 1.3 / 1.2" },
-                { "client": "Java 17+ / OpenSSL 3.x", "supported": tls_enabled, "protocol": "TLS 1.3 / 1.2" },
-                { "client": "Legacy SSLv3 / TLS 1.0", "supported": false, "protocol": "Disabled (Secure)" }
-            ]
+            "clients": [],
+            "measured": false,
         },
 
         // 26. Subdomains
@@ -967,14 +906,13 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
         // 36. Quality Metrics
         "qualityMetrics": {
-            "performance": perf_score,
-            "accessibility": a11y_score,
-            "bestPractices": best_practices_score,
-            "seo": seo_score,
             "responseTimeMs": response_time_ms,
             "hasTitle": html_analysis["hasTitle"],
             "hasMetaDescription": html_analysis["hasMetaDescription"],
             "hasViewport": html_analysis["hasViewport"],
+            "hasLang": html_analysis["hasLang"],
+            "imagesMissingAlt": html_analysis["imagesMissingAlt"],
+            "mixedContentCount": html_analysis["mixedContentCount"],
         },
 
         // 37. Carbon Footprint
