@@ -10,6 +10,8 @@
 
 export interface ApiSubmission {
   id: string;
+  /** Why the scan failed, when it did. */
+  failureReason?: string;
   submitterId?: string;
   userId?: string;
   fileHash?: string;
@@ -45,6 +47,8 @@ export interface ApiEngine {
   ownerId?: string | null;
   apiEndpoint?: string | null;
   isActive?: boolean | null;
+  /** Live state from the analysis engine: online, advisory, disabled, unavailable. */
+  status?: string | null;
   accuracy?: string;
   accuracyRate?: string;
   totalAnalyses?: number;
@@ -125,7 +129,8 @@ export interface ApiStats {
   activeAnalyses?: number;
   completedToday?: number;
   totalActiveBounties?: string | number;
-  avgResponseTime?: string;
+  /** Null until an analysis has recorded its processing time. */
+  avgResponseTime?: string | null;
   totalRewardsPaid?: string;
   pendingSubmissions?: number;
   completedAnalyses?: number;

@@ -135,7 +135,7 @@ impl From<AnalyzerStatus> for EngineSummary {
 }
 
 /// The analyzers built into the analysis engine, with their live status.
-async fn builtin_engines(state: &AppState) -> Result<Vec<EngineSummary>, StatusCode> {
+pub(crate) async fn builtin_engines(state: &AppState) -> Result<Vec<EngineSummary>, StatusCode> {
     let resp = state
         .proxy
         .get("analysis-engine", "/engines/status", None)
@@ -306,5 +306,17 @@ mod tests {
         }
         assert_eq!(builtin_engine_id("yara"), builtin_engine_id("yara"));
         assert_ne!(builtin_engine_id("yara"), builtin_engine_id("clamav"));
+    }
+
+    #[test]
+    fn advisory_engine_is_listed_but_not_active() {
+        let ml: AnalyzerStatus = serde_json::from_value(serde_json::json!({
+            "id": "ml_engine", "name": "Machine Learning Classifier", "engineType": "ml",
+            "status": "advisory", "details": "Advisory only"
+        }))
+        .unwrap();
+        let summary = EngineSummary::from(ml);
+        assert!(!summary.is_active, "an advisory engine doesn't vote");
+        assert_eq!(summary.status.as_deref(), Some("advisory"));
     }
 }

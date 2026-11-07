@@ -14,7 +14,7 @@ pub struct EngineStatusItem {
     pub name: String,
     pub engine_type: String,
     pub is_optional: bool,
-    pub status: String, // "online" | "unavailable" | "disabled" | "degraded"
+    pub status: String, // "online" | "advisory" | "unavailable" | "disabled" | "degraded"
     pub version: String,
     pub details: String,
     pub error: Option<String>,
@@ -357,7 +357,7 @@ pub use ml_stub::*;
 
 use crate::models::analysis_result::{
     AnalysisResult, DetectionResult, EngineType, FileMetadata, SeverityLevel, ThreatCategory,
-    ThreatVerdict,
+    ThreatVerdict, STRONG_SIGNAL_KEY,
 };
 use crate::scanners::email_scanner::{AuthResult, EmailScanner, EmailScannerConfig};
 use crate::scanners::Scanner;
@@ -820,6 +820,7 @@ impl AnalysisEngine {
             ThreatVerdict::Suspicious => 0.6,
             _ => 0.6,
         };
+        let strong_signal = verdict == ThreatVerdict::Malicious;
 
         Ok(DetectionResult {
             detection_id: Uuid::new_v4(),
@@ -834,6 +835,12 @@ impl AnalysisEngine {
                 ("match_count".to_string(), serde_json::json!(matches.len())),
                 ("risk_score".to_string(), serde_json::json!(risk_score)),
                 ("matches".to_string(), serde_json::to_value(&matches)?),
+                // Malicious here means several patterns scoring 50+, not one
+                // stray string.
+                (
+                    STRONG_SIGNAL_KEY.to_string(),
+                    serde_json::json!(strong_signal),
+                ),
             ]),
             detected_at: Utc::now(),
             processing_time_ms: start.elapsed().as_millis().max(1) as u64,
@@ -865,6 +872,7 @@ impl AnalysisEngine {
         } else {
             (ThreatVerdict::Suspicious, raw_match_conf.clamp(0.68, 0.85))
         };
+        let strong_signal = verdict == ThreatVerdict::Malicious;
 
         Ok(DetectionResult {
             detection_id: Uuid::new_v4(),
@@ -886,6 +894,10 @@ impl AnalysisEngine {
                     serde_json::json!(request.file_data.len()),
                 ),
                 ("matches".to_string(), serde_json::to_value(&matches)?),
+                (
+                    STRONG_SIGNAL_KEY.to_string(),
+                    serde_json::json!(strong_signal),
+                ),
             ]),
             detected_at: Utc::now(),
             processing_time_ms: start.elapsed().as_millis().max(1) as u64,
@@ -1299,7 +1311,12 @@ impl AnalysisEngine {
                 )
             } else if self.ml_analyzer.is_available() {
                 (
-                    "online",
+                    // Advisory: running, but its prediction doesn't vote.
+                    if self.config.ml_analyzer.counts_toward_verdict {
+                        "online"
+                    } else {
+                        "advisory"
+                    },
                     "ort 2.0.0-rc.13",
                     if self.config.ml_analyzer.counts_toward_verdict {
                         "ONNX threat classifier and anomaly detector models loaded".to_string()

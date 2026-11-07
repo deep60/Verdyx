@@ -335,6 +335,11 @@ export default function AnalysisDetails() {
                 ? "The page couldn't be fetched or analysed. Check the address is public and reachable, then scan it again."
                 : "The file couldn't be analysed. Try uploading it again."}
             </p>
+            {submission?.failureReason && (
+              <p className="mt-2 text-sm text-muted-foreground">
+                Reason: <span className="text-foreground">{submission.failureReason}</span>
+              </p>
+            )}
           </section>
         ) : (
           consensus && (

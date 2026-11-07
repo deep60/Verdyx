@@ -58,7 +58,8 @@ pub struct AnalysisStats {
     pub threats_detected: i64,
     pub total_engines: i64,
     pub total_active_bounties: i64,
-    pub avg_response_time: String,
+    /// `None` until an analysis has recorded its processing time.
+    pub avg_response_time: Option<String>,
     pub total_rewards_paid: String,
 }
 
@@ -134,94 +135,78 @@ pub async fn list_analyses(
 pub async fn get_analysis_stats(
     State(state): State<AppState>,
 ) -> Result<Json<AnalysisStats>, StatusCode> {
-    let analyses_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM analyses")
-        .fetch_one(state.db.pool())
-        .await
-        .unwrap_or(0);
+    // Counts are per scan (a row in `submissions`) plus per analyst analysis
+    // (a row in `analyses`). `analysis_results` holds one row per engine per
+    // scan, so counting it would multiply every scan by its engine count.
+    // A scan's verdict is the consensus the worker stored with it.
+    let count = |sql: &'static str| {
+        let pool = state.db.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sql)
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0)
+        }
+    };
+    let analyses_count = count("SELECT COUNT(*) FROM analyses").await;
+    let submissions_count = count("SELECT COUNT(*) FROM submissions").await;
+    let total = submissions_count + analyses_count;
 
-    let results_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM analysis_results")
-        .fetch_one(state.db.pool())
-        .await
-        .unwrap_or(0);
-
-    let submissions_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM submissions")
-        .fetch_one(state.db.pool())
-        .await
-        .unwrap_or(0);
-
-    let total = analyses_count + results_count;
-
-    let pending_subs: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM submissions WHERE analysis_status IN ('pending', 'analyzing', 'processing')",
+    let pending = count(
+        "SELECT (SELECT COUNT(*) FROM submissions WHERE analysis_status IN ('pending', 'analyzing', 'processing')) \
+              + (SELECT COUNT(*) FROM analyses WHERE status = 'pending')",
     )
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
+    .await;
 
-    let pending_analyses: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM analyses WHERE status = 'pending'")
-            .fetch_one(state.db.pool())
-            .await
-            .unwrap_or(0);
-
-    let pending = pending_subs + pending_analyses;
-
-    let completed_subs: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed'")
-            .fetch_one(state.db.pool())
-            .await
-            .unwrap_or(0);
-
-    let completed_analyses: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM analyses WHERE status = 'completed'")
-            .fetch_one(state.db.pool())
-            .await
-            .unwrap_or(0);
-
-    let completed = completed_subs + completed_analyses;
-
-    let malicious: i64 = sqlx::query_scalar(
-        "SELECT (SELECT COUNT(*) FROM analyses WHERE LOWER(verdict) = 'malicious') + (SELECT COUNT(*) FROM submissions WHERE is_malicious = true)",
+    let completed = count(
+        "SELECT (SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed') \
+              + (SELECT COUNT(*) FROM analyses WHERE status = 'completed')",
     )
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
+    .await;
 
-    let benign: i64 = sqlx::query_scalar(
-        "SELECT (SELECT COUNT(*) FROM analyses WHERE LOWER(verdict) = 'benign') + (SELECT COUNT(*) FROM submissions WHERE is_malicious = false AND analysis_status = 'completed')",
+    let malicious = count(
+        "SELECT (SELECT COUNT(*) FROM analyses WHERE LOWER(verdict) = 'malicious') \
+              + (SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed' \
+                 AND COALESCE(metadata ->> 'consensus_verdict', CASE WHEN is_malicious THEN 'malicious' END) = 'malicious')",
     )
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
+    .await;
 
-    let suspicious: i64 = sqlx::query_scalar(
-        "SELECT (SELECT COUNT(*) FROM analyses WHERE LOWER(verdict) = 'suspicious') + (SELECT COUNT(*) FROM analysis_results WHERE LOWER(verdict) = 'suspicious')",
+    let benign = count(
+        "SELECT (SELECT COUNT(*) FROM analyses WHERE LOWER(verdict) IN ('benign', 'clean')) \
+              + (SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed' \
+                 AND COALESCE(metadata ->> 'consensus_verdict', CASE WHEN is_malicious = false THEN 'benign' END) = 'benign')",
     )
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
+    .await;
 
-    let bounty_submissions_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM bounty_submissions")
-            .fetch_one(state.db.pool())
-            .await
-            .unwrap_or(0);
+    let suspicious = count(
+        "SELECT (SELECT COUNT(*) FROM analyses WHERE LOWER(verdict) = 'suspicious') \
+              + (SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed' \
+                 AND metadata ->> 'consensus_verdict' = 'suspicious')",
+    )
+    .await;
 
+    let bounty_submissions_count = count("SELECT COUNT(*) FROM bounty_submissions").await;
     let total_submissions = submissions_count + bounty_submissions_count;
 
-    let completed_today: i64 = sqlx::query_scalar(
-        "SELECT (SELECT COUNT(*) FROM analyses WHERE status = 'completed' AND completed_at >= CURRENT_DATE) + (SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed' AND updated_at >= CURRENT_DATE)",
+    let completed_today = count(
+        "SELECT (SELECT COUNT(*) FROM analyses WHERE status = 'completed' AND completed_at >= CURRENT_DATE) \
+              + (SELECT COUNT(*) FROM submissions WHERE analysis_status = 'completed' AND updated_at >= CURRENT_DATE)",
     )
-    .fetch_one(state.db.pool())
-    .await
-    .unwrap_or(0);
+    .await;
 
-    let total_engines: i64 =
+    // Engines that vote right now: the analysis engine's built-in analyzers
+    // that report "online" (advisory and disabled ones don't vote), plus any
+    // active registered engines. No floor: if nothing is online, say so.
+    let builtin_online = crate::handlers::engines::builtin_engines(&state)
+        .await
+        .map(|engines| engines.iter().filter(|e| e.is_active).count() as i64)
+        .unwrap_or(0);
+    let registered_active: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM engines WHERE is_active = true")
             .fetch_one(state.db.pool())
             .await
-            .unwrap_or(0)
-            .max(3); // Built-in ClamAV, YARA, and Heuristic engines are always active
+            .unwrap_or(0);
+    let total_engines = builtin_online + registered_active;
 
     let total_active_bounties: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM bounties WHERE bounty_status = 'active'")
@@ -236,11 +221,13 @@ pub async fn get_analysis_stats(
     .await
     .unwrap_or(None);
 
-    let avg_response_time = match avg_ms {
-        Some(ms) if ms >= 1000.0 => format!("{:.1}s", ms / 1000.0),
-        Some(ms) => format!("{:.0}ms", ms),
-        None => "1.2s".to_string(),
-    };
+    let avg_response_time = avg_ms.map(|ms| {
+        if ms >= 1000.0 {
+            format!("{:.1}s", ms / 1000.0)
+        } else {
+            format!("{:.0}ms", ms)
+        }
+    });
 
     let total_rewards_paid: String = sqlx::query_scalar(
         "SELECT COALESCE(SUM(amount)::text, '0') FROM payouts WHERE status = 'completed'",

@@ -8,7 +8,7 @@ export function ArchitectureDiagram() {
     {
       id: "api",
       title: "Submission API & Gateway",
-      description: "gRPC & REST endpoints. Handles rate limiting, authentication, and file ingestion.",
+      description: "REST and WebSocket endpoints. Handles rate limiting, authentication, and file ingestion.",
       color: "text-primary",
       bgHover: "hover:bg-primary/10",
       borderHover: "hover:border-primary/50",

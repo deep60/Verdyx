@@ -8,11 +8,6 @@ import {
   Area,
   BarChart,
   Bar,
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -31,6 +26,8 @@ import {
 import { StatCardSkeleton } from "@/components/loading-skeleton";
 import { InlineErrorState } from "@/components/error-state";
 import type { ApiStats, ApiSubmission, ApiEngine } from "@/lib/api-types";
+import { Badge } from "@/components/ui/badge";
+import { ENGINE_STATE_LABEL, engineState, votingEngines } from "@/lib/engines";
 
 export function PlatformAnalytics() {
   const { data: stats, isLoading, isError } = useQuery<ApiStats>({
@@ -74,12 +71,13 @@ export function PlatformAnalytics() {
       const label = dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
       const entry = byDate.get(label) ?? { malicious: 0, suspicious: 0, clean: 0, total: 0 };
       entry.total += 1;
+      // Only finished analyses have a verdict; pending ones count toward the
+      // total but aren't labelled suspicious.
+      const finished = (sub.analysisStatus || sub.status) === "completed";
       if (sub.isMalicious === true) {
         entry.malicious += 1;
-      } else if ((sub.analysisStatus || sub.status) === "completed") {
+      } else if (finished) {
         entry.clean += 1;
-      } else {
-        entry.suspicious += 1;
       }
       byDate.set(label, entry);
     }
@@ -136,31 +134,17 @@ export function PlatformAnalytics() {
       else counts.full += 1;
     }
     return [
-      { type: "Quick Scan", count: counts.quick, avgTime: "1.1s" },
-      { type: "Full Analysis", count: counts.full, avgTime: stats?.avgResponseTime || "2.4s" },
-      { type: "Deep Scan", count: counts.deep, avgTime: "8.5s" },
-      { type: "Behavioral", count: counts.behavioral, avgTime: "15.0s" },
+      { type: "Quick Scan", count: counts.quick },
+      { type: "Full Analysis", count: counts.full },
+      { type: "Deep Scan", count: counts.deep },
+      { type: "Behavioral", count: counts.behavioral },
     ];
-  }, [submissions, stats?.avgResponseTime]);
+  }, [submissions]);
 
   const activeEnginesCount =
-    engines.filter((e) => e.isActive !== false).length || stats?.totalEngines || 3;
+    engines.length > 0 ? votingEngines(engines).length : (stats?.totalEngines ?? 0);
 
-  // System health metrics
-  const systemHealth = [
-    { metric: "API Response", value: 99, fullMark: 100 },
-    { metric: "Engine Uptime", value: 99.5, fullMark: 100 },
-    { metric: "Analysis Speed", value: 96, fullMark: 100 },
-    {
-      metric: "Completion Rate",
-      value:
-        totalVolume > 0
-          ? Math.min(100, Math.round(((stats?.completed ?? 0) / totalVolume) * 100))
-          : 100,
-      fullMark: 100,
-    },
-    { metric: "Consensus Quorum", value: 95, fullMark: 100 },
-  ];
+
 
   if (isLoading) {
     return (
@@ -226,11 +210,10 @@ export function PlatformAnalytics() {
             <Zap className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats?.avgResponseTime || "1.2s"}</div>
-            <div className="flex items-center gap-1 text-xs text-success mt-1">
-              <TrendingUp className="h-3 w-3" />
-              <span>Real-time automated scanning</span>
-            </div>
+            <div className="text-2xl font-bold">{stats?.avgResponseTime ?? "—"}</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {stats?.avgResponseTime ? "Average engine processing time" : "No completed analyses timed yet"}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -405,46 +388,43 @@ export function PlatformAnalytics() {
           </CardContent>
         </Card>
 
-        {/* System Health Radar */}
+        {/* Live engine status */}
         <Card className="glassmorphism border-primary/20">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Target className="h-5 w-5" />
-              System Health Metrics
+              Engine Status
             </CardTitle>
-            <CardDescription>Overall platform performance indicators</CardDescription>
+            <CardDescription>Live from the analysis engine. Only engines marked Votes count.</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <RadarChart data={systemHealth}>
-                <PolarGrid stroke="hsl(var(--border))" />
-                <PolarAngleAxis
-                  dataKey="metric"
-                  stroke="hsl(var(--muted-foreground))"
-                  style={{ fontSize: '11px' }}
-                />
-                <PolarRadiusAxis
-                  angle={90}
-                  domain={[0, 100]}
-                  stroke="hsl(var(--muted-foreground))"
-                  style={{ fontSize: '10px' }}
-                />
-                <Radar
-                  name="Health Score"
-                  dataKey="value"
-                  stroke="hsl(var(--primary))"
-                  fill="hsl(var(--primary))"
-                  fillOpacity={0.6}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)",
-                  }}
-                />
-              </RadarChart>
-            </ResponsiveContainer>
+            {engines.length === 0 ? (
+              <p className="flex h-[300px] items-center justify-center text-center text-sm text-muted-foreground">
+                Engine status is unavailable right now.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border border-y border-border">
+                {engines.map((engine) => {
+                  const state = engineState(engine);
+                  return (
+                    <li key={engine.id} className="flex items-start justify-between gap-4 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{engine.name}</p>
+                        {engine.description && (
+                          <p className="truncate text-xs text-muted-foreground">{engine.description}</p>
+                        )}
+                      </div>
+                      <Badge
+                        variant={state === "voting" ? "default" : "outline"}
+                        className="shrink-0 font-mono text-[10px] uppercase"
+                      >
+                        {ENGINE_STATE_LABEL[state]}
+                      </Badge>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -456,7 +436,7 @@ export function PlatformAnalytics() {
             <Activity className="h-5 w-5" />
             Analysis Type Distribution
           </CardTitle>
-          <CardDescription>Breakdown by analysis depth with average completion times</CardDescription>
+          <CardDescription>Your submissions by analysis depth</CardDescription>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={250}>
@@ -484,7 +464,6 @@ export function PlatformAnalytics() {
                       <div className="bg-card border border-border rounded-lg p-3">
                         <p className="font-semibold">{data.type}</p>
                         <p className="text-sm text-muted-foreground">Count: {data.count}</p>
-                        <p className="text-sm text-primary">Avg Time: {data.avgTime}</p>
                       </div>
                     );
                   }

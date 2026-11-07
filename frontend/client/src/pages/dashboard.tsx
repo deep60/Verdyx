@@ -168,7 +168,7 @@ export default function Dashboard() {
     },
     {
       step: "03",
-      title: "8-Engine Parallel Analysis",
+      title: "Parallel Multi-Engine Analysis",
       service: "verdyx-analysis-engine · tokio::join!",
       detail:
         "Runs ClamAV, YARA, Goblin PE/ELF static parsing, ONNX ML, heuristics, signatures, and hash and threat-intel lookups concurrently.",
@@ -208,7 +208,7 @@ export default function Dashboard() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <SEO
         title="Analysis Dashboard — Verdyx Command Center"
-        description="Submit files or URLs for 8-engine malware analysis, inspect 36+ website OSINT modules, and see how the backend pipeline works."
+        description="Submit files or URLs for multi-engine malware analysis, inspect 36+ website OSINT modules, and see how the backend pipeline works."
       />
       <Navigation />
 
