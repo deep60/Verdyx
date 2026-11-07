@@ -102,6 +102,24 @@ pub struct FileSubmissionListItem {
     /// disputes are keyed by this id, not by the submission id.
     pub bounty_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
+    /// Why the scan failed, when it did. Only filled in on the single-scan
+    /// endpoint, so a failed report can say what went wrong.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+}
+
+/// Turns the worker's stored diagnostic ("attempt 3/3: Could not fetch …")
+/// into the reason shown on a failed scan.
+pub(crate) fn failure_reason(status: &str, last_error: Option<String>) -> Option<String> {
+    if status != "failed" {
+        return None;
+    }
+    let raw = last_error.filter(|e| !e.trim().is_empty())?;
+    let reason = match raw.split_once(": ") {
+        Some((prefix, rest)) if prefix.starts_with("attempt ") => rest,
+        _ => raw.as_str(),
+    };
+    Some(reason.trim().to_string())
 }
 
 #[derive(Deserialize)]
@@ -1651,6 +1669,7 @@ mod tests {
 
     fn sub(owner: Uuid, bounty: Option<Uuid>) -> FileSubmissionListItem {
         FileSubmissionListItem {
+            failure_reason: None,
             id: Uuid::new_v4(),
             submitter_id: owner,
             user_id: owner,
@@ -1738,5 +1757,27 @@ mod tests {
             consensus_body(Uuid::nil(), &none, &serde_json::Value::Null)["finalVerdict"],
             "unknown"
         );
+    }
+}
+
+#[cfg(test)]
+mod failure_reason_tests {
+    use super::failure_reason;
+
+    #[test]
+    fn shows_the_worker_reason_without_the_attempt_counter() {
+        assert_eq!(
+            failure_reason(
+                "failed",
+                Some("attempt 3/3: analysis didn't finish within 30 minutes".into())
+            )
+            .as_deref(),
+            Some("analysis didn't finish within 30 minutes")
+        );
+        assert_eq!(
+            failure_reason("completed", Some("attempt 1/3: x".into())),
+            None
+        );
+        assert_eq!(failure_reason("failed", Some(" ".into())), None);
     }
 }

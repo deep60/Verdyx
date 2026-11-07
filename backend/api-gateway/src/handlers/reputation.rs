@@ -72,7 +72,11 @@ struct LeaderboardRow {
     reputation_score: i32,
 }
 
-/// Get global leaderboard
+/// Get global leaderboard.
+///
+/// Only analysts who have submitted at least one analysis are ranked. Every
+/// account starts at the same reputation, so ranking accounts that never
+/// analysed anything would order people by nothing.
 pub async fn get_leaderboard(
     State(state): State<AppState>,
     Query(params): Query<LeaderboardQuery>,
@@ -81,14 +85,19 @@ pub async fn get_leaderboard(
     let limit = params.limit.unwrap_or(50).min(100);
     let offset = (page.saturating_sub(1)) * limit;
 
-    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_active = true")
-        .fetch_one(state.db.pool())
-        .await
-        .unwrap_or(0);
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users u WHERE u.is_active = true
+           AND EXISTS (SELECT 1 FROM analyses a WHERE a.analyst_id = u.id)",
+    )
+    .fetch_one(state.db.pool())
+    .await
+    .unwrap_or(0);
 
     let rows = sqlx::query_as::<_, LeaderboardRow>(
-        "SELECT id, username, reputation_score FROM users WHERE is_active = true
-         ORDER BY reputation_score DESC LIMIT $1 OFFSET $2",
+        "SELECT u.id, u.username, u.reputation_score
+         FROM users u WHERE u.is_active = true
+           AND EXISTS (SELECT 1 FROM analyses a WHERE a.analyst_id = u.id)
+         ORDER BY u.reputation_score DESC, u.id LIMIT $1 OFFSET $2",
     )
     .bind(limit as i64)
     .bind(offset as i64)
@@ -124,8 +133,10 @@ pub async fn get_top_analysts(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<LeaderboardEntry>>, StatusCode> {
     let rows = sqlx::query_as::<_, LeaderboardRow>(
-        "SELECT id, username, reputation_score FROM users WHERE is_active = true
-         ORDER BY reputation_score DESC LIMIT 10",
+        "SELECT u.id, u.username, u.reputation_score
+         FROM users u WHERE u.is_active = true
+           AND EXISTS (SELECT 1 FROM analyses a WHERE a.analyst_id = u.id)
+         ORDER BY u.reputation_score DESC, u.id LIMIT 10",
     )
     .fetch_all(state.db.pool())
     .await

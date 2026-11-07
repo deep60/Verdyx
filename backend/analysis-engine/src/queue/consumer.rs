@@ -62,6 +62,19 @@ pub async fn start_analysis_worker(
         error!("Failed to recover in-flight analysis jobs: {}", e);
     }
 
+    {
+        let (redis_client, db_pool) = (redis_client.clone(), db_pool.clone());
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(STALE_SWEEP_INTERVAL);
+            loop {
+                ticker.tick().await;
+                if let Err(e) = sweep_stale_submissions(&redis_client, &db_pool).await {
+                    warn!("Stale scan sweep failed: {}", e);
+                }
+            }
+        });
+    }
+
     loop {
         // Reliable pop: the id stays on the processing list until ack.
         let popped = match pop_from_queue(&redis_client).await {
@@ -118,6 +131,67 @@ pub async fn start_analysis_worker(
             );
         }
     }
+}
+
+/// How often unfinished scans are looked for.
+const STALE_SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(600);
+/// A scan untouched for this long, and not waiting in the queue, was lost.
+const STALE_AFTER_MINUTES: i32 = 30;
+
+/// Finds scans stuck in "pending" or "analyzing": their job was lost (a
+/// failed enqueue, or a worker restart that dropped it). Each one is retried
+/// through the normal retry path, and after `MAX_ATTEMPTS` it is marked failed
+/// with the reason, so nothing stays "pending" forever.
+async fn sweep_stale_submissions(redis_client: &redis::Client, db_pool: &PgPool) -> Result<()> {
+    let stale: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT id FROM submissions
+        WHERE analysis_status IN ('pending', 'analyzing', 'processing')
+          AND updated_at < NOW() - make_interval(mins => $1)
+        ORDER BY updated_at
+        LIMIT 100
+        "#,
+    )
+    .bind(STALE_AFTER_MINUTES)
+    .fetch_all(db_pool)
+    .await
+    .map_err(|e| anyhow!("Failed to find stale submissions: {e}"))?;
+    if stale.is_empty() {
+        return Ok(());
+    }
+
+    let mut conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| anyhow!("Failed to connect to Redis: {e}"))?;
+    for id in stale {
+        let key = id.to_string();
+        // Still waiting its turn or being worked on: not lost.
+        let queued: Option<i64> = redis::cmd("LPOS")
+            .arg(ANALYSIS_QUEUE_KEY)
+            .arg(&key)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(None);
+        let in_flight: Option<i64> = redis::cmd("LPOS")
+            .arg(ANALYSIS_PROCESSING_KEY)
+            .arg(&key)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(None);
+        if queued.is_some() || in_flight.is_some() {
+            continue;
+        }
+        warn!("Submission {id} was lost from the queue; retrying it");
+        nack(
+            redis_client,
+            db_pool,
+            id,
+            &format!("analysis didn't finish within {STALE_AFTER_MINUTES} minutes"),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Move jobs left on the processing list by a crashed worker back onto the queue.
@@ -284,56 +358,76 @@ async fn process_submission(
     // submissions). A URL also gets the URL engines: URLhaus, ThreatFox and
     // Verdyx's own URL checks.
     let mut url_votes = Vec::new();
+    // Why a URL's page couldn't be loaded, when it couldn't.
+    let mut page_error: Option<String> = None;
     let file_data = match submission.file_path.as_deref() {
-        Some(fp) if !fp.is_empty() => load_artifact(s3_client, fp).await?,
+        Some(fp) if !fp.is_empty() => Some(load_artifact(s3_client, fp).await?),
         _ if submission.submission_type == "url" => {
             let target_url = submission
                 .url
                 .as_deref()
                 .or(submission.original_filename.as_deref())
                 .ok_or_else(|| anyhow!("URL submission has no url"))?;
-            // A failed fetch must fail the job: scanning only the URL's text
-            // would report every unreachable page as clean.
-            let page = url_scanner
-                .fetch_page(target_url)
-                .await
-                .map_err(|e| anyhow!("Could not fetch {target_url}: {e}"))?;
+            // The URL engines (URLhaus, ThreatFox, phishing patterns, blocked
+            // destinations) don't need the page, so an unreachable page
+            // doesn't stop them. Phishing pages are often down or blocked.
             url_votes = url_engine_votes(url_scanner, target_url).await;
-            page
+            match url_scanner.fetch_page(target_url).await {
+                Ok(page) => Some(page),
+                Err(e) => {
+                    warn!("Could not fetch {target_url}: {e}");
+                    page_error = Some(e.to_string());
+                    None
+                }
+            }
         }
         _ => return Err(anyhow!("Submission has no file_path")),
     };
 
-    info!(
-        "Loaded artifact for analysis: submission_id={}, size={} bytes",
-        submission_id,
-        file_data.len()
-    );
+    // Step 4: Run ClamAV + other analyzers on the bytes, when there are any.
+    let mut analysis_result = match file_data {
+        Some(file_data) => {
+            info!(
+                "Loaded artifact for analysis: submission_id={}, size={} bytes",
+                submission_id,
+                file_data.len()
+            );
+            let filename = submission
+                .original_filename
+                .clone()
+                .or_else(|| submission.url.clone())
+                .unwrap_or_else(|| "unknown".to_string());
 
-    // Step 4: Run ClamAV + other analyzers
-    let filename = submission
-        .original_filename
-        .clone()
-        .or_else(|| submission.url.clone())
-        .unwrap_or_else(|| "unknown".to_string());
+            let analysis_request = FileAnalysisRequest {
+                filename,
+                file_data,
+                file_hashes: None,
+                analysis_options: analysis_options_for(&submission.submission_type),
+            };
 
-    let analysis_request = FileAnalysisRequest {
-        filename: filename.clone(),
-        file_data,
-        file_hashes: None,
-        analysis_options: analysis_options_for(&submission.submission_type),
+            let mut engine = analysis_engine.lock().await;
+            let result = engine
+                .analyze_file(analysis_request)
+                .await
+                .map_err(|e| anyhow!("Analysis failed: {e}"))?;
+            drop(engine); // Release lock
+            result
+        }
+        None => {
+            let mut result = crate::models::analysis_result::AnalysisResult {
+                submission_id,
+                ..Default::default()
+            };
+            result.mark_completed();
+            result
+        }
     };
-
-    let mut engine = analysis_engine.lock().await;
-    let mut analysis_result = engine
-        .analyze_file(analysis_request)
-        .await
-        .map_err(|e| anyhow!("Analysis failed: {e}"))?;
-
-    drop(engine); // Release lock
 
     for vote in url_votes {
         analysis_result.add_detection(vote);
+    }
+    if let Some(err) = page_error {
+        note_unreachable_page(&mut analysis_result, &err);
     }
 
     info!(
@@ -378,6 +472,38 @@ async fn process_submission(
     );
 
     Ok(())
+}
+
+/// Engine name for the page itself, shown when it couldn't be loaded.
+pub const PAGE_CONTENT: &str = "Page content";
+
+/// Records that a URL's page couldn't be loaded.
+///
+/// Only the address was checked, so "URL checks found nothing" is not a clean
+/// bill of health: that vote becomes "no record" and, unless something else
+/// flagged the URL, the result is "no verdict" rather than clean. Findings
+/// (phishing patterns, a blocked destination, a feed listing) still count.
+fn note_unreachable_page(result: &mut crate::models::analysis_result::AnalysisResult, error: &str) {
+    use crate::models::analysis_result::{EngineType, ThreatVerdict};
+
+    for d in result.detections.iter_mut() {
+        if d.engine_name == URL_CHECKS && d.verdict == ThreatVerdict::Benign {
+            d.verdict = ThreatVerdict::Unknown;
+            d.metadata.insert(
+                "reason".to_string(),
+                serde_json::json!(
+                    "The page couldn't be loaded, so only the address was checked. \
+                     Nothing was found there, but that doesn't make the site safe."
+                ),
+            );
+        }
+    }
+    result.add_detection(AnalysisEngine::create_unavailable_detection(
+        PAGE_CONTENT,
+        "live",
+        EngineType::Static,
+        format!("The page couldn't be loaded: {error}"),
+    ));
 }
 
 /// Load the bytes the gateway stored. An absolute path that exists on disk
@@ -749,5 +875,59 @@ mod analysis_options_tests {
         let options = analysis_options_for("file");
         assert!(options.enable_static_analysis);
         assert!(options.enable_heuristic_analysis);
+    }
+}
+
+#[cfg(test)]
+mod unreachable_page_tests {
+    use super::{note_unreachable_page, PAGE_CONTENT};
+    use crate::models::analysis_result::{
+        AnalysisResult, DetectionResult, EngineType, SeverityLevel, ThreatVerdict,
+    };
+    use crate::scanners::url_verdicts::{URLHAUS, URL_CHECKS};
+
+    fn det(name: &str, verdict: ThreatVerdict, reason: Option<&str>) -> DetectionResult {
+        DetectionResult {
+            detection_id: uuid::Uuid::new_v4(),
+            engine_name: name.to_string(),
+            engine_version: "live".to_string(),
+            engine_type: EngineType::Static,
+            verdict,
+            confidence: 0.6,
+            severity: SeverityLevel::Info,
+            categories: vec![],
+            metadata: reason
+                .map(|r| [("reason".to_string(), serde_json::json!(r))].into())
+                .unwrap_or_default(),
+            detected_at: chrono::Utc::now(),
+            processing_time_ms: 1,
+            error_message: None,
+        }
+    }
+
+    #[test]
+    fn an_unreachable_page_with_no_findings_has_no_verdict_not_clean() {
+        let mut r = AnalysisResult::default();
+        r.add_detection(det(
+            URLHAUS,
+            ThreatVerdict::Unknown,
+            Some("Not listed on URLhaus"),
+        ));
+        r.add_detection(det(URL_CHECKS, ThreatVerdict::Benign, None));
+        note_unreachable_page(&mut r, "connection timed out");
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Unknown);
+        assert!(r
+            .unavailable_engines
+            .iter()
+            .any(|u| u.engine_name == PAGE_CONTENT && u.reason.contains("connection timed out")));
+    }
+
+    #[test]
+    fn findings_on_the_address_still_count_when_the_page_is_down() {
+        // A phishing-looking address on a host that can't be reached.
+        let mut r = AnalysisResult::default();
+        r.add_detection(det(URL_CHECKS, ThreatVerdict::Suspicious, None));
+        note_unreachable_page(&mut r, "blocked destination");
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Suspicious);
     }
 }
