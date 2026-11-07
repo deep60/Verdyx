@@ -524,7 +524,8 @@ impl DatabaseService {
                 metadata ->> 'bountyAmount' AS bounty_amount,
                 (metadata ->> 'priority')::boolean AS priority,
                 (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id,
-                file_path
+                file_path,
+                metadata ->> 'last_error' AS last_error
             FROM submissions
             WHERE id = $1
             "#,
@@ -539,6 +540,10 @@ impl DatabaseService {
             let submitter_id: Uuid = r.get("submitter_id");
             let original_filename: Option<String> = r.get("original_filename");
             crate::handlers::submission::FileSubmissionListItem {
+                failure_reason: crate::handlers::submission::failure_reason(
+                    &analysis_status,
+                    r.get("last_error"),
+                ),
                 id: r.get("id"),
                 submitter_id,
                 user_id: submitter_id,
@@ -602,6 +607,7 @@ impl DatabaseService {
                 let submitter_id: Uuid = r.get("submitter_id");
                 let original_filename: Option<String> = r.get("original_filename");
                 crate::handlers::submission::FileSubmissionListItem {
+                    failure_reason: None,
                     id: r.get("id"),
                     submitter_id,
                     user_id: submitter_id,
@@ -662,6 +668,7 @@ impl DatabaseService {
             let submitter_id: Uuid = r.get("submitter_id");
             let original_filename: Option<String> = r.get("original_filename");
             crate::handlers::submission::FileSubmissionListItem {
+                failure_reason: None,
                 id: r.get("id"),
                 submitter_id,
                 user_id: submitter_id,
@@ -754,6 +761,7 @@ impl DatabaseService {
                 let submitter_id: Uuid = r.get("submitter_id");
                 let original_filename: Option<String> = r.get("original_filename");
                 crate::handlers::submission::FileSubmissionListItem {
+                    failure_reason: None,
                     id: r.get("id"),
                     submitter_id,
                     user_id: submitter_id,

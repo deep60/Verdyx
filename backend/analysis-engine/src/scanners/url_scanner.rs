@@ -459,6 +459,10 @@ impl Scanner for UrlScanner {
             }
         }
 
+        if let Some(finding) = unencrypted_finding(&parsed, &redirect_chain, &content_analysis) {
+            base_result.add_finding(finding);
+        }
+
         let scan_duration_ms = start_time.elapsed().as_millis() as u64;
         base_result.scan_duration_ms = scan_duration_ms;
 
@@ -985,6 +989,51 @@ struct ResolvedEndpoint {
     port: u16,
 }
 
+/// A finding when the site is reached without encryption (plain `http://`
+/// that doesn't redirect to `https://`). Anything sent to it, including a
+/// password, can be read or changed on the way. A password form on such a
+/// page is High (suspicious); an unencrypted page alone is Medium, a warning
+/// that doesn't make the site suspicious, since many harmless sites still
+/// use plain HTTP.
+fn unencrypted_finding(
+    submitted: &Url,
+    redirect_chain: &[String],
+    content: &Option<ContentAnalysis>,
+) -> Option<Finding> {
+    let final_scheme = redirect_chain
+        .last()
+        .and_then(|u| Url::parse(u).ok())
+        .map(|u| u.scheme().to_string())
+        .unwrap_or_else(|| submitted.scheme().to_string());
+    if final_scheme != "http" {
+        return None;
+    }
+    let password_form = content
+        .as_ref()
+        .is_some_and(|c| c.has_login_form && c.has_password_field);
+    Some(if password_form {
+        Finding {
+            finding_id: Uuid::new_v4(),
+            category: FindingCategory::Suspicious,
+            title: "Password form without encryption".to_string(),
+            description: "The page asks for a password over plain HTTP, so it can be read on the way. Real login pages use HTTPS.".to_string(),
+            severity: ThreatLevel::High,
+            evidence: redirect_chain.to_vec(),
+            recommendation: Some("Do not enter a password on this page".to_string()),
+        }
+    } else {
+        Finding {
+            finding_id: Uuid::new_v4(),
+            category: FindingCategory::Suspicious,
+            title: "Not encrypted (no HTTPS)".to_string(),
+            description: "The site is served over plain HTTP. Anything sent to it can be read or changed on the way.".to_string(),
+            severity: ThreatLevel::Medium,
+            evidence: redirect_chain.to_vec(),
+            recommendation: Some("Don't enter personal information on this site".to_string()),
+        }
+    })
+}
+
 fn push_denial(denials: &mut Vec<String>, reason: String) {
     if !denials.iter().any(|existing| existing == &reason) {
         denials.push(reason);
@@ -1413,5 +1462,45 @@ mod tests {
         assert!(is_public_ip("8.8.8.8".parse().unwrap()));
         assert!(!is_public_ip("169.254.169.254".parse().unwrap()));
         assert!(!is_public_ip("::ffff:10.0.0.1".parse().unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod unencrypted_tests {
+    use super::{unencrypted_finding, ContentAnalysis, ThreatLevel};
+    use url::Url;
+
+    fn page(password: bool) -> Option<ContentAnalysis> {
+        Some(ContentAnalysis {
+            title: None,
+            has_login_form: password,
+            has_password_field: password,
+            external_links_count: 0,
+            suspicious_scripts: vec![],
+        })
+    }
+
+    #[test]
+    fn plain_http_is_a_warning() {
+        let u = Url::parse("http://neverssl.com").unwrap();
+        let f = unencrypted_finding(&u, &["http://neverssl.com".into()], &page(false)).unwrap();
+        assert_eq!(f.title, "Not encrypted (no HTTPS)");
+        assert!(matches!(f.severity, ThreatLevel::Medium));
+    }
+
+    #[test]
+    fn a_password_form_over_http_is_suspicious() {
+        let u = Url::parse("http://login.example").unwrap();
+        let f = unencrypted_finding(&u, &["http://login.example".into()], &page(true)).unwrap();
+        assert!(matches!(f.severity, ThreatLevel::High));
+    }
+
+    #[test]
+    fn http_that_redirects_to_https_is_fine() {
+        let u = Url::parse("http://example.com").unwrap();
+        let chain = vec!["http://example.com".into(), "https://example.com/".into()];
+        assert!(unencrypted_finding(&u, &chain, &page(true)).is_none());
+        let s = Url::parse("https://example.com").unwrap();
+        assert!(unencrypted_finding(&s, &["https://example.com".into()], &page(false)).is_none());
     }
 }

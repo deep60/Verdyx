@@ -76,7 +76,7 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
     queryKey: ["/api/analysis/stats"],
   });
 
-  const { data: leaderboardData } = useQuery<{ entries?: LeaderboardEntry[] } | LeaderboardEntry[]>({
+  const { data: leaderboardData } = useQuery<{ entries?: LeaderboardEntry[]; total?: number } | LeaderboardEntry[]>({
     queryKey: ["/api/reputation/leaderboard"],
   });
 
@@ -171,11 +171,15 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
   const leaderboardEntries: LeaderboardEntry[] = Array.isArray(leaderboardData)
     ? leaderboardData
     : leaderboardData?.entries ?? [];
-  const totalUsersCount = Math.max(leaderboardEntries.length, 1);
+  // Only analysts who have submitted an analysis are ranked. Someone who
+  // isn't on the list has no rank, not rank #1.
+  const rankedCount = Array.isArray(leaderboardData)
+    ? leaderboardData.length
+    : leaderboardData?.total ?? leaderboardEntries.length;
   const foundRankIndex = leaderboardEntries.findIndex(
     (e) => (e.userId || e.user_id) === targetUserId
   );
-  const userRank = foundRankIndex >= 0 ? foundRankIndex + 1 : 1;
+  const userRank: number | null = foundRankIndex >= 0 ? foundRankIndex + 1 : null;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -413,15 +417,26 @@ export function UserAnalyticsDashboard({ userId }: UserAnalyticsDashboardProps) 
               <Trophy className="h-5 w-5" />
               Leaderboard Ranking
             </CardTitle>
-            <CardDescription>Your position among all analysts</CardDescription>
+            <CardDescription>Your position among ranked analysts</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
               <div className="text-center">
-                <div className="text-6xl font-bold text-primary mb-2">#{userRank}</div>
-                <p className="text-sm text-muted-foreground">
-                  Out of {totalUsersCount} active {totalUsersCount === 1 ? "analyst" : "analysts"}
-                </p>
+                {userRank !== null ? (
+                  <>
+                    <div className="text-6xl font-bold text-primary mb-2">#{userRank}</div>
+                    <p className="text-sm text-muted-foreground">
+                      Out of {rankedCount} ranked {rankedCount === 1 ? "analyst" : "analysts"}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-2xl font-semibold text-muted-foreground mb-2">Not ranked yet</div>
+                    <p className="text-sm text-muted-foreground">
+                      Analysts are ranked once they submit an analysis on a bounty.
+                    </p>
+                  </>
+                )}
               </div>
 
               <div className="space-y-2">

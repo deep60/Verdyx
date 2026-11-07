@@ -10,6 +10,8 @@
 
 export interface ApiSubmission {
   id: string;
+  /** Why the scan failed, when it did. */
+  failureReason?: string;
   submitterId?: string;
   userId?: string;
   fileHash?: string;
