@@ -36,6 +36,16 @@ impl HeuristicSeverity {
             Self::Critical => 10,
         }
     }
+
+    /// How much one rule of this severity counts toward the verdict.
+    pub fn points(&self) -> u32 {
+        match self {
+            Self::Info => 0,
+            Self::Low => 1,
+            Self::Medium => 2,
+            Self::High | Self::Critical => 3,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -111,16 +121,6 @@ impl HeuristicEngine {
 
     fn add_malware_rules(&mut self) {
         // Suspicious API calls
-        self.rules.push(HeuristicRule {
-            id: "HEUR_001".to_string(),
-            name: "Suspicious Windows API Sequence".to_string(),
-            description: "Detects suspicious sequence of Windows API calls commonly used by malware".to_string(),
-            pattern: Regex::new(r"(?i)(CreateProcess|WriteProcessMemory|VirtualAllocEx|SetWindowsHookEx|GetProcAddress)").unwrap(),
-            severity: HeuristicSeverity::Medium,
-            confidence: 0.7,
-            file_types: vec!["exe".to_string(), "dll".to_string(), "scr".to_string()],
-            context_extractor: Some(extract_api_context),
-        });
 
         // Registry manipulation
         self.rules.push(HeuristicRule {
@@ -128,7 +128,7 @@ impl HeuristicEngine {
             name: "Registry Persistence".to_string(),
             description: "Detects attempts to modify registry for persistence".to_string(),
             pattern: Regex::new(r"(?i)(HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run|HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run)").unwrap(),
-            severity: HeuristicSeverity::High,
+            severity: HeuristicSeverity::Medium,
             confidence: 0.8,
             file_types: vec!["*".to_string()],
             context_extractor: Some(extract_registry_context),
@@ -139,7 +139,7 @@ impl HeuristicEngine {
             id: "HEUR_003".to_string(),
             name: "Process Hollowing Pattern".to_string(),
             description: "Detects patterns indicative of process hollowing technique".to_string(),
-            pattern: Regex::new(r"(?i)(NtUnmapViewOfSection|CreateProcessA.*SUSPENDED|WriteProcessMemory.*ResumeThread)").unwrap(),
+            pattern: Regex::new(r"(?i)(NtUnmapViewOfSection|ZwUnmapViewOfSection|CreateProcessA[^\x00\n]{0,64}SUSPENDED|WriteProcessMemory[^\x00\n]{0,64}ResumeThread)").unwrap(),
             severity: HeuristicSeverity::High,
             confidence: 0.85,
             file_types: vec!["exe".to_string(), "dll".to_string()],
@@ -158,18 +158,6 @@ impl HeuristicEngine {
             confidence: 0.6,
             file_types: vec!["*".to_string()],
             context_extractor: Some(extract_exploit_context),
-        });
-
-        // ROP gadgets
-        self.rules.push(HeuristicRule {
-            id: "HEUR_102".to_string(),
-            name: "ROP Gadget Chain".to_string(),
-            description: "Detects potential ROP (Return Oriented Programming) gadgets".to_string(),
-            pattern: Regex::new(r"(\x58\xc3|\x5d\xc3|\x5b\xc3)").unwrap(), // pop reg; ret patterns
-            severity: HeuristicSeverity::Medium,
-            confidence: 0.5,
-            file_types: vec!["exe".to_string(), "dll".to_string()],
-            context_extractor: None,
         });
 
         // Shellcode patterns
@@ -192,7 +180,7 @@ impl HeuristicEngine {
             name: "C2 Communication Pattern".to_string(),
             description: "Detects patterns indicative of C2 server communication".to_string(),
             pattern: Regex::new(
-                r"(?i)(POST.*admin\.php|GET.*gate\.php|User-Agent:\s*(Mozilla/4\.0|curl))",
+                r"(?i)(POST [^\x00\n]{0,80}admin\.php|GET [^\x00\n]{0,80}gate\.php|User-Agent:\s*Mozilla/4\.0)",
             )
             .unwrap(),
             severity: HeuristicSeverity::High,
@@ -201,24 +189,13 @@ impl HeuristicEngine {
             context_extractor: Some(extract_network_context),
         });
 
-        // Suspicious domains
-        self.rules.push(HeuristicRule {
-            id: "HEUR_202".to_string(),
-            name: "Suspicious Domain Pattern".to_string(),
-            description: "Detects connections to suspicious domains".to_string(),
-            pattern: Regex::new(r"(?i)([a-z]{10,}\.tk|[a-z]{10,}\.ml|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})").unwrap(),
-            severity: HeuristicSeverity::Medium,
-            confidence: 0.6,
-            file_types: vec!["*".to_string()],
-            context_extractor: Some(extract_domain_context),
-        });
-
         // IRC bot patterns
         self.rules.push(HeuristicRule {
             id: "HEUR_203".to_string(),
             name: "IRC Bot Pattern".to_string(),
             description: "Detects IRC bot communication patterns".to_string(),
-            pattern: Regex::new(r"(?i)(PRIVMSG.*!bot|JOIN\s+#[a-z]+|NICK.*bot[0-9]+)").unwrap(),
+            pattern: Regex::new(r"(?i)(PRIVMSG [^\x00\n]{0,64}!bot|NICK [^\x00\n]{0,32}bot[0-9]+)")
+                .unwrap(),
             severity: HeuristicSeverity::Medium,
             confidence: 0.8,
             file_types: vec!["*".to_string()],
@@ -237,18 +214,6 @@ impl HeuristicEngine {
             confidence: 0.3,
             file_types: vec!["*".to_string()],
             context_extractor: Some(extract_base64_context),
-        });
-
-        // XOR obfuscation
-        self.rules.push(HeuristicRule {
-            id: "HEUR_302".to_string(),
-            name: "XOR Obfuscation".to_string(),
-            description: "Detects XOR obfuscation patterns".to_string(),
-            pattern: Regex::new(r"(\x00[\x01-\xff]\x00[\x01-\xff]){10,}").unwrap(),
-            severity: HeuristicSeverity::Medium,
-            confidence: 0.5,
-            file_types: vec!["exe".to_string(), "dll".to_string()],
-            context_extractor: None,
         });
 
         // String obfuscation
@@ -270,8 +235,7 @@ impl HeuristicEngine {
             id: "HEUR_401".to_string(),
             name: "Cryptocurrency Mining Pool".to_string(),
             description: "Detects connections to cryptocurrency mining pools".to_string(),
-            pattern: Regex::new(r"(?i)(stratum\+tcp://|pool\..*\..*:.*|.*\.nicehash\.com)")
-                .unwrap(),
+            pattern: Regex::new(r"(?i)(stratum\+(tcp|ssl)://|\bnicehash\.com\b)").unwrap(),
             severity: HeuristicSeverity::High,
             confidence: 0.9,
             file_types: vec!["*".to_string()],
@@ -298,43 +262,17 @@ impl HeuristicEngine {
             id: "HEUR_501".to_string(),
             name: "File Encryption Pattern".to_string(),
             description: "Detects patterns indicative of file encryption (ransomware)".to_string(),
-            pattern: Regex::new(r"(?i)(\.encrypted|\.locked|\.crypto|YOUR_FILES_ARE_ENCRYPTED)")
+            pattern: Regex::new(r"\.(encrypted|locked|crypto|Encrypted|Locked)\b|YOUR_FILES_ARE_ENCRYPTED|DECRYPT_INSTRUCTIONS")
                 .unwrap(),
             severity: HeuristicSeverity::Critical,
             confidence: 0.9,
             file_types: vec!["*".to_string()],
             context_extractor: Some(extract_ransomware_context),
         });
-
-        // Bitcoin payment demands
-        self.rules.push(HeuristicRule {
-            id: "HEUR_502".to_string(),
-            name: "Bitcoin Payment Demand".to_string(),
-            description: "Detects bitcoin addresses and payment demands".to_string(),
-            pattern: Regex::new(r"(?i)([13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59})")
-                .unwrap(),
-            severity: HeuristicSeverity::High,
-            confidence: 0.8,
-            file_types: vec!["*".to_string()],
-            context_extractor: Some(extract_bitcoin_context),
-        });
     }
 
     fn add_stealer_rules(&mut self) {
         // Password/credential stealing patterns
-        self.rules.push(HeuristicRule {
-            id: "HEUR_601".to_string(),
-            name: "Credential Stealer Pattern".to_string(),
-            description: "Detects patterns indicative of credential stealing".to_string(),
-            pattern: Regex::new(
-                r"(?i)(passwords?|login|credential|keylog|\\Cookies\\|\\History\\)",
-            )
-            .unwrap(),
-            severity: HeuristicSeverity::High,
-            confidence: 0.6,
-            file_types: vec!["*".to_string()],
-            context_extractor: Some(extract_stealer_context),
-        });
 
         // Browser data theft
         self.rules.push(HeuristicRule {
@@ -416,19 +354,16 @@ impl HeuristicEngine {
         Ok(matches)
     }
 
+    /// Points from the distinct rules that matched. Each rule counts once, so
+    /// a large file can't add up a verdict from many copies of one weak match.
+    /// (This used to be an average, so a single weak match scored like ten.)
     pub fn calculate_risk_score(&self, matches: &[HeuristicMatch]) -> f32 {
-        if matches.is_empty() {
-            return 0.0;
-        }
-
-        let total_weighted_score: f32 = matches
+        let mut seen = std::collections::HashSet::new();
+        matches
             .iter()
-            .map(|m| m.severity.score() as f32 * m.confidence)
-            .sum();
-
-        let max_possible_score = matches.len() as f32 * 10.0; // Max severity * max confidence
-
-        (total_weighted_score / max_possible_score) * 100.0
+            .filter(|m| seen.insert(m.rule_id.as_str()))
+            .map(|m| m.severity.points())
+            .sum::<u32>() as f32
     }
 }
 
@@ -456,21 +391,6 @@ fn snippet(content: &str, start: usize, end: usize) -> &str {
         end += 1;
     }
     &content[start..end]
-}
-
-// Context extraction functions
-fn extract_api_context(content: &str, offset: usize) -> HashMap<String, String> {
-    let mut context = HashMap::new();
-
-    // Extract surrounding context (100 chars before and after)
-    let start = offset.saturating_sub(100);
-    let end = std::cmp::min(offset + 100, content.len());
-    let surrounding = snippet(content, start, end);
-
-    context.insert("surrounding_context".to_string(), surrounding.to_string());
-    context.insert("api_sequence".to_string(), "detected".to_string());
-
-    context
 }
 
 fn extract_registry_context(content: &str, offset: usize) -> HashMap<String, String> {
@@ -537,18 +457,6 @@ fn extract_network_context(content: &str, offset: usize) -> HashMap<String, Stri
     context
 }
 
-fn extract_domain_context(content: &str, offset: usize) -> HashMap<String, String> {
-    let mut context = HashMap::new();
-
-    let start = offset.saturating_sub(30);
-    let end = std::cmp::min(offset + 100, content.len());
-    let domain_context = snippet(content, start, end);
-
-    context.insert("domain_context".to_string(), domain_context.to_string());
-
-    context
-}
-
 fn extract_base64_context(content: &str, offset: usize) -> HashMap<String, String> {
     let mut context = HashMap::new();
 
@@ -602,30 +510,6 @@ fn extract_ransomware_context(content: &str, offset: usize) -> HashMap<String, S
     context
 }
 
-fn extract_bitcoin_context(content: &str, offset: usize) -> HashMap<String, String> {
-    let mut context = HashMap::new();
-
-    let start = offset.saturating_sub(50);
-    let end = std::cmp::min(offset + 100, content.len());
-    let payment_context = snippet(content, start, end);
-
-    context.insert("payment_demand".to_string(), payment_context.to_string());
-
-    context
-}
-
-fn extract_stealer_context(content: &str, offset: usize) -> HashMap<String, String> {
-    let mut context = HashMap::new();
-
-    let start = offset.saturating_sub(50);
-    let end = std::cmp::min(offset + 150, content.len());
-    let stealer_context = snippet(content, start, end);
-
-    context.insert("credential_target".to_string(), stealer_context.to_string());
-
-    context
-}
-
 fn extract_browser_context(content: &str, offset: usize) -> HashMap<String, String> {
     let mut context = HashMap::new();
 
@@ -657,7 +541,7 @@ mod tests {
         // 40 three-byte characters put the match at byte 120, so the
         // 100-byte context window starts at byte 20, inside a character.
         let content = format!(
-            "{}CreateProcess WriteProcessMemory VirtualAllocEx{}",
+            "{}NtUnmapViewOfSection WriteProcessMemory ResumeThread{}",
             "式".repeat(40),
             "式".repeat(40)
         );
@@ -680,7 +564,7 @@ mod tests {
     #[tokio::test]
     async fn test_malware_detection() {
         let engine = HeuristicEngine::new();
-        let malicious_content = "CreateProcess WriteProcessMemory VirtualAllocEx";
+        let malicious_content = "NtUnmapViewOfSection WriteProcessMemory ResumeThread";
 
         // Write to a temp file with an .exe extension so executable-scoped
         // heuristic rules apply (rules are filtered by file extension).
@@ -728,21 +612,6 @@ mod tests {
         if let Some(mat) = ransomware_match {
             assert!(matches![mat.severity, HeuristicSeverity::Critical]);
         }
-    }
-
-    #[tokio::test]
-    async fn test_bitcoin_address_detection() {
-        let engine = HeuristicEngine::new();
-        let bitcoin_content = "Send payment to: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-
-        let matches = engine
-            .analyze_content(bitcoin_content, Path::new("test.txt"))
-            .await
-            .unwrap();
-        assert!(!matches.is_empty());
-
-        let bitcoin_match = matches.iter().find(|m| m.rule_id == "HEUR_502");
-        assert!(bitcoin_match.is_some());
     }
 
     #[tokio::test]
@@ -806,9 +675,11 @@ mod tests {
             },
         ];
 
-        let risk_score = engine.calculate_risk_score(&matches);
-        assert!(risk_score > 0.0);
-        assert!(risk_score <= 100.0);
+        // High (3) + Medium (2), each counted once.
+        let mut doubled = matches.clone();
+        doubled.extend(matches.clone());
+        assert_eq!(engine.calculate_risk_score(&matches), 5.0);
+        assert_eq!(engine.calculate_risk_score(&doubled), 5.0);
     }
 
     #[tokio::test]
@@ -816,7 +687,7 @@ mod tests {
         let engine = HeuristicEngine::new();
 
         // Test with .exe file - should match executable rules
-        let exe_content = "CreateProcess WriteProcessMemory";
+        let exe_content = "NtUnmapViewOfSection";
         let exe_matches = engine
             .analyze_content(exe_content, Path::new("test.exe"))
             .await
@@ -843,31 +714,14 @@ mod tests {
             .unwrap();
         let risk_score = engine.calculate_risk_score(&matches);
 
-        // Clean files should have low or zero risk scores
-        assert!(risk_score < 10.0);
-    }
-
-    #[tokio::test]
-    async fn test_context_extraction() {
-        let engine = HeuristicEngine::new();
-        let content_with_context = "Before context CreateProcess WriteProcessMemory After context";
-
-        let matches = engine
-            .analyze_content(content_with_context, Path::new("test.exe"))
-            .await
-            .unwrap();
-
-        if let Some(api_match) = matches.iter().find(|m| m.rule_id == "HEUR_001") {
-            assert!(api_match.context.contains_key("surrounding_context"));
-            assert!(api_match.context.contains_key("api_sequence"));
-        }
+        assert_eq!(risk_score, 0.0);
     }
 
     #[tokio::test]
     async fn test_multiple_threat_types() {
         let engine = HeuristicEngine::new();
         let multi_threat_content = r#"
-            CreateProcess WriteProcessMemory
+            NtUnmapViewOfSection
             HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run
             stratum+tcp://pool.example.com:4444
             YOUR_FILES_ARE_ENCRYPTED
@@ -880,17 +734,41 @@ mod tests {
             .unwrap();
 
         // Should detect multiple different threat types
-        assert!(matches.len() >= 5);
+        assert!(matches.len() >= 4);
 
         // Verify we have matches from different categories
         let rule_ids: Vec<&String> = matches.iter().map(|m| &m.rule_id).collect();
-        assert!(rule_ids.contains(&&"HEUR_001".to_string())); // Malware API
+        assert!(rule_ids.contains(&&"HEUR_003".to_string())); // Process hollowing
         assert!(rule_ids.contains(&&"HEUR_002".to_string())); // Registry persistence
         assert!(rule_ids.contains(&&"HEUR_401".to_string())); // Mining pool
         assert!(rule_ids.contains(&&"HEUR_501".to_string())); // Ransomware
-        assert!(rule_ids.contains(&&"HEUR_502".to_string())); // Bitcoin address
 
         let risk_score = engine.calculate_risk_score(&matches);
-        assert!(risk_score > 50.0); // Should be considered high risk
+        assert!(risk_score >= 5.0); // Malicious
+    }
+
+    #[tokio::test]
+    async fn rules_that_fire_on_clean_software_are_gone() {
+        let engine = HeuristicEngine::new();
+        // Each of these used to flag a file on its own.
+        let content = "CreateProcess GetProcAddress password login credential \
+            1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa 10.0.0.1 pool.example.com:80 \
+            System.Security.Cryptography X\x00Y\x00Z\x00W";
+        let matches = engine
+            .analyze_content(content, Path::new("tool.exe"))
+            .await
+            .unwrap();
+        assert_eq!(engine.calculate_risk_score(&matches), 0.0, "{matches:?}");
+    }
+
+    #[tokio::test]
+    async fn bounded_patterns_do_not_span_unrelated_text() {
+        let engine = HeuristicEngine::new();
+        let far = format!("WriteProcessMemory{}ResumeThread", "x".repeat(500));
+        let matches = engine
+            .analyze_content(&far, Path::new("a.exe"))
+            .await
+            .unwrap();
+        assert!(matches.iter().all(|m| m.rule_id != "HEUR_003"));
     }
 }
