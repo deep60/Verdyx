@@ -797,7 +797,7 @@ impl AnalysisEngine {
         }
 
         let start = std::time::Instant::now();
-        let content = String::from_utf8_lossy(&request.file_data);
+        let content = heuristic_text(&request.file_data);
         let matches = self
             .heuristic_engine
             .analyze_content(&content, std::path::Path::new(&request.filename))
@@ -1364,6 +1364,47 @@ impl AnalysisEngine {
             ],
         }
     }
+}
+
+/// The text the heuristic rules read. Shortcuts (.lnk) and many PowerShell
+/// scripts store their text as UTF-16, which a byte-wise read turns into
+/// "p\0o\0w\0e\0r..."; their UTF-16 strings are decoded and appended.
+pub(crate) fn heuristic_text(data: &[u8]) -> String {
+    let mut text = String::from_utf8_lossy(data).into_owned();
+    const LNK_MAGIC: [u8; 8] = [0x4C, 0x00, 0x00, 0x00, 0x01, 0x14, 0x02, 0x00];
+    let utf16_bom = data.starts_with(&[0xFF, 0xFE]);
+    if data.starts_with(&LNK_MAGIC) || utf16_bom {
+        text.push('\n');
+        text.push_str(&utf16_strings(data, if utf16_bom { 2 } else { 0 }));
+    }
+    text
+}
+
+/// Printable UTF-16LE runs of four or more characters, one per line.
+fn utf16_strings(data: &[u8], skip: usize) -> String {
+    let mut out = String::new();
+    let mut run = String::new();
+    for offset in [skip, skip + 1] {
+        for pair in data.get(offset..).unwrap_or_default().as_chunks::<2>().0 {
+            let unit = u16::from_le_bytes([pair[0], pair[1]]);
+            match char::from_u32(unit as u32) {
+                Some(c) if c == '\t' || (!c.is_control() && unit < 0xD800) => run.push(c),
+                _ => {
+                    if run.chars().count() >= 4 {
+                        out.push_str(&run);
+                        out.push('\n');
+                    }
+                    run.clear();
+                }
+            }
+        }
+        if run.chars().count() >= 4 {
+            out.push_str(&run);
+            out.push('\n');
+        }
+        run.clear();
+    }
+    out
 }
 
 /// Engines that only look for known-bad patterns.

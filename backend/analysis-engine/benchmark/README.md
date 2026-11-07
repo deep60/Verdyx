@@ -15,6 +15,7 @@ tuning) should be checked against it before it ships.
 |---|---|---|
 | Malicious | [MalwareBazaar](https://bazaar.abuse.ch), picked by `build_manifest.py` | 197 files, 87 families |
 | Clean, Windows | Official releases of Python 3.12.7 (embeddable), MinGit 2.47.0, PuTTY 0.81, Notepad++ 8.7 | ~700 files |
+| Clean, scripts | Pester 5.6.1 and PSScriptAnalyzer 1.23.0 (PowerShell), jQuery 3.7.1 and Bootstrap 5.3.3 (JavaScript) | ~1,200 files |
 | Clean, Linux | `/usr/bin` of the analysis-engine image (Debian trixie) | a few hundred files |
 
 The malicious half covers Windows executables and DLLs (94), scripts (42:
