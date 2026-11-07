@@ -1,6 +1,5 @@
 import { Navigation } from "@/components/navigation";
 import { ArchitectureDiagram } from "@/components/diagrams/ArchitectureDiagram";
-import { ComparisonTable } from "@/components/tables/ComparisonTable";
 import { CasePreview } from "@/components/case-preview";
 import { Footer } from "@/components/footer";
 import { Button } from "@/components/ui/button";
@@ -8,17 +7,25 @@ import { Link } from "wouter";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SEO } from "@/components/seo";
-import type { ApiStats } from "@/lib/api-types";
+import type { ApiEngine } from "@/lib/api-types";
+import { ENGINE_STATE_LABEL, engineState, votingEngines } from "@/lib/engines";
 
-const ENGINES: { name: string; detail: string }[] = [
-  { name: "ClamAV", detail: "Optional. Signature sweep when a ClamAV server is connected." },
-  { name: "YARA 4.5", detail: "Pattern match on strings, hex, and conditions." },
-  { name: "Goblin", detail: "PE and ELF imports, sections, and packer marks." },
-  { name: "Byte entropy", detail: "Histogram and packing score for the whole file." },
-  { name: "Heuristics", detail: "Behavioral flags that do not need a named signature." },
-  { name: "Signatures", detail: "Known-bad byte sequences and packer names." },
-  { name: "Hash intel", detail: "SHA-256 and related digests against prior cases." },
+/** Shown until the live engine list loads, so the section is never empty. */
+const FALLBACK_ENGINES: ApiEngine[] = [
+  { id: "static", name: "Static Analyzer", description: "Executable header parsing (PE/ELF/Mach-O), section entropy, and string/IoC extraction" },
+  { id: "hash", name: "Hash Analyzer", description: "SHA-256, MD5 and SHA-1, checked against MalwareBazaar" },
+  { id: "heuristic", name: "Heuristic Engine", description: "Behavioral patterns that don't need a named signature" },
+  { id: "signature", name: "Signature Matcher", description: "Known-bad byte sequences and packer names" },
+  { id: "yara", name: "YARA Engine", description: "The YARA-Forge core rule pack, over 5,000 rules" },
+  { id: "clamav", name: "ClamAV Scanner", description: "Signature sweep when a ClamAV server is connected" },
+  { id: "ml", name: "Machine Learning Classifier", description: "Advisory only until it's trained on real data" },
 ];
+
+const STATE_STYLE = {
+  voting: "border-[#9CBFAE]/60 text-foreground",
+  advisory: "border-[#E4C27A]/70 text-foreground",
+  off: "border-border text-muted-foreground",
+} as const;
 
 const RECON: { name: string; detail: string }[] = [
   { name: "Network and host", detail: "IP, ASN, open ports, co-hosted names, redirect chain." },
@@ -28,10 +35,29 @@ const RECON: { name: string; detail: string }[] = [
 ];
 
 const STEPS = [
-  { n: "1", title: "Ingest", text: "The gateway stores the file or URL and the SHA-256." },
-  { n: "2", title: "Engines", text: "The workers read the same artifact in parallel." },
-  { n: "3", title: "Commit", text: "Each vote is sealed as a hash before anyone sees it." },
-  { n: "4", title: "Reveal", text: "The case opens the votes and records the quorum." },
+  { n: "1", title: "Ingest", text: "The gateway stores the file or URL with its SHA-256." },
+  { n: "2", title: "Engines", text: "Every engine reads the same artifact, in parallel." },
+  { n: "3", title: "Consensus", text: "A majority vote of the engines that returned a verdict. The rest are named, not counted." },
+  { n: "4", title: "Report", text: "The case keeps each vote, its confidence, and the evidence behind it." },
+];
+
+const PRINCIPLES = [
+  {
+    title: "No invented verdicts",
+    text: "A hash no source knows comes back as No verdict, not Clean. Confidence is what the engine reported, never a default.",
+  },
+  {
+    title: "Advisory engines don't vote",
+    text: "The ML model is shown on every case, but until it's trained on real data its prediction doesn't count.",
+  },
+  {
+    title: "Failures are visible",
+    text: "An engine that errors or is switched off is listed on the case with the reason, instead of silently counting as clean.",
+  },
+  {
+    title: "Your scans are yours",
+    text: "Submissions and results are tied to your account. Nobody else can list them.",
+  },
 ];
 
 function scrollToLocationHash() {
@@ -41,9 +67,11 @@ function scrollToLocationHash() {
 }
 
 export default function Home() {
-  const { data: stats } = useQuery<ApiStats>({
-    queryKey: ["/api/analysis/stats"],
+  const { data: liveEngines } = useQuery<ApiEngine[]>({
+    queryKey: ["/api/engines"],
   });
+  const engines = liveEngines && liveEngines.length > 0 ? liveEngines : null;
+  const voting = engines ? votingEngines(engines).length : null;
 
   useEffect(() => {
     scrollToLocationHash();
@@ -57,16 +85,11 @@ export default function Home() {
     };
   }, []);
 
-  const indexed =
-    typeof stats?.totalSubmissions === "number"
-      ? stats.totalSubmissions.toLocaleString()
-      : null;
-
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <SEO
         title="Verdyx — Malware verdicts you can audit"
-        description="Verdyx runs several engines on one file, seals each vote, then reveals the quorum. URL scans cover DNS, TLS, mail auth, and the page."
+        description="Verdyx runs several engines on one file and shows every vote, its confidence, and the evidence. URL scans cover DNS, TLS, mail auth, and the page."
       />
       <Navigation />
 
@@ -79,8 +102,9 @@ export default function Home() {
                 A malware verdict you can audit, engine by engine.
               </h1>
               <p className="mt-5 max-w-md text-[15px] leading-relaxed text-foreground/80 sm:text-base">
-                YARA, static parsing, hash intel, and the rest of the set read the same artifact.
-                Each vote is hashed before it is shown. The case keeps the quorum, the confidence, and the evidence.
+                Static parsing, YARA-Forge rules, hash reputation, heuristics, and signatures read the same file.
+                Every engine's verdict, confidence, and evidence stays on the case, and an engine that can't
+                give a verdict is named instead of counted.
               </p>
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
                 <Link href="/dashboard">
@@ -96,20 +120,16 @@ export default function Home() {
               </div>
               <dl className="mt-10 grid grid-cols-3 gap-3 border-t border-border pt-5">
                 <div>
-                  <dt className="text-xs text-muted-foreground">Engines</dt>
-                  <dd className="mt-1 font-mono text-lg tabular-nums">7</dd>
+                  <dt className="text-xs text-muted-foreground">Voting engines</dt>
+                  <dd className="mt-1 font-mono text-lg tabular-nums">{voting ?? "—"}</dd>
                 </div>
                 <div>
                   <dt className="text-xs text-muted-foreground">Site checks</dt>
                   <dd className="mt-1 font-mono text-lg tabular-nums">36</dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted-foreground">
-                    {indexed ? "Cases indexed" : "Vote"}
-                  </dt>
-                  <dd className="mt-1 font-mono text-lg tabular-nums">
-                    {indexed ?? "Sealed"}
-                  </dd>
+                  <dt className="text-xs text-muted-foreground">Price</dt>
+                  <dd className="mt-1 font-mono text-lg">Free beta</dd>
                 </div>
               </dl>
             </div>
@@ -139,18 +159,28 @@ export default function Home() {
             <div>
               <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">File engines</h2>
               <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-                Always-on static, hash, heuristic, and signature passes. YARA, the entropy model, and ClamAV when connected join the same case.
+                Live status from the analysis engine. Only engines marked Votes count toward the verdict.
               </p>
               <ul className="mt-6 border-t border-border">
-                {ENGINES.map((engine) => (
-                  <li
-                    key={engine.name}
-                    className="grid gap-1 border-b border-border py-3 sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4"
-                  >
-                    <span className="text-sm font-medium">{engine.name}</span>
-                    <span className="text-sm text-muted-foreground">{engine.detail}</span>
-                  </li>
-                ))}
+                {(engines ?? FALLBACK_ENGINES).map((engine) => {
+                  const state = engines ? engineState(engine) : null;
+                  return (
+                    <li
+                      key={engine.id}
+                      className="grid gap-1 border-b border-border py-3 sm:grid-cols-[12rem_minmax(0,1fr)_auto] sm:items-baseline sm:gap-4"
+                    >
+                      <span className="text-sm font-medium">{engine.name}</span>
+                      <span className="text-sm text-muted-foreground">{engine.description}</span>
+                      {state && (
+                        <span
+                          className={`w-fit border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${STATE_STYLE[state]}`}
+                        >
+                          {ENGINE_STATE_LABEL[state]}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
             <div>
@@ -192,9 +222,22 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="border-b border-border">
+        <section className="border-b border-border" aria-labelledby="principles-heading">
           <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-            <ComparisonTable />
+            <h2 id="principles-heading" className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">
+              What a verdict here means
+            </h2>
+            <ul className="mt-8 grid border-t border-border sm:grid-cols-2 lg:grid-cols-4">
+              {PRINCIPLES.map((p) => (
+                <li
+                  key={p.title}
+                  className="border-b border-border py-5 sm:px-5 sm:[&:nth-child(odd)]:border-r lg:border-r lg:last:border-r-0 lg:first:pl-0"
+                >
+                  <h3 className="text-sm font-medium">{p.title}</h3>
+                  <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{p.text}</p>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
 
@@ -230,7 +273,7 @@ export default function Home() {
         </section>
       </main>
 
-      <Footer tag="file · url · quorum" />
+      <Footer tag="file · url · consensus" />
     </div>
   );
 }

@@ -14,14 +14,14 @@ const footerSections = [
       { href: "/dashboard", label: "Analysis Dashboard" },
       { href: "/marketplace", label: "Bounty Marketplace" },
       { href: "/#architecture", label: "Architecture & Pipeline" },
-      { href: "/pricing", label: "Pricing & Tiers" },
+      { href: "/pricing", label: "Pricing" },
     ],
   },
   {
     title: "Capabilities",
     links: [
-      { href: "/#capabilities", label: "8-Engine Malware Sandbox" },
-      { href: "/#architecture", label: "Bayesian Consensus" },
+      { href: "/#capabilities", label: "File & URL Engines" },
+      { href: "/#architecture", label: "How Consensus Works" },
       { href: "/marketplace", label: "Security Engines" },
       { href: "/#capabilities", label: "Enterprise Use Cases" },
     ],
@@ -30,9 +30,9 @@ const footerSections = [
     title: "Developers",
     links: [
       { href: "/api", label: "REST & WebSocket API" },
-      { href: "/api-docs", label: "API Reference & Keys" },
+      { href: "/api", label: "API Reference & Keys" },
       { href: "/login", label: "Analyst Sign In" },
-      { href: "/register", label: "Register Node" },
+      { href: "/register", label: "Create an Account" },
     ],
   },
 ];
@@ -52,7 +52,7 @@ export function Footer({ tag = "commit · reveal" }: FooterProps) {
             </Link>
 
             <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-              Eight engines on one file. Each vote is sealed, then opened with the quorum.
+              Several engines on one file. Every vote, its confidence, and its evidence stay on the case.
             </p>
 
             <p className="font-mono text-xs text-muted-foreground">{tag}</p>
@@ -98,7 +98,7 @@ export function Footer({ tag = "commit · reveal" }: FooterProps) {
         </div>
 
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
-          <p className="font-mono">Eight engines · thirty-six checks · one verdict</p>
+          <p className="font-mono">Every engine shown · thirty-six site checks · one verdict</p>
           <p className="font-mono">© {new Date().getFullYear()} Verdyx Labs</p>
         </div>
       </div>

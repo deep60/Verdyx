@@ -14,7 +14,7 @@ pub struct EngineStatusItem {
     pub name: String,
     pub engine_type: String,
     pub is_optional: bool,
-    pub status: String, // "online" | "unavailable" | "disabled" | "degraded"
+    pub status: String, // "online" | "advisory" | "unavailable" | "disabled" | "degraded"
     pub version: String,
     pub details: String,
     pub error: Option<String>,
@@ -1296,7 +1296,12 @@ impl AnalysisEngine {
                 )
             } else if self.ml_analyzer.is_available() {
                 (
-                    "online",
+                    // Advisory: running, but its prediction doesn't vote.
+                    if self.config.ml_analyzer.counts_toward_verdict {
+                        "online"
+                    } else {
+                        "advisory"
+                    },
                     "ort 2.0.0-rc.13",
                     if self.config.ml_analyzer.counts_toward_verdict {
                         "ONNX threat classifier and anomaly detector models loaded".to_string()

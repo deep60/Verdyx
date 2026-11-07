@@ -58,7 +58,8 @@ pub struct AnalysisStats {
     pub threats_detected: i64,
     pub total_engines: i64,
     pub total_active_bounties: i64,
-    pub avg_response_time: String,
+    /// `None` until an analysis has recorded its processing time.
+    pub avg_response_time: Option<String>,
     pub total_rewards_paid: String,
 }
 
@@ -216,12 +217,19 @@ pub async fn get_analysis_stats(
     .await
     .unwrap_or(0);
 
-    let total_engines: i64 =
+    // Engines that vote right now: the analysis engine's built-in analyzers
+    // that report "online" (advisory and disabled ones don't vote), plus any
+    // active registered engines. No floor: if nothing is online, say so.
+    let builtin_online = crate::handlers::engines::builtin_engines(&state)
+        .await
+        .map(|engines| engines.iter().filter(|e| e.is_active).count() as i64)
+        .unwrap_or(0);
+    let registered_active: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM engines WHERE is_active = true")
             .fetch_one(state.db.pool())
             .await
-            .unwrap_or(0)
-            .max(3); // Built-in ClamAV, YARA, and Heuristic engines are always active
+            .unwrap_or(0);
+    let total_engines = builtin_online + registered_active;
 
     let total_active_bounties: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM bounties WHERE bounty_status = 'active'")
@@ -236,11 +244,13 @@ pub async fn get_analysis_stats(
     .await
     .unwrap_or(None);
 
-    let avg_response_time = match avg_ms {
-        Some(ms) if ms >= 1000.0 => format!("{:.1}s", ms / 1000.0),
-        Some(ms) => format!("{:.0}ms", ms),
-        None => "1.2s".to_string(),
-    };
+    let avg_response_time = avg_ms.map(|ms| {
+        if ms >= 1000.0 {
+            format!("{:.1}s", ms / 1000.0)
+        } else {
+            format!("{:.0}ms", ms)
+        }
+    });
 
     let total_rewards_paid: String = sqlx::query_scalar(
         "SELECT COALESCE(SUM(amount)::text, '0') FROM payouts WHERE status = 'completed'",
