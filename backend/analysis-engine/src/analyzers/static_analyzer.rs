@@ -180,9 +180,10 @@ lazy_static! {
         (Regex::new(r"\b(CreateRemoteThread|VirtualAllocEx|WriteProcessMemory|NtUnmapViewOfSection|ZwUnmapViewOfSection)\b").unwrap(), StringCategory::ProcessInjection, 10),
         (Regex::new(r"\b(SetWindowsHookEx[AW]?|GetAsyncKeyState|WH_KEYBOARD_LL)\b").unwrap(), StringCategory::Keylogging, 9),
         (Regex::new(r"(?i)\b(mimikatz|lsass\.exe)\b").unwrap(), StringCategory::CredentialTheft, 10),
-        // Lowercase file extensions only: ".Crypto" is the start of .NET's
-        // System.Security.Cryptography.
-        (Regex::new(r"\.(encrypted|locked|crypto|Encrypted|Locked)\b|DECRYPT_INSTRUCTIONS|HELP_instructions|YOUR_FILES_ARE_ENCRYPTED").unwrap(), StringCategory::Ransomware, 10),
+        // File extensions only: ".Crypto" is the start of .NET's
+        // System.Security.Cryptography, and jQuery has a `.locked()` method,
+        // so the extension must end the name.
+        (Regex::new(r#"[A-Za-z0-9_\-]\.(encrypted|locked|crypto|Encrypted|Locked)(?:$|[\s"'\x00,;)\]])|DECRYPT_INSTRUCTIONS|HELP_instructions|YOUR_FILES_ARE_ENCRYPTED"#).unwrap(), StringCategory::Ransomware, 10),
         (Regex::new(r"(?i)\b(backdoor|rootkit|keylogger)\b").unwrap(), StringCategory::Malware, 8),
         (Regex::new(r"\b(IsDebuggerPresent|CheckRemoteDebuggerPresent)\b").unwrap(), StringCategory::AntiAnalysis, 8),
         (Regex::new(r"(?i)\b(VBoxService|vmtoolsd|SbieDll\.dll|wine_get_unix_file_name)\b").unwrap(), StringCategory::AntiAnalysis, 7),
@@ -315,12 +316,15 @@ fn string_points(sa: &StringAnalysis) -> Vec<(&'static str, String, u8)> {
             2,
         ));
     }
+    // mimikatz is a credential-dumping tool. lsass.exe alone is weaker: security
+    // tooling and documentation name it too.
     let creds = found(|c| matches!(c, StringCategory::CredentialTheft));
     if !creds.is_empty() {
+        let tool = creds.iter().any(|c| c.eq_ignore_ascii_case("mimikatz"));
         out.push((
             "credential_tools",
             format!("Credential theft: {}", creds.join(", ")),
-            3,
+            if tool { 3 } else { 1 },
         ));
     }
     let keylog = found(|c| matches!(c, StringCategory::Keylogging));
@@ -392,7 +396,12 @@ impl StaticAnalyzer {
                 "Overall entropy: {:.2}, Packed: {}",
                 analysis.overall_entropy, analysis.is_likely_packed
             );
-            if analysis.is_likely_packed || analysis.overall_entropy > self.config.entropy_threshold
+            // Images and archives are compressed by design, so high entropy
+            // says nothing about them.
+            let compressed_format = matches!(file_type, FileType::Image | FileType::Archive);
+            if !compressed_format
+                && (analysis.is_likely_packed
+                    || analysis.overall_entropy > self.config.entropy_threshold)
             {
                 evidence.add(
                     PACKED,
@@ -1285,5 +1294,33 @@ mod tests {
         e.add("keylogging", "d".into(), 1);
         assert_eq!(verdict_for(e.points()).0, ThreatVerdict::Malicious);
         assert_eq!(verdict_for(1).0, ThreatVerdict::Benign);
+    }
+
+    #[test]
+    fn a_locked_method_is_not_a_ransomware_extension() {
+        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        let sa = analyzer.analyze_strings(b"if ( callbacks.locked() ) { return; }");
+        assert!(string_points(&sa).is_empty());
+        let sa =
+            analyzer.analyze_strings(b"Your files now end in .locked and invoice.pdf.locked\n");
+        assert_eq!(string_points(&sa)[0].0, "ransomware");
+    }
+
+    #[test]
+    fn lsass_alone_is_weak_but_mimikatz_is_strong() {
+        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        let weak = string_points(&analyzer.analyze_strings(b"Protects lsass.exe from dumping"));
+        assert_eq!(weak[0].2, 1);
+        let strong = string_points(&analyzer.analyze_strings(b"mimikatz sekurlsa lsass.exe"));
+        assert_eq!(strong[0].2, 3);
+    }
+
+    #[tokio::test]
+    async fn compressed_images_are_not_called_packed() {
+        let analyzer = StaticAnalyzer::new(StaticAnalyzerConfig::default());
+        let mut png = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend((0..8192u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8));
+        let d = analyzer.analyze(&png, Some("logo.png")).await.unwrap();
+        assert_eq!(d.verdict, ThreatVerdict::Benign);
     }
 }

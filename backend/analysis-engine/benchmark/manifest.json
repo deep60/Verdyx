@@ -1989,6 +1989,22 @@
     {
       "name": "notepad++-8.7-portable-x64",
       "url": "https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.7/npp.8.7.portable.x64.zip"
+    },
+    {
+      "name": "pester-5.6.1",
+      "url": "https://github.com/pester/Pester/archive/refs/tags/5.6.1.zip"
+    },
+    {
+      "name": "psscriptanalyzer-1.23.0",
+      "url": "https://github.com/PowerShell/PSScriptAnalyzer/archive/refs/tags/1.23.0.zip"
+    },
+    {
+      "name": "jquery-3.7.1",
+      "url": "https://github.com/jquery/jquery/archive/refs/tags/3.7.1.zip"
+    },
+    {
+      "name": "bootstrap-5.3.3-dist",
+      "url": "https://github.com/twbs/bootstrap/releases/download/v5.3.3/bootstrap-5.3.3-dist.zip"
     }
   ]
 }
