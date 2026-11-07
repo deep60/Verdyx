@@ -357,7 +357,7 @@ pub use ml_stub::*;
 
 use crate::models::analysis_result::{
     AnalysisResult, DetectionResult, EngineType, FileMetadata, SeverityLevel, ThreatCategory,
-    ThreatVerdict,
+    ThreatVerdict, STRONG_SIGNAL_KEY,
 };
 use crate::scanners::email_scanner::{AuthResult, EmailScanner, EmailScannerConfig};
 use crate::scanners::Scanner;
@@ -817,6 +817,7 @@ impl AnalysisEngine {
             ThreatVerdict::Benign => ((95.0 - risk_score * 1.2) / 100.0).clamp(0.88, 0.96),
             ThreatVerdict::Unknown => 0.50,
         };
+        let strong_signal = verdict == ThreatVerdict::Malicious;
 
         Ok(DetectionResult {
             detection_id: Uuid::new_v4(),
@@ -831,6 +832,12 @@ impl AnalysisEngine {
                 ("match_count".to_string(), serde_json::json!(matches.len())),
                 ("risk_score".to_string(), serde_json::json!(risk_score)),
                 ("matches".to_string(), serde_json::to_value(&matches)?),
+                // Malicious here means several patterns scoring 50+, not one
+                // stray string.
+                (
+                    STRONG_SIGNAL_KEY.to_string(),
+                    serde_json::json!(strong_signal),
+                ),
             ]),
             detected_at: Utc::now(),
             processing_time_ms: start.elapsed().as_millis().max(1) as u64,
@@ -862,6 +869,7 @@ impl AnalysisEngine {
         } else {
             (ThreatVerdict::Suspicious, raw_match_conf.clamp(0.68, 0.85))
         };
+        let strong_signal = verdict == ThreatVerdict::Malicious;
 
         Ok(DetectionResult {
             detection_id: Uuid::new_v4(),
@@ -883,6 +891,10 @@ impl AnalysisEngine {
                     serde_json::json!(request.file_data.len()),
                 ),
                 ("matches".to_string(), serde_json::to_value(&matches)?),
+                (
+                    STRONG_SIGNAL_KEY.to_string(),
+                    serde_json::json!(strong_signal),
+                ),
             ]),
             detected_at: Utc::now(),
             processing_time_ms: start.elapsed().as_millis().max(1) as u64,

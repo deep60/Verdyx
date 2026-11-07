@@ -255,20 +255,31 @@ impl Database {
         let status = format!("{:?}", result.status);
         let severity = format!("{:?}", result.consensus_severity);
 
-        let file_metadata = serde_json::to_value(&result.file_metadata)
-            .context("Failed to serialize file metadata")?;
+        // Postgres rejects NUL in jsonb; strings pulled from binaries carry it.
+        use crate::models::analysis_result::without_nul;
+        let file_metadata = without_nul(
+            serde_json::to_value(&result.file_metadata)
+                .context("Failed to serialize file metadata")?,
+        );
 
-        let detections =
-            serde_json::to_value(&result.detections).context("Failed to serialize detections")?;
+        let detections = without_nul(
+            serde_json::to_value(&result.detections).context("Failed to serialize detections")?,
+        );
 
-        let yara_matches = serde_json::to_value(&result.yara_matches)
-            .context("Failed to serialize yara matches")?;
+        let yara_matches = without_nul(
+            serde_json::to_value(&result.yara_matches)
+                .context("Failed to serialize yara matches")?,
+        );
 
-        let network_indicators = serde_json::to_value(&result.network_indicators)
-            .context("Failed to serialize network indicators")?;
+        let network_indicators = without_nul(
+            serde_json::to_value(&result.network_indicators)
+                .context("Failed to serialize network indicators")?,
+        );
 
-        let behavioral_analysis = serde_json::to_value(&result.behavioral_analysis)
-            .context("Failed to serialize behavioral analysis")?;
+        let behavioral_analysis = without_nul(
+            serde_json::to_value(&result.behavioral_analysis)
+                .context("Failed to serialize behavioral analysis")?,
+        );
 
         sqlx::query(
             r#"
