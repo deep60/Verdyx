@@ -14,6 +14,7 @@ pub mod consensus_proxy;
 pub mod engines;
 pub mod health;
 pub mod identity;
+pub mod oauth;
 pub mod reputation;
 pub mod submission;
 pub mod user;

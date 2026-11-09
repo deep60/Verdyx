@@ -6,8 +6,8 @@ use axum::{
 
 use crate::{
     handlers::{
-        analysis, auth, bounty, consensus_proxy, engines, health, reputation, submission, user,
-        wallet, web_intel, webhook,
+        analysis, auth, bounty, consensus_proxy, engines, health, oauth, reputation, submission,
+        user, wallet, web_intel, webhook,
     },
     middleware::{auth as auth_mw, rate_limiter},
     AppState,
@@ -85,6 +85,7 @@ fn auth_routes(state: AppState) -> Router<AppState> {
         .route("/login", post(auth::login))
         .route("/forgot-password", post(auth::forgot_password))
         .route("/reset-password", post(auth::reset_password))
+        .route("/oauth/{provider}", get(oauth::start))
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limiter::auth_rate_limit_middleware,
@@ -100,6 +101,8 @@ fn auth_routes(state: AppState) -> Router<AppState> {
         .route("/api-key", post(auth::generate_api_key))
         .route("/wallet/connect", post(auth::collect_wallet))
         .route("/wallet/disconnect", post(auth::disconnect_wallet))
+        .route("/oauth/providers", get(oauth::providers))
+        .route("/oauth/{provider}/callback", get(oauth::callback))
 }
 
 // ─── Mixed route groups (optional auth) ─────────────────────────
