@@ -710,21 +710,40 @@ impl BlockchainService {
             .context("Invalid Ethereum address format")
     }
 
-    /// Health check for blockchain service
-    /// Pings the RPC endpoint with a 5-second timeout to verify connectivity
-    pub async fn health_check(&self) -> bool {
-        match tokio::time::timeout(Duration::from_secs(5), self.client.get_block_number()).await {
-            Ok(Ok(_)) => true,
+    /// Whether the RPC answers and the configured contracts exist on that
+    /// chain. An RPC that answers says nothing about Verdyx: a public node
+    /// replies even when no contract was ever deployed there.
+    pub async fn health_check(&self) -> ChainHealth {
+        let probe = async {
+            self.client.get_block_number().await?;
+            self.client
+                .get_code(self.contracts.bounty_manager.address(), None)
+                .await
+        };
+        match tokio::time::timeout(Duration::from_secs(5), probe).await {
+            Ok(Ok(code)) if code.as_ref().is_empty() => ChainHealth::NotDeployed,
+            Ok(Ok(_)) => ChainHealth::Ready,
             Ok(Err(e)) => {
                 tracing::warn!("Blockchain health check failed: {}", e);
-                false
+                ChainHealth::Unreachable
             }
             Err(_) => {
                 tracing::warn!("Blockchain health check timed out");
-                false
+                ChainHealth::Unreachable
             }
         }
     }
+}
+
+/// Result of [`BlockchainService::health_check`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainHealth {
+    /// RPC answers and the bounty contract has code.
+    Ready,
+    /// RPC answers but no contract is deployed at the configured address.
+    NotDeployed,
+    /// RPC error or timeout.
+    Unreachable,
 }
 
 #[cfg(test)]

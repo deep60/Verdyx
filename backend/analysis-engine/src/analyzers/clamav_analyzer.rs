@@ -25,6 +25,8 @@ impl Default for ClamAvAnalyzerConfig {
         // the clamd default port 3310.
         let address = std::env::var("CLAMAV_HOST")
             .ok()
+            .map(|h| h.trim().to_string())
+            .filter(|h| !h.is_empty())
             .map(|h| {
                 if h.contains(':') {
                     h
