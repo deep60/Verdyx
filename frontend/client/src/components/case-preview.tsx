@@ -7,8 +7,8 @@ type Row =
 
 /**
  * An example case built the way the consensus really works: a majority of the
- * engines that returned a verdict. The advisory ML model and a switched-off
- * engine are shown but don't vote.
+ * engines that returned a verdict. The advisory ML model is shown but doesn't
+ * vote.
  */
 const ROWS: Row[] = [
   { engine: "YARA Engine", vote: "malicious", confidence: 0.92, note: "2 rules" },
@@ -17,7 +17,7 @@ const ROWS: Row[] = [
   { engine: "Static Analyzer", vote: "suspicious", confidence: 0.78 },
   { engine: "Signature Matcher", vote: "benign", confidence: 0.88 },
   { engine: "ML Classifier", vote: "advisory", prediction: "malicious", confidence: 0.71 },
-  { engine: "ClamAV Scanner", vote: "off", note: "not connected" },
+  { engine: "ClamAV Scanner", vote: "malicious", confidence: 0.95, note: "signature match" },
 ];
 
 const VOTE_COLOR: Record<Vote, string> = {
@@ -111,7 +111,7 @@ export function CasePreview() {
               Votes counted
             </div>
             <div className="mt-1 font-mono text-xs text-[#F3F1EA]/85">
-              5 of 7 · 3 malicious · 1 suspicious · 1 benign
+              6 of 7 · 4 malicious · 1 suspicious · 1 benign
             </div>
           </div>
           <div className="px-4 py-3 sm:px-5">
@@ -119,7 +119,7 @@ export function CasePreview() {
               Not counted
             </div>
             <div className="mt-1 font-mono text-xs text-[#F3F1EA]/70">
-              ML advisory · ClamAV off
+              ML advisory
             </div>
           </div>
         </div>

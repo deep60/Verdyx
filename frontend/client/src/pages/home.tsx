@@ -17,7 +17,7 @@ const FALLBACK_ENGINES: ApiEngine[] = [
   { id: "heuristic", name: "Heuristic Engine", description: "Behavioral patterns that don't need a named signature" },
   { id: "signature", name: "Signature Matcher", description: "Known-bad byte sequences and packer names" },
   { id: "yara", name: "YARA Engine", description: "The YARA-Forge core rule pack, over 5,000 rules" },
-  { id: "clamav", name: "ClamAV Scanner", description: "Signature sweep when a ClamAV server is connected" },
+  { id: "clamav", name: "ClamAV Scanner", description: "Open-source antivirus signatures, updated several times a day" },
   { id: "ml", name: "Machine Learning Classifier", description: "Advisory only until it's trained on real data" },
 ];
 
