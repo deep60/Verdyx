@@ -28,9 +28,22 @@ echo "== Fetching samples"
 docker run --rm -e ABUSE_CH_API_KEY -e BENCH=/bench -v "$remote:/bench" \
   debian:trixie-slim bash /bench/fetch_samples.sh
 
+# ClamAV runs on its own VM. When production has it switched on, give the
+# benchmark a network so it can reach clamd too; otherwise keep it offline.
+# Hash-reputation feeds stay off either way (verdyx-benchmark clears their keys).
+clam_enabled="$(sudo grep -E '^ENABLE_CLAMAV=' /opt/verdyx/.env | cut -d= -f2- | tr -d "\"'" || true)"
+clam_host="$(sudo grep -E '^CLAMAV_HOST=' /opt/verdyx/.env | cut -d= -f2- | tr -d "\"'" || true)"
+if [ "$clam_enabled" = "true" ] && [ -n "$clam_host" ]; then
+  echo "== ClamAV: $clam_host"
+  net=(--network bridge -e ENABLE_CLAMAV=true -e "CLAMAV_HOST=$clam_host" -e CLAMAV_TIMEOUT_SECONDS=60)
+else
+  echo "== ClamAV: off"
+  net=(--network none -e ENABLE_CLAMAV=false)
+fi
+
 echo "== Running the benchmark"
 docker pull -q "$image" >/dev/null
-docker run --rm --memory 700m --network none \
+docker run --rm --memory 700m "${net[@]}" \
   -v "$remote/manifest.json:/bench/manifest.json:ro" \
   -v "$remote/samples:/bench/samples:ro" \
   -v "$remote/out:/out" \

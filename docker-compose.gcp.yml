@@ -11,8 +11,10 @@
 #   minio     -> Cloudflare R2 via S3_ENDPOINT. The S3 client already takes an
 #                endpoint override and uses path-style addressing, which R2
 #                accepts, so this is config-only.
-#   clamav    -> disabled with ENABLE_CLAMAV=false. It alone wants ~1.5 GB for
-#                its signature database, more than the entire VM has.
+#   clamav    -> runs on its own free VM (VM.Standard.E2.1.Micro + swap) on the
+#                same private subnet, because its signature database alone
+#                wants more memory than this VM has. Set ENABLE_CLAMAV=true and
+#                CLAMAV_HOST=<private-ip>:3310 in .env to use it.
 #   frontend  -> Cloudflare Pages. The Node BFF is redundant there because
 #                functions/api/[[path]].ts does the same /api proxying at the
 #                edge, for free, without using VM memory.
@@ -182,9 +184,11 @@ services:
       - S3_ACCESS_KEY=${S3_ACCESS_KEY}
       - S3_SECRET_KEY=${S3_SECRET_KEY}
       - YARA_RULES_PATH=/app/rules
-      # No clamd on this box — the analyzer skips itself when disabled rather
-      # than failing submissions.
-      - ENABLE_CLAMAV=false
+      # clamd runs on a separate VM (see the header). Off unless .env turns it
+      # on; when off, the analyzer skips itself rather than failing scans.
+      - ENABLE_CLAMAV=${ENABLE_CLAMAV:-false}
+      - CLAMAV_HOST=${CLAMAV_HOST:-}
+      - CLAMAV_TIMEOUT_SECONDS=${CLAMAV_TIMEOUT_SECONDS:-60}
     volumes:
       - uploads_data:/app/uploads
     mem_limit: 224m
