@@ -36,6 +36,7 @@ pub struct DetailedEngineReport {
 pub mod dynamic_analyzer;
 pub mod hash_analyzer;
 pub mod heuristic_engine;
+pub mod pe_model_analyzer;
 pub mod signature_matcher;
 pub mod static_analyzer;
 
@@ -49,6 +50,7 @@ pub mod yara_engine;
 // Re-export commonly used types
 pub use hash_analyzer::{HashAnalyzer, HashAnalyzerConfig, HashInfo, HashType};
 pub use heuristic_engine::{HeuristicEngine, HeuristicMatch, HeuristicSeverity};
+pub use pe_model_analyzer::{PeModelAnalyzer, PeModelConfig};
 pub use signature_matcher::{
     SignatureMatch, SignatureMatcher, SignatureMatcherConfig, ThreatSeverity as SignatureSeverity,
 };
@@ -370,6 +372,7 @@ pub struct AnalysisEngineConfig {
     pub yara_engine: YaraEngineConfig,
     pub clamav_analyzer: ClamAvAnalyzerConfig,
     pub ml_analyzer: MlAnalyzerConfig,
+    pub pe_model: PeModelConfig,
     pub signature_matcher: SignatureMatcherConfig,
     pub enable_parallel_analysis: bool,
     pub analysis_timeout_seconds: u64,
@@ -384,6 +387,7 @@ impl Default for AnalysisEngineConfig {
             yara_engine: YaraEngineConfig::default(),
             clamav_analyzer: ClamAvAnalyzerConfig::default(),
             ml_analyzer: MlAnalyzerConfig::default(),
+            pe_model: PeModelConfig::default(),
             signature_matcher: SignatureMatcherConfig::default(),
             enable_parallel_analysis: true,
             analysis_timeout_seconds: 120,
@@ -446,6 +450,7 @@ pub struct AnalysisEngine {
     yara_engine: YaraEngine,
     clamav_analyzer: ClamAvAnalyzer,
     ml_analyzer: MlAnalyzer,
+    pe_model: PeModelAnalyzer,
     heuristic_engine: HeuristicEngine,
     signature_matcher: SignatureMatcher,
 }
@@ -464,6 +469,7 @@ impl AnalysisEngine {
 
         let clamav_analyzer = ClamAvAnalyzer::new(config.clamav_analyzer.clone());
         let ml_analyzer = MlAnalyzer::new(config.ml_analyzer.clone());
+        let pe_model = PeModelAnalyzer::new(config.pe_model.clone());
         let heuristic_engine = HeuristicEngine::new();
         let signature_matcher = SignatureMatcher::new(config.signature_matcher.clone())
             .await
@@ -476,6 +482,7 @@ impl AnalysisEngine {
             yara_engine,
             clamav_analyzer,
             ml_analyzer,
+            pe_model,
             heuristic_engine,
             signature_matcher,
         })
@@ -531,18 +538,34 @@ impl AnalysisEngine {
             let yara_future = self.run_yara_analysis(request);
             let clamav_future = self.run_clamav_analysis(request);
             let ml_future = self.run_ml_analysis(request);
+            let pe_model_future = self.run_pe_model_analysis(request);
             let heuristic_future = self.run_heuristic_analysis(request);
             let signature_future = self.run_signature_analysis(request);
 
-            let (hash_res, static_res, yara_res, clamav_res, ml_res, heuristic_res, signature_res) = tokio::join!(
+            let (
+                hash_res,
+                static_res,
+                yara_res,
+                clamav_res,
+                ml_res,
+                pe_model_res,
+                heuristic_res,
+                signature_res,
+            ) = tokio::join!(
                 hash_future,
                 static_future,
                 yara_future,
                 clamav_future,
                 ml_future,
+                pe_model_future,
                 heuristic_future,
                 signature_future
             );
+
+            // None: not configured, or not a Windows program.
+            if let Some(det) = pe_model_res {
+                detections.push(det);
+            }
 
             let opts = &request.analysis_options;
             // Collect results and errors
@@ -692,6 +715,9 @@ impl AnalysisEngine {
                     ));
                 }
             }
+            if let Some(det) = self.run_pe_model_analysis(request).await {
+                detections.push(det);
+            }
             if let Ok(det) = self.run_heuristic_analysis(request).await {
                 detections.push(det);
             }
@@ -786,6 +812,17 @@ impl AnalysisEngine {
         } else {
             Err(anyhow!("ML analysis disabled"))
         }
+    }
+
+    /// The EMBER2024-trained PE model. Shares the ML on/off switch.
+    async fn run_pe_model_analysis(
+        &self,
+        request: &FileAnalysisRequest,
+    ) -> Option<DetectionResult> {
+        if !request.analysis_options.enable_ml_analysis {
+            return None;
+        }
+        self.pe_model.analyze(&request.file_data).await
     }
 
     async fn run_heuristic_analysis(
@@ -1342,6 +1379,19 @@ impl AnalysisEngine {
             error: ml_error,
         });
 
+        // 8. PE model (Optional; off until PE_MODEL_URL points at the ML service)
+        let (pe_status, pe_version, pe_details, pe_error) = self.pe_model.status().await;
+        engines.push(EngineStatusItem {
+            id: "pe_model".to_string(),
+            name: "Windows Program Model (EMBER2024)".to_string(),
+            engine_type: "ml".to_string(),
+            is_optional: true,
+            status: pe_status,
+            version: pe_version,
+            details: pe_details,
+            error: pe_error,
+        });
+
         let total_engines = engines.len();
         let active_engines = engines.iter().filter(|e| e.status == "online").count();
         let unavailable_engines = engines.iter().filter(|e| e.status == "unavailable").count();
@@ -1361,6 +1411,7 @@ impl AnalysisEngine {
                 "yara_engine".to_string(),
                 "clamav".to_string(),
                 "ml_engine".to_string(),
+                "pe_model".to_string(),
             ],
         }
     }
