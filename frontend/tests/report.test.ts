@@ -33,6 +33,26 @@ describe("scan report", () => {
     expect(engineRole(engine("YARA", { verdict: "malicious" })).role).toBe("flagged");
   });
 
+  it("lists the files scanned inside an archive, worst first", () => {
+    const archive = engine("Archive contents", {
+      verdict: "malicious",
+      metadata: {
+        format: "zip",
+        password_used: "infected",
+        skipped: ["big.iso: larger than 32 MB unpacked"],
+        files: [
+          { path: "readme.txt", verdict: "Benign" },
+          { path: "invoice.exe", verdict: "Malicious" },
+        ],
+      },
+    });
+    const facts = engineFacts(archive);
+    expect(facts[0]).toMatchObject({ label: "Inside the zip", value: "invoice.exe: malicious", tone: "danger" });
+    expect(facts[1].value).toBe("readme.txt: nothing found");
+    expect(facts.find((f) => f.label === "Opened with password")?.value).toBe("infected");
+    expect(facts.find((f) => f.label === "Not scanned")?.value).toContain("1 file");
+  });
+
   it("summarises flags from the vote counts", () => {
     const c: ApiConsensus = { totalVotes: 3, flaggedVotes: 1 };
     expect(flaggedSummary(c)).toBe("Flagged by 1 of 3 voting engines");
