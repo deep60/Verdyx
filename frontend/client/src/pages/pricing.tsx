@@ -9,7 +9,7 @@ const GITHUB_ISSUES = "https://github.com/deep60/Verdyx/issues/new";
 
 /** What the free beta includes today. Every line maps to something running. */
 const INCLUDED = [
-  "File scans with every voting engine, including ClamAV, plus per-engine evidence and the consensus",
+  "File scans with every voting engine, per-engine evidence, and the consensus",
   "URL scans: redirect chain, TLS, DNS and mail auth, page checks, URLhaus and ThreatFox",
   "36 website inspection checks",
   "Uploads up to 100 MB",
@@ -28,6 +28,7 @@ const LIMITS = [
 /** On the roadmap, not available yet. Listed so nobody pays for a promise. */
 const NOT_YET = [
   "Paid plans and higher limits",
+  "ClamAV signatures (being set up on a dedicated server)",
   "A trained ML model (today's model is advisory only)",
   "Sandbox (run-the-file) analysis",
 ];
