@@ -233,6 +233,7 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    handlers::health::mark_started();
     dotenvy::dotenv().ok();
 
     // Initialize tracing for logging
