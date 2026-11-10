@@ -191,6 +191,18 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/auth/reset-password",
             post(handlers::auth::reset_password),
+        )
+        .route(
+            "/api/v1/auth/oauth/providers",
+            get(handlers::auth::oauth_providers),
+        )
+        .route(
+            "/api/v1/auth/oauth/{provider}/authorize",
+            post(handlers::auth::oauth_authorize),
+        )
+        .route(
+            "/api/v1/auth/oauth/{provider}/callback",
+            post(handlers::auth::oauth_callback),
         );
 
     // Protected routes (authentication required)

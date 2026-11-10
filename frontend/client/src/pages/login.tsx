@@ -10,13 +10,15 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Wallet, Mail, Lock, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { SEO } from "@/components/seo";
+import { OAuthButtons } from "@/components/oauth-buttons";
+import { oauthErrorFromUrl } from "@/lib/oauth-errors";
 
 export default function Login() {
   const [, setLocation] = useLocation();
   const { login, connectWallet } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(oauthErrorFromUrl);
   const [isLoading, setIsLoading] = useState(false);
 
   // Return the user to where they were headed before being redirected to login.
@@ -129,6 +131,8 @@ export default function Login() {
               <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
             </div>
           </div>
+
+          <OAuthButtons />
 
           <Button
             type="button"

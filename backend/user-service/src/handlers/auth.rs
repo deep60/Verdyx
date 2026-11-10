@@ -64,6 +64,56 @@ pub async fn login(
     Ok(Json(response))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct OAuthAuthorizeRequest {
+    pub state: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OAuthCallbackRequest {
+    pub code: String,
+}
+
+fn oauth_provider(name: &str) -> Result<crate::services::oauth::Provider, AppError> {
+    crate::services::oauth::Provider::parse(name).ok_or(AppError::UserError(UserError::NotFound))
+}
+
+/// Which "Continue with …" buttons the site should show.
+pub async fn oauth_providers(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(json!({ "providers": state.user_service.oauth().enabled() }))
+}
+
+/// Where to send the browser to sign in with a provider.
+pub async fn oauth_authorize(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(provider): axum::extract::Path<String>,
+    Json(req): Json<OAuthAuthorizeRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if req.state.len() < 32 {
+        return Err(AppError::UserError(UserError::ValidationError(
+            "state is too short".to_string(),
+        )));
+    }
+    let url = state
+        .user_service
+        .oauth()
+        .authorize_url(oauth_provider(&provider)?, &req.state)?;
+    Ok(Json(json!({ "url": url })))
+}
+
+/// Finish a provider sign-in. The gateway has already checked `state`.
+pub async fn oauth_callback(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(provider): axum::extract::Path<String>,
+    Json(req): Json<OAuthCallbackRequest>,
+) -> Result<Json<AuthResponse>, AppError> {
+    let response = state
+        .user_service
+        .oauth_login(oauth_provider(&provider)?, req.code.trim())
+        .await?;
+    Ok(Json(response))
+}
+
 /// Return the authenticated user's public identity.
 ///
 /// Used by the API gateway's `/api/v1/auth/verify` proxy to resolve the
