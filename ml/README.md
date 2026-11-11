@@ -160,9 +160,10 @@ scoring with SHAP. On macOS, if LightGBM can't find `libomp`, either
 
 Everything in `requirements.txt` is exact, because the model is only as good as
 the match between training features and production features. EMBER2024
-(`thrember`) is pinned to a commit. `signify` is held at 0.8.1: thrember asks
-for `>=0.7.1`, but 0.9 removed `SignedPEFile`, which thrember imports, so an
-unpinned install crashes.
+(`thrember`) is pinned to a commit. `signify` is held at 0.7.1, the version
+thrember was written for: 0.9 removed `SignedPEFile`, which thrember imports, and
+0.8 made the certificate list unsliceable, so every **signed** file (most
+legitimate software) failed to score with a `TypeError`.
 
 ## Roadmap
 

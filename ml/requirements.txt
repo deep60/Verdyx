@@ -8,10 +8,12 @@
 # Pinned to a commit: the repo has no releases.
 thrember @ git+https://github.com/FutureComputing4AI/EMBER2024@0ef753e81d98bf209f71b03cd331dfc190b5b54d
 
-# thrember asks for signify>=0.7.1, but signify 0.9 removed SignedPEFile, which
-# thrember imports, so an unpinned install crashes on import. 0.8.1 is the
-# newest release that still has it.
-signify==0.8.1
+# thrember asks for signify>=0.7.1 and must stay on 0.7.x:
+# - 0.9 removed SignedPEFile, which thrember imports (crash on import);
+# - 0.8 turned SignedData.certificates into a CertificateStore that can't be
+#   sliced, so thrember's certs[:-1] raises TypeError on every signed file,
+#   and signed files (most legitimate software) can't be scored at all.
+signify==0.7.1
 
 # These change feature values or model output, so they stay exact.
 pefile==2024.8.26
