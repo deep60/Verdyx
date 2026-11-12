@@ -633,28 +633,12 @@ impl UrlScanner {
             });
         }
 
-        // Check for brand impersonation (simplified)
-        let brands = [
-            "paypal",
-            "amazon",
-            "google",
-            "microsoft",
-            "apple",
-            "facebook",
-        ];
-        for brand in &brands {
-            if url_lower.contains(brand)
-                && !url_info
-                    .parsed_url
-                    .domain
-                    .ends_with(&format!("{brand}.com"))
-            {
-                indicators.push(PhishingIndicator {
-                    indicator_type: PhishingIndicatorType::BrandImpersonation,
-                    description: format!("Possible {brand} brand impersonation"),
-                    severity: ThreatLevel::High,
-                });
-            }
+        // Brand impersonation: a brand in the host name, or a look-alike of
+        // one ("paypa1", "rnicrosoft"), on a site that isn't the brand's own.
+        // Only the host is checked: a brand in the path ("github.com/paypal")
+        // is ordinary.
+        if let Some(indicator) = brand_impersonation(&url_info.parsed_url.domain) {
+            indicators.push(indicator);
         }
 
         indicators
@@ -1042,6 +1026,157 @@ fn push_denial(denials: &mut Vec<String>, reason: String) {
 
 /// `domain` is `listed` or a subdomain of it. A plain substring test would
 /// treat `google.com.evil.example` as `google.com`.
+/// Brands phishing kits copy most. Their own sites, under any country
+/// domain (amazon.in, google.co.uk), are recognised by [`site_label`].
+const IMPERSONATED_BRANDS: &[&str] = &[
+    "paypal",
+    "amazon",
+    "google",
+    "microsoft",
+    "apple",
+    "facebook",
+    "instagram",
+    "whatsapp",
+    "netflix",
+    "linkedin",
+    "outlook",
+    "office365",
+    "dropbox",
+    "adobe",
+    "coinbase",
+    "binance",
+    "metamask",
+    "steam",
+];
+
+/// The label that names the site: "paypal" for www.paypal.com, "amazon" for
+/// amazon.co.uk. Handles the common two-part country suffixes.
+fn site_label(host: &str) -> &str {
+    let labels: Vec<&str> = host.trim_end_matches('.').split('.').collect();
+    let n = labels.len();
+    if n < 2 {
+        return labels.first().copied().unwrap_or("");
+    }
+    let two_part_suffix = n >= 3
+        && labels[n - 1].len() == 2
+        && matches!(
+            labels[n - 2],
+            "co" | "com" | "net" | "org" | "gov" | "ac" | "edu"
+        );
+    if two_part_suffix {
+        labels[n - 3]
+    } else {
+        labels[n - 2]
+    }
+}
+
+/// Undo the character swaps look-alike domains use (1→l, 0→o, rn→m, …).
+fn unconfuse(host: &str) -> String {
+    host.to_ascii_lowercase()
+        .replace("rn", "m")
+        .replace("vv", "w")
+        .chars()
+        .map(|c| match c {
+            '0' => 'o',
+            '1' | '|' => 'l',
+            '3' => 'e',
+            '4' | '@' => 'a',
+            '5' | '$' => 's',
+            '7' => 't',
+            _ => c,
+        })
+        .collect()
+}
+
+/// The brands' own sites under other names, which contain the brand but are
+/// genuine (login.microsoftonline.com, store.steampowered.com).
+const BRAND_OWNED_SITES: &[&str] = &[
+    "microsoftonline",
+    "microsoftstore",
+    "googleapis",
+    "googleusercontent",
+    "googlevideo",
+    "googlesyndication",
+    "googletagmanager",
+    "paypalobjects",
+    "amazonaws",
+    "amazonpay",
+    "amazonvideo",
+    "facebookcorewwwi",
+    "steampowered",
+    "steamcommunity",
+    "steamstatic",
+    "adobelogin",
+    "netflixtechblog",
+];
+
+static POPULAR_DOMAINS: std::sync::LazyLock<std::collections::HashSet<&'static str>> =
+    std::sync::LazyLock::new(|| {
+        include_str!("data/popular_domains.txt")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect()
+    });
+
+/// Whether the host is, or is under, one of the most visited sites. Free
+/// hosting domains aren't in the list, so `paypal-login.github.io` is not.
+fn is_popular_site(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    let mut rest = host;
+    loop {
+        if POPULAR_DOMAINS.contains(rest) {
+            return true;
+        }
+        match rest.split_once('.') {
+            Some((_, parent)) if parent.contains('.') => rest = parent,
+            _ => return false,
+        }
+    }
+}
+
+/// Brands that are also everyday words: they count only as a separate word
+/// in the address ("apple-id.com"), not inside another ("rappler.com").
+const WORD_BRANDS: &[&str] = &["apple", "steam"];
+
+fn names_brand(host: &str, brand: &str) -> bool {
+    if WORD_BRANDS.contains(&brand) {
+        host.split(|c: char| !c.is_ascii_alphabetic())
+            .any(|word| word == brand || word.strip_prefix(brand).is_some_and(|r| r == "id"))
+    } else {
+        host.contains(brand)
+    }
+}
+
+fn brand_impersonation(host: &str) -> Option<PhishingIndicator> {
+    let host = host.to_ascii_lowercase();
+    // A brand's own top-level domain (dns.google, cloud.microsoft) or a site
+    // millions visit daily is not impersonating anyone.
+    let tld = host.rsplit('.').next().unwrap_or("");
+    if IMPERSONATED_BRANDS.contains(&tld) || is_popular_site(&host) {
+        return None;
+    }
+    let own_site = site_label(&host);
+    let plain = unconfuse(&host);
+    IMPERSONATED_BRANDS.iter().find_map(|brand| {
+        if own_site == *brand || BRAND_OWNED_SITES.contains(&own_site) {
+            return None;
+        }
+        let description = if names_brand(&host, brand) {
+            format!("The address uses the name {brand}, but the site isn't {brand}'s own")
+        } else if names_brand(&plain, brand) {
+            format!("The address imitates {brand} with look-alike characters")
+        } else {
+            return None;
+        };
+        Some(PhishingIndicator {
+            indicator_type: PhishingIndicatorType::BrandImpersonation,
+            description,
+            severity: ThreatLevel::High,
+        })
+    })
+}
+
 fn domain_matches(domain: &str, listed: &str) -> bool {
     let domain = domain.trim_end_matches('.').to_ascii_lowercase();
     let listed = listed.trim_end_matches('.').to_ascii_lowercase();
@@ -1304,6 +1439,82 @@ mod tests {
         assert_eq!(url_info.parsed_url.domain, "example.com");
         assert_eq!(url_info.parsed_url.path, "/path");
         assert_eq!(url_info.parsed_url.port, Some(8080));
+    }
+
+    /// The "URL checks" vote for an address, from the address alone (what is
+    /// left when the page can't be loaded).
+    fn address_vote(url: &str) -> crate::models::analysis_result::ThreatVerdict {
+        let scanner = UrlScanner::new(UrlScannerConfig::default()).unwrap();
+        let parsed = Url::parse(url).unwrap();
+        let info = scanner.analyze_url(&parsed);
+        let mut findings: Vec<Finding> = scanner
+            .check_phishing_patterns(&info, &parsed)
+            .into_iter()
+            .map(|i| Finding {
+                finding_id: Uuid::new_v4(),
+                category: FindingCategory::Suspicious,
+                title: format!("Phishing indicator: {:?}", i.indicator_type),
+                description: i.description,
+                severity: i.severity,
+                evidence: vec![],
+                recommendation: None,
+            })
+            .collect();
+        findings.extend(unencrypted_finding(&parsed, &[], &None));
+        let refs: Vec<&Finding> = findings.iter().collect();
+        crate::scanners::url_verdicts::checks_verdict(&refs).0
+    }
+
+    #[test]
+    fn look_alike_and_misused_brand_names_are_caught() {
+        use crate::models::analysis_result::ThreatVerdict::*;
+        for url in [
+            "http://paypa1-secure-login.verify-account-update.com/signin",
+            "https://paypa1.com/login",
+            "https://rnicrosoft-support.net/",
+            "https://g00gle.co/accounts",
+            "https://login.paypal.com.account-check.ru/",
+            "https://appleid.apple.com.verify-id.info/",
+            "https://netflix-billing-update.com/",
+            "https://paypal-login.github.io/",
+        ] {
+            assert_eq!(address_vote(url), Suspicious, "{url}");
+        }
+    }
+
+    #[test]
+    fn ordinary_addresses_stay_clean() {
+        use crate::models::analysis_result::ThreatVerdict::*;
+        for url in [
+            "https://www.paypal.com/signin",
+            "https://www.amazon.in/gp/your-account/order-history",
+            "https://www.amazon.co.uk/ap/signin",
+            "https://accounts.google.com/signin/v2/identifier",
+            "https://myaccount.google.co.in/security",
+            "https://login.microsoftonline.com/common/oauth2/authorize",
+            "https://account.microsoft.com/account/manage",
+            "https://github.com/paypal/paypal-checkout-components",
+            "https://support.apple.com/en-in/HT204915",
+            "https://www.netflix.com/youraccount",
+            "https://onlinebanking.example-bank.com/secure/account/update",
+            "https://www.hdfcbank.com/personal/verify-account",
+            "https://example.com/",
+            "http://neverssl.com/",
+            "https://store.steampowered.com/account/",
+            "https://www.linkedin.com/checkpoint/lg/login",
+            "https://verdyx.dev/login",
+        ] {
+            assert_ne!(address_vote(url), Suspicious, "{url}");
+            assert_ne!(address_vote(url), Malicious, "{url}");
+        }
+    }
+
+    #[test]
+    fn site_label_handles_country_suffixes() {
+        assert_eq!(site_label("www.amazon.co.uk"), "amazon");
+        assert_eq!(site_label("amazon.in"), "amazon");
+        assert_eq!(site_label("login.paypal.com.evil.ru"), "evil");
+        assert_eq!(site_label("localhost"), "localhost");
     }
 
     #[test]

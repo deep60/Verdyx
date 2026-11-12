@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::abuse_ch::ThreatIntelMatch;
 use super::url_scanner::UrlScanResult;
-use super::ThreatLevel;
+use super::{Finding, ThreatLevel};
 use crate::models::analysis_result::{
     DetectionResult, EngineType, SeverityLevel, ThreatCategory, ThreatVerdict, AUTHORITATIVE_KEY,
 };
@@ -198,14 +198,29 @@ fn is_feed_finding(title: &str) -> bool {
     title.contains(URLHAUS) || title.contains(THREATFOX)
 }
 
-fn url_checks_detection(scan: &UrlScanResult) -> DetectionResult {
-    let findings: Vec<_> = scan
-        .base
-        .findings
-        .iter()
-        .filter(|f| !is_feed_finding(&f.title))
-        .collect();
+/// Several medium warning signs together make an address suspicious, even
+/// though no single one does.
+const SUSPICIOUS_POINTS: usize = 3;
 
+/// Medium findings, one point each. Login words ("verify", "account", …)
+/// count for at most two between them: ordinary bank and shop pages use
+/// them, so words alone never reach [`SUSPICIOUS_POINTS`].
+fn warning_points(findings: &[&Finding]) -> usize {
+    let medium = findings
+        .iter()
+        .filter(|f| matches!(f.severity, ThreatLevel::Medium));
+    let words = medium
+        .clone()
+        .filter(|f| f.title.ends_with("SuspiciousKeywords"))
+        .count();
+    let other = medium
+        .filter(|f| !f.title.ends_with("SuspiciousKeywords"))
+        .count();
+    words.min(2) + other
+}
+
+/// The "URL checks" vote from its own findings (feed findings excluded).
+pub(crate) fn checks_verdict(findings: &[&Finding]) -> (ThreatVerdict, f32, SeverityLevel) {
     let worst = findings
         .iter()
         .map(|f| match f.severity {
@@ -216,9 +231,12 @@ fn url_checks_detection(scan: &UrlScanResult) -> DetectionResult {
         })
         .max()
         .unwrap_or(0);
-    let (verdict, confidence, severity) = match worst {
+    match worst {
         3 => (ThreatVerdict::Malicious, 0.8, SeverityLevel::Critical),
         2 => (ThreatVerdict::Suspicious, 0.6, SeverityLevel::High),
+        _ if warning_points(findings) >= SUSPICIOUS_POINTS => {
+            (ThreatVerdict::Suspicious, 0.5, SeverityLevel::Medium)
+        }
         _ => (
             ThreatVerdict::Benign,
             0.6,
@@ -228,7 +246,18 @@ fn url_checks_detection(scan: &UrlScanResult) -> DetectionResult {
                 SeverityLevel::Info
             },
         ),
-    };
+    }
+}
+
+fn url_checks_detection(scan: &UrlScanResult) -> DetectionResult {
+    let findings: Vec<_> = scan
+        .base
+        .findings
+        .iter()
+        .filter(|f| !is_feed_finding(&f.title))
+        .collect();
+
+    let (verdict, confidence, severity) = checks_verdict(&findings);
 
     let mut metadata: HashMap<String, Value> = HashMap::new();
     metadata.insert(
