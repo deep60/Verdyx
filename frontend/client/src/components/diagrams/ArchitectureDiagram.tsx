@@ -15,8 +15,8 @@ export function ArchitectureDiagram() {
     },
     {
       id: "orchestrator",
-      title: "Distributed Scanner Nodes",
-      description: "Parallel execution across YARA, ClamAV, and ML engines (ONNX). Fully containerized and scalable.",
+      title: "Analysis Engine",
+      description: "A Redis queue feeds the analysis engine, which runs the static, hash, heuristic, signature and YARA engines on the same bytes. ClamAV and the ML model appear on every case but don't vote until ClamAV is connected and the model is trained.",
       color: "text-accent",
       bgHover: "hover:bg-accent/10",
       borderHover: "hover:border-accent/50",
@@ -24,7 +24,7 @@ export function ArchitectureDiagram() {
     {
       id: "consensus",
       title: "Consensus Engine",
-      description: "Aggregates results using a weighted algorithm to eliminate false positives. Optionally logs to blockchain.",
+      description: "A majority vote of the engines that returned a verdict. A match in a curated malware list decides on its own. Engines with no verdict are named on the case, not counted.",
       color: "text-[hsl(var(--chart-3))]",
       bgHover: "hover:bg-[hsl(var(--chart-3))]/10",
       borderHover: "hover:border-[hsl(var(--chart-3))]/50",
@@ -82,17 +82,17 @@ export function ArchitectureDiagram() {
             style={{ transform: activeLayer === "orchestrator" ? "scale(1.02)" : "scale(1)" }}
           >
             <rect x="30" y="180" width="340" height="120" rx="2" fill="url(#emeraldGradient)" stroke={activeLayer === "orchestrator" ? "#F0D83A" : "#32342C"} strokeWidth="1" />
-            <text x="200" y="215" textAnchor="middle" fill="#F3F1EA" className="font-mono text-lg">2. Distributed Nodes</text>
+            <text x="200" y="215" textAnchor="middle" fill="#F3F1EA" className="font-mono text-lg">2. Engines</text>
             
             {/* Inner boxes for engines */}
             <rect x="50" y="235" width="80" height="40" rx="2" fill="#141513" stroke="#32342C" />
             <text x="90" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">YARA</text>
             
             <rect x="160" y="235" width="80" height="40" rx="2" fill="#141513" stroke="#32342C" />
-            <text x="200" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">ClamAV</text>
+            <text x="200" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">Static</text>
             
             <rect x="270" y="235" width="80" height="40" rx="2" fill="#141513" stroke="#32342C" />
-            <text x="310" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">ML</text>
+            <text x="310" y="260" textAnchor="middle" fill="#F0D83A" className="font-mono text-xs">Heuristic</text>
           </g>
 
           {/* Layer 3: Consensus */}
@@ -104,7 +104,7 @@ export function ArchitectureDiagram() {
           >
             <rect x="50" y="350" width="300" height="80" rx="2" fill="url(#purpleGradient)" stroke={activeLayer === "consensus" ? "#F0D83A" : "#32342C"} strokeWidth="1" />
             <text x="200" y="390" textAnchor="middle" fill="#F3F1EA" className="font-mono text-lg">3. Consensus</text>
-            <text x="200" y="410" textAnchor="middle" fill="#C8C5BC" className="font-sans text-xs">Sealed, then opened</text>
+            <text x="200" y="410" textAnchor="middle" fill="#C8C5BC" className="font-sans text-xs">Majority vote, reasons kept</text>
           </g>
         </svg>
       </div>
