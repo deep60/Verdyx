@@ -736,7 +736,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         "openPorts": {
             "ports": open_ports,
             "totalOpen": open_ports.len(),
-            "source": "Shodan InternetDB & Active Probe",
+            "source": "Shodan InternetDB",
         },
 
         // 6. Associated Hosts
@@ -827,7 +827,6 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         // 18. DNS Server
         "dnsServer": {
             "authoritativeNameservers": ns_records.iter().filter_map(|r| r.get("data").and_then(|v| v.as_str())).collect::<Vec<_>>(),
-            "dohSupported": true,
         },
 
         // 19. Email Configuration
@@ -927,30 +926,6 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         // 38. Archive History
         "archiveHistory": archive_info,
 
-        // 39. Global Ranking
-        "globalRanking": {
-            "domain": root_domain,
-            "tier": if ["google.com", "github.com", "cloudflare.com", "microsoft.com", "apple.com", "amazon.com", "youtube.com", "wikipedia.org", "x.com"].contains(&root_domain.as_str()) {
-                "Top 100 Global (Tier 1)"
-            } else if !subdomains_list.is_empty() && subdomains_list.len() > 10 {
-                "Established Domain (Active CT Footprint)"
-            } else {
-                "Standard / Emerging Domain"
-            },
-            "ctCertificatesObserved": subdomains_list.len(),
-        },
-
-        // 40. Block Detection
-        "blockDetection": {
-            "resolvers": [
-                { "provider": "Cloudflare Security (1.1.1.2)", "blocked": a_records.is_empty() && !is_up, "category": "Malware" },
-                { "provider": "Cloudflare Family (1.1.1.3)", "blocked": false, "category": "Malware & Adult" },
-                { "provider": "Quad9 Threat Block (9.9.9.9)", "blocked": false, "category": "Phishing & C2" },
-                { "provider": "AdGuard DNS", "blocked": false, "category": "Trackers & Phishing" }
-            ],
-            "status": "Unblocked on major public resolvers"
-        },
-
         // 41. Malware & Phishing
         "malwarePhishing": {
             "riskLevel": phish_risk,
@@ -965,16 +940,6 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
             "count": breaches_list.len(),
             "breaches": breaches_list,
             "source": "Have I Been Pwned (Domain Breach Index)",
-        },
-
-        // 43. Traceroute
-        "traceroute": {
-            "hops": [
-                { "hop": 1, "node": "verdyx-gateway-edge", "ip": "172.18.0.1", "rttMs": 1 },
-                { "hop": 2, "node": format!("{isp_name} Core Transit"), "ip": "100.64.0.1", "rttMs": (response_time_ms / 4).max(4) },
-                { "hop": 3, "node": format!("{org_name} ({country})"), "ip": primary_ip.clone(), "rttMs": (response_time_ms / 2).max(8) },
-                { "hop": 4, "node": host.clone(), "ip": primary_ip, "rttMs": response_time_ms }
-            ]
         },
 
         // 44. DOM phishing inspector (script-stripped snapshot, not a browser)
