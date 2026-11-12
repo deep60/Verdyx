@@ -11,10 +11,11 @@
 #   minio     -> Cloudflare R2 via S3_ENDPOINT. The S3 client already takes an
 #                endpoint override and uses path-style addressing, which R2
 #                accepts, so this is config-only.
-#   clamav    -> runs on its own free VM (VM.Standard.E2.1.Micro + swap) on the
-#                same private subnet, because its signature database alone
-#                wants more memory than this VM has. Set ENABLE_CLAMAV=true and
-#                CLAMAV_HOST=<private-ip>:3310 in .env to use it.
+#   clamav    -> off by default. Its signature database alone wants ~1.2 GB,
+#                so it needs its own machine with ~3 GB+ (a free 1 GB E2.1.Micro
+#                was tried and was far too slow). Run clamd there, reachable
+#                only over a private network, and set ENABLE_CLAMAV=true and
+#                CLAMAV_HOST=<private-ip>:3310 in .env.
 #   frontend  -> Cloudflare Pages. The Node BFF is redundant there because
 #                functions/api/[[path]].ts does the same /api proxying at the
 #                edge, for free, without using VM memory.
