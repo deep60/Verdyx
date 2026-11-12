@@ -489,13 +489,25 @@ fn note_unreachable_page(result: &mut crate::models::analysis_result::AnalysisRe
     for d in result.detections.iter_mut() {
         if d.engine_name == URL_CHECKS && d.verdict == ThreatVerdict::Benign {
             d.verdict = ThreatVerdict::Unknown;
-            d.metadata.insert(
-                "reason".to_string(),
-                serde_json::json!(
+            let signs = d
+                .metadata
+                .get("findings")
+                .and_then(|f| f.as_array())
+                .map_or(0, |f| f.len());
+            let reason = if signs == 0 {
+                "The page couldn't be loaded, so only the address was checked. \
+                 Nothing was found there, but that doesn't make the site safe."
+                    .to_string()
+            } else {
+                format!(
                     "The page couldn't be loaded, so only the address was checked. \
-                     Nothing was found there, but that doesn't make the site safe."
-                ),
-            );
+                     It shows {signs} warning sign{} (listed below), not enough on \
+                     their own to call it suspicious.",
+                    if signs == 1 { "" } else { "s" }
+                )
+            };
+            d.metadata
+                .insert("reason".to_string(), serde_json::json!(reason));
         }
     }
     result.add_detection(AnalysisEngine::create_unavailable_detection(
