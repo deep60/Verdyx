@@ -7,6 +7,7 @@ use validator::Validate;
 use crate::auth::AuthService;
 use crate::config::Config;
 use crate::models::*;
+use crate::services::oauth::{self, OAuthConfig, Provider, ProviderIdentity};
 
 /// Failed logins allowed per account/identifier before it is temporarily locked.
 const MAX_LOGIN_FAILURES: i64 = 10;
@@ -24,6 +25,7 @@ pub struct UserService {
     db_pool: PgPool,
     redis_conn: redis::aio::ConnectionManager,
     auth_service: Arc<AuthService>,
+    oauth: OAuthConfig,
 }
 
 impl UserService {
@@ -39,7 +41,12 @@ impl UserService {
             db_pool,
             redis_conn,
             auth_service,
+            oauth: OAuthConfig::from_env(),
         })
+    }
+
+    pub fn oauth(&self) -> &OAuthConfig {
+        &self.oauth
     }
 
     // ============= Authentication Methods =============
@@ -92,32 +99,13 @@ impl UserService {
         .await
         .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
-        // Create default profile
-        sqlx::query(
-            r#"
-            INSERT INTO user_profiles (user_id, created_at, updated_at)
-            VALUES ($1, NOW(), NOW())
-            "#,
-        )
-        .bind(user.id)
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| UserError::DatabaseError(e.to_string()))?;
-
-        // Create default settings
-        sqlx::query(
-            r#"
-            INSERT INTO user_settings (user_id, email_notifications, push_notifications,
-                                       webhook_notifications, privacy_public_profile,
-                                       privacy_show_email, privacy_show_stats,
-                                       language, timezone, updated_at)
-            VALUES ($1, true, true, false, true, false, true, 'en', 'UTC', NOW())
-            "#,
-        )
-        .bind(user.id)
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+        let mut conn = self
+            .db_pool
+            .acquire()
+            .await
+            .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+        create_profile_and_settings(&mut conn, user.id).await?;
+        drop(conn);
 
         // Generate verification token
         let verification_token = self.auth_service.generate_verification_token();
@@ -273,7 +261,12 @@ impl UserService {
         }
 
         self.clear_login_failures(&identifier).await;
+        self.issue_session(&user).await
+    }
 
+    /// Record the login and hand out tokens, keeping the refresh token as the
+    /// user's session.
+    async fn issue_session(&self, user: &User) -> UserResult<AuthResponse> {
         // Update last login
         sqlx::query("UPDATE users SET last_login = NOW() WHERE id = $1")
             .bind(user.id)
@@ -310,9 +303,205 @@ impl UserService {
         Ok(AuthResponse {
             access_token,
             refresh_token,
-            user: user.into(),
+            user: user.clone().into(),
             expires_in: self.auth_service.get_access_token_expiry(),
         })
+    }
+
+    // ============= Google / GitHub sign-in =============
+
+    /// Sign in with a provider account, creating or linking the Verdyx account.
+    ///
+    /// Lookup order: an account already linked to this provider account, then
+    /// an account with the same (provider-verified) email, else a new account.
+    pub async fn oauth_login(&self, provider: Provider, code: &str) -> UserResult<AuthResponse> {
+        let identity = self.oauth.fetch_identity(provider, code).await?;
+        let user = self.oauth_user(provider, &identity).await?;
+
+        if !user.is_active {
+            return Err(UserError::Unauthorized("Account is suspended".to_string()));
+        }
+        // The provider proves who someone is, not that they hold the second
+        // factor, so it can't stand in for it.
+        if user.two_factor_enabled {
+            return Err(UserError::AuthenticationError(
+                "This account uses two-factor authentication. Sign in with your password and code."
+                    .to_string(),
+            ));
+        }
+        self.issue_session(&user).await
+    }
+
+    async fn oauth_user(
+        &self,
+        provider: Provider,
+        identity: &ProviderIdentity,
+    ) -> UserResult<User> {
+        let db = |e: sqlx::Error| UserError::DatabaseError(e.to_string());
+
+        let linked = sqlx::query_as::<_, User>(
+            r#"
+            UPDATE user_oauth_identities i SET last_used_at = NOW(), email = $3
+            FROM users u
+            WHERE i.provider = $1 AND i.provider_user_id = $2 AND u.id = i.user_id
+            RETURNING u.*
+            "#,
+        )
+        .bind(provider.as_str())
+        .bind(&identity.provider_user_id)
+        .bind(&identity.email)
+        .fetch_optional(&self.db_pool)
+        .await
+        .map_err(db)?;
+        if let Some(user) = linked {
+            return Ok(user);
+        }
+
+        let mut tx = self.db_pool.begin().await.map_err(db)?;
+        let existing =
+            sqlx::query_as::<_, User>("SELECT * FROM users WHERE lower(email) = $1 FOR UPDATE")
+                .bind(&identity.email)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db)?;
+
+        let (user, created) = match existing {
+            // Someone could have registered this address without owning it.
+            // The provider has now proven who owns it, so a password set
+            // before the address was verified stops working; the owner can
+            // set a new one with "Forgot password".
+            Some(user) if !user.email_verified => {
+                let unusable = self.unusable_password_hash()?;
+                let user = sqlx::query_as::<_, User>(
+                    r#"
+                    UPDATE users SET email_verified = true, password_hash = $2, updated_at = NOW()
+                    WHERE id = $1 RETURNING *
+                    "#,
+                )
+                .bind(user.id)
+                .bind(&unusable)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)?;
+                (user, false)
+            }
+            Some(user) => (user, false),
+            None => {
+                let username = self
+                    .free_username(&mut tx, identity.name_hint.as_deref(), &identity.email)
+                    .await?;
+                let unusable = self.unusable_password_hash()?;
+                let user = sqlx::query_as::<_, User>(
+                    r#"
+                    INSERT INTO users (id, username, email, password_hash, email_verified,
+                                      is_active, is_admin, two_factor_enabled, kyc_status,
+                                      created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, true, true, false, false, 'not_submitted', NOW(), NOW())
+                    RETURNING *
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(&username)
+                .bind(&identity.email)
+                .bind(&unusable)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)?;
+                create_profile_and_settings(&mut tx, user.id).await?;
+                (user, true)
+            }
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO user_oauth_identities (provider, provider_user_id, user_id, email)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(provider.as_str())
+        .bind(&identity.provider_user_id)
+        .bind(user.id)
+        .bind(&identity.email)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+        tx.commit().await.map_err(db)?;
+
+        self.record_audit(
+            user.id,
+            if created {
+                "account.created_oauth"
+            } else {
+                "account.linked_oauth"
+            },
+            serde_json::json!({ "provider": provider.as_str() }),
+        )
+        .await?;
+        if created {
+            self.publish_registered(&user).await;
+        }
+        Ok(user)
+    }
+
+    /// A password hash nobody knows: accounts made through a provider have no
+    /// password until the owner sets one with "Forgot password".
+    fn unusable_password_hash(&self) -> UserResult<String> {
+        let secret = format!(
+            "{}{}",
+            self.auth_service.generate_verification_token(),
+            Uuid::new_v4()
+        );
+        self.auth_service.hash_password(&secret)
+    }
+
+    async fn free_username(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        hint: Option<&str>,
+        email: &str,
+    ) -> UserResult<String> {
+        let base = oauth::username_base(hint, email);
+        for n in 0..20u32 {
+            let candidate = match n {
+                0 => base.clone(),
+                _ => format!("{base}_{}", rand::random_range(10..10_000u32)),
+            };
+            let taken: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM users WHERE lower(username) = lower($1))",
+            )
+            .bind(&candidate)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+            if !taken {
+                return Ok(candidate);
+            }
+        }
+        Ok(format!(
+            "user_{}",
+            &Uuid::new_v4().simple().to_string()[..12]
+        ))
+    }
+
+    async fn publish_registered(&self, user: &User) {
+        let event = shared::messaging::event_types::VerdyxEvent::UserRegistered(
+            shared::messaging::event_types::UserRegisteredEvent {
+                user_id: user.id,
+                username: user.username.clone(),
+                email: user.email.clone(),
+                ethereum_address: user.ethereum_address.clone().unwrap_or_default(),
+                registered_at: user.created_at,
+            },
+        );
+        let result = match redis::Client::open(self.config.redis.url.clone()) {
+            Ok(client) => shared::messaging::publish_event(&client, &event)
+                .await
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(e) = result {
+            tracing::error!("Failed to publish UserRegistered event: {}", e);
+        }
     }
 
     /// Change the signed-in user's username and/or email.
@@ -441,6 +630,12 @@ impl UserService {
         if updated.rows_affected() == 0 {
             return Err(UserError::NotFound);
         }
+
+        sqlx::query("DELETE FROM user_oauth_identities WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.db_pool)
+            .await
+            .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
         self.record_audit(user_id, "account.deleted", serde_json::json!({}))
             .await?;
@@ -978,5 +1173,37 @@ fn validate_email(email: &str) -> UserResult<()> {
     if email.len() > 255 || local.len() > 64 || domain.len() > 190 {
         return Err(UserError::ValidationError("email is not valid".to_string()));
     }
+    Ok(())
+}
+
+/// The profile and settings rows every account starts with.
+async fn create_profile_and_settings(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+) -> UserResult<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO user_profiles (user_id, created_at, updated_at)
+        VALUES ($1, NOW(), NOW())
+        "#,
+    )
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| UserError::DatabaseError(e.to_string()))?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_settings (user_id, email_notifications, push_notifications,
+                                   webhook_notifications, privacy_public_profile,
+                                   privacy_show_email, privacy_show_stats,
+                                   language, timezone, updated_at)
+        VALUES ($1, true, true, false, true, false, true, 'en', 'UTC', NOW())
+        "#,
+    )
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await
+    .map_err(|e| UserError::DatabaseError(e.to_string()))?;
     Ok(())
 }

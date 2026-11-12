@@ -604,12 +604,12 @@ fn to_user_response(u: UserIdentity) -> UserResponse {
 
 /// user-service's auth response shape (snake_case).
 #[derive(Debug, Deserialize)]
-struct UsAuthResponse {
-    access_token: String,
-    refresh_token: String,
-    user: UserIdentity,
+pub(crate) struct UsAuthResponse {
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: String,
+    pub(crate) user: UserIdentity,
     #[serde(default)]
-    expires_in: i64,
+    pub(crate) expires_in: i64,
 }
 
 /// Map a downstream auth error status code to the gateway's ApiError.

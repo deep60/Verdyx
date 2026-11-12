@@ -11,6 +11,7 @@ import { Wallet, Mail, Lock, User, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SEO } from "@/components/seo";
+import { OAuthButtons } from "@/components/oauth-buttons";
 import { passwordPolicyError } from "@/lib/password-policy";
 
 export default function Register() {
@@ -210,6 +211,8 @@ export default function Register() {
               <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
             </div>
           </div>
+
+          <OAuthButtons />
 
           <Button
             type="button"

@@ -63,9 +63,16 @@ ndarray = { version = "0.17.2", optional = true }
 futures = "0.3"
 tempfile = "3"
 url = "2"
-zip = { version = "9", default-features = false, features = ["deflate", "bzip2", "zstd", "time"] }
+zip = { version = "9", default-features = false, features = ["deflate", "bzip2", "zstd", "time", "aes-crypto"] }
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
+sevenz-rust2 = { version = "0.25", default-features = false, features = ["aes256"] }
 async-trait = "0.1"
 # Used to inspect the peer certificate after a real TLS handshake. Issuer and
 # expiry are reported only from this parse — never from placeholders.
 native-tls = "0.2.18"
 tokio-native-tls = "0.3.1"
+
+[dev-dependencies]
+# The writer, only to build 7z archives in tests.
+sevenz-rust2 = { version = "0.25", default-features = false, features = ["aes256", "compress"] }

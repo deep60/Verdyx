@@ -2,7 +2,22 @@ use axum::{extract::State, http::StatusCode, response::Json};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::services::blockchain::ChainHealth;
 use crate::AppState;
+
+static STARTED_AT: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// Record the process start for `uptime`. Called once from `main`.
+pub fn mark_started() {
+    STARTED_AT.get_or_init(std::time::Instant::now);
+}
+
+fn uptime_secs() -> u64 {
+    STARTED_AT
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs()
+}
 
 /// Service status enum
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -11,6 +26,9 @@ pub enum ServiceStatus {
     Healthy,
     Degraded,
     Unhealthy,
+    /// Not set up: no Verdyx contract exists on the configured chain.
+    #[serde(rename = "not_deployed")]
+    NotDeployed,
 }
 
 /// Health check response structure
@@ -31,30 +49,30 @@ pub struct ServiceHealth {
     pub blockchain: ServiceStatus,
 }
 
+/// Database and Redis are required for the public API. A chain with no
+/// Verdyx contracts is a feature that isn't set up, not an outage; a deployed
+/// chain whose RPC fails degrades the API without taking it down.
+fn overall(db_ready: bool, redis_ready: bool, chain: ChainHealth) -> ServiceStatus {
+    if !(db_ready && redis_ready) {
+        ServiceStatus::Unhealthy
+    } else if chain == ChainHealth::Unreachable {
+        ServiceStatus::Degraded
+    } else {
+        ServiceStatus::Healthy
+    }
+}
+
 /// Main health check endpoint
 ///
 /// GET /api/v1/health
 pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<HealthResponse>) {
-    let start_time = std::time::Instant::now();
-
     // Check services
     let db_ready = state.db.health_check().await.is_ok();
     let redis_ready = state.redis.health_check().await.unwrap_or(false);
-    let blockchain_ready = state.blockchain.health_check().await;
+    let chain = state.blockchain.health_check().await;
 
-    // Database and Redis are required for the public API. Blockchain is
-    // reported, but a dead RPC must not take the whole site down.
-    let overall_status = if db_ready && redis_ready {
-        if blockchain_ready {
-            ServiceStatus::Healthy
-        } else {
-            ServiceStatus::Degraded
-        }
-    } else {
-        ServiceStatus::Unhealthy
-    };
-
-    let uptime = start_time.elapsed().as_secs();
+    let overall_status = overall(db_ready, redis_ready, chain);
+    let uptime = uptime_secs();
 
     let response = HealthResponse {
         status: overall_status,
@@ -72,10 +90,10 @@ pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<He
             } else {
                 ServiceStatus::Unhealthy
             },
-            blockchain: if blockchain_ready {
-                ServiceStatus::Healthy
-            } else {
-                ServiceStatus::Unhealthy
+            blockchain: match chain {
+                ChainHealth::Ready => ServiceStatus::Healthy,
+                ChainHealth::NotDeployed => ServiceStatus::NotDeployed,
+                ChainHealth::Unreachable => ServiceStatus::Unhealthy,
             },
         },
     };
@@ -136,4 +154,41 @@ pub async fn metrics(State(state): State<AppState>) -> Result<Json<serde_json::V
         "endpoints": endpoint_metrics,
         "status_codes": status_codes,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_undeployed_chain_is_not_an_outage() {
+        assert_eq!(
+            overall(true, true, ChainHealth::Ready),
+            ServiceStatus::Healthy
+        );
+        assert_eq!(
+            overall(true, true, ChainHealth::NotDeployed),
+            ServiceStatus::Healthy
+        );
+        assert_eq!(
+            overall(true, true, ChainHealth::Unreachable),
+            ServiceStatus::Degraded
+        );
+        assert_eq!(
+            overall(false, true, ChainHealth::Ready),
+            ServiceStatus::Unhealthy
+        );
+        assert_eq!(
+            serde_json::to_string(&ServiceStatus::NotDeployed).unwrap(),
+            "\"not_deployed\""
+        );
+    }
+
+    #[test]
+    fn uptime_counts_from_process_start() {
+        mark_started();
+        let first = uptime_secs();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert!(uptime_secs() > first);
+    }
 }

@@ -52,4 +52,10 @@ ignore = [
     "RUSTSEC-2026-0369",
     "RUSTSEC-2026-0403",
     "RUSTSEC-2026-0429",
+
+    # libsqlite3-sys 0.30 (bundled SQLite CVE). In Cargo.lock only, through
+    # sqlx's optional sqlx-sqlite; every service uses Postgres, and
+    # `cargo tree --workspace --all-features --target all -e all -i libsqlite3-sys`
+    # finds nothing that builds it. The fix (>=0.39) needs sqlx 0.9.
+    "RUSTSEC-2026-0459",
 ]
