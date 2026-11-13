@@ -122,7 +122,7 @@ fn is_safe_webhook_url(raw_url: &str) -> bool {
         return false;
     };
     let lower = host.to_lowercase();
-    if lower == "localhost"
+    let internal = lower == "localhost"
         || lower == "0.0.0.0"
         || lower == "::1"
         || lower.starts_with("127.")
@@ -130,11 +130,8 @@ fn is_safe_webhook_url(raw_url: &str) -> bool {
         || lower.starts_with("192.168.")
         || lower.starts_with("169.254.")
         || lower.ends_with(".internal")
-        || lower.ends_with(".local")
-    {
-        return false;
-    }
-    true
+        || lower.ends_with(".local");
+    !internal
 }
 
 // ─── Handlers ───
