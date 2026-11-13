@@ -157,10 +157,40 @@ export function engineFacts(a: ApiAnalysis): Fact[] {
     facts.push({ label: "Scanned", value: formatBytes(m.bytes_scanned) });
   }
 
+  // Archive contents: every file inside was scanned on its own.
+  const inside = arr(m.files);
+  if (inside.length > 0) {
+    const format = str(m.format) ?? "archive";
+    const ranked = [...inside].sort((x, y) => verdictWeight(str(y.verdict)) - verdictWeight(str(x.verdict)));
+    for (const f of ranked.slice(0, 10)) {
+      const verdict = str(f.verdict) ?? "Unknown";
+      facts.push({
+        label: `Inside the ${format}`,
+        value: `${str(f.path) ?? "file"}: ${verdictText(verdict)}`,
+        tone: verdict === "Malicious" ? "danger" : verdict === "Suspicious" ? "warning" : "muted",
+      });
+    }
+    if (inside.length > 10) facts.push({ label: `Inside the ${format}`, value: `and ${inside.length - 10} more` });
+  }
+  const password = str(m.password_used);
+  if (password) facts.push({ label: "Opened with password", value: password });
+  const skipped = Array.isArray(m.skipped) ? m.skipped.length : 0;
+  if (skipped > 0 && m.format) {
+    facts.push({ label: "Not scanned", value: `${skipped} file(s): size, count or time limit`, tone: "muted" });
+  }
+
   const advisory = str(m.advisory_verdict);
   if (advisory) facts.push({ label: "Prediction (not counted)", value: advisory });
 
   return facts;
+}
+
+function verdictWeight(v?: string): number {
+  return v === "Malicious" ? 3 : v === "Suspicious" ? 2 : v === "Benign" ? 1 : 0;
+}
+
+function verdictText(v: string): string {
+  return v === "Benign" ? "nothing found" : v === "Unknown" ? "no verdict" : v.toLowerCase();
 }
 
 export function formatBytes(n: number): string {

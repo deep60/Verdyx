@@ -256,6 +256,12 @@ pub const AUTHORITATIVE_KEY: &str = "authoritative";
 /// misfire on a harmless file.
 pub const STRONG_SIGNAL_KEY: &str = "strong_signal";
 
+/// Metadata key marking a malicious vote about a file inside an archive,
+/// reached by that file's own consensus. It decides the archive's verdict:
+/// engines that only read the compressed container can't see the file, so
+/// their clean votes don't count against it.
+pub const INNER_FILE_KEY: &str = "inner_file_malicious";
+
 fn meta_flag(detection: &DetectionResult, key: &str) -> bool {
     detection.metadata.get(key).and_then(|v| v.as_bool()) == Some(true)
 }
@@ -414,6 +420,7 @@ impl AnalysisResult {
         let mut flagged_by = Vec::new();
         let mut confirmed_by = Vec::new();
         let mut strong_by = Vec::new();
+        let mut inside_by = Vec::new();
 
         for detection in self.detections.iter().filter(|d| !d.is_aggregate()) {
             if let Some((kind, reason)) = detection.non_vote() {
@@ -435,6 +442,8 @@ impl AnalysisResult {
                     flagged_by.push(detection.engine_name.clone());
                     if meta_flag(detection, AUTHORITATIVE_KEY) {
                         confirmed_by.push(detection.engine_name.clone());
+                    } else if meta_flag(detection, INNER_FILE_KEY) {
+                        inside_by.push(detection.engine_name.clone());
                     } else if meta_flag(detection, STRONG_SIGNAL_KEY) {
                         strong_by.push(detection.engine_name.clone());
                     }
@@ -504,15 +513,16 @@ impl AnalysisResult {
             let clean_majority = benign_count > malicious_count && benign_count > suspicious_count;
             // A strong rule match is what stops clean votes winning outright.
             let outvoted_strong = clean_majority && !strong_by.is_empty();
-            self.consensus_verdict = if !confirmed_by.is_empty() || malicious_majority {
-                ThreatVerdict::Malicious
-            } else if clean_majority && !outvoted_strong {
-                ThreatVerdict::Benign
-            } else if malicious_count + suspicious_count > 0 {
-                ThreatVerdict::Suspicious
-            } else {
-                ThreatVerdict::Unknown
-            };
+            self.consensus_verdict =
+                if !confirmed_by.is_empty() || !inside_by.is_empty() || malicious_majority {
+                    ThreatVerdict::Malicious
+                } else if clean_majority && !outvoted_strong {
+                    ThreatVerdict::Benign
+                } else if malicious_count + suspicious_count > 0 {
+                    ThreatVerdict::Suspicious
+                } else {
+                    ThreatVerdict::Unknown
+                };
 
             let max_votes = malicious_count.max(benign_count).max(suspicious_count);
             self.agreement_score = (max_votes as f32 / total_participating as f32) * 100.0;
@@ -526,7 +536,12 @@ impl AnalysisResult {
                     flagged_by.join(", ")
                 )
             };
-            self.consensus_explanation = if outvoted_strong {
+            self.consensus_explanation = if confirmed_by.is_empty() && !inside_by.is_empty() {
+                format!(
+                    "Malicious: a file inside it was judged malicious by its own engine vote (see {}). Engines that read only the compressed archive can't see that file. {flagged}{not_voting_note}",
+                    inside_by.join(", ")
+                )
+            } else if outvoted_strong {
                 format!(
                     "Suspicious: {} matched specific malicious patterns. Engines that found nothing can't clear that, so the file needs a closer look. {flagged}{not_voting_note}",
                     strong_by.join(", ")

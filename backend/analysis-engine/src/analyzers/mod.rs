@@ -522,6 +522,15 @@ impl AnalysisEngine {
     }
 
     async fn perform_analysis(&mut self, request: &FileAnalysisRequest) -> Result<AnalysisResult> {
+        self.perform_analysis_at(request, 0).await
+    }
+
+    /// Analyse one file. `depth` is how many archives it was unpacked from.
+    async fn perform_analysis_at(
+        &mut self,
+        request: &FileAnalysisRequest,
+        depth: usize,
+    ) -> Result<AnalysisResult> {
         let mut detections = Vec::new();
         let mut analysis_errors = Vec::new();
 
@@ -730,6 +739,12 @@ impl AnalysisEngine {
             detections.push(email_det);
         }
 
+        if depth < MAX_ARCHIVE_DEPTH {
+            if let Some(det) = self.scan_archive_contents(request, depth).await {
+                detections.push(det);
+            }
+        }
+
         // Add detections to result
         for mut det in detections {
             no_match_is_no_record(&mut det);
@@ -744,6 +759,50 @@ impl AnalysisEngine {
         }
 
         Ok(result)
+    }
+
+    /// Unpack an archive and run every engine on each file inside, so a
+    /// zipped (or `infected`-password) sample is judged by what it contains,
+    /// not by its compressed bytes. `None` if the file isn't an archive.
+    async fn scan_archive_contents(
+        &mut self,
+        request: &FileAnalysisRequest,
+        depth: usize,
+    ) -> Option<DetectionResult> {
+        use crate::scanners::unpack::{self, UnpackLimits};
+
+        // Decompressing is bounded by UnpackLimits; the engine handles one
+        // job at a time, so doing it inline costs no other request anything.
+        let mut unpacked = unpack::unpack(&request.file_data, UnpackLimits::default())?;
+        let members = std::mem::take(&mut unpacked.members);
+
+        let started = std::time::Instant::now();
+        let mut skipped = unpacked.skipped.clone();
+        let mut scanned = Vec::new();
+        for member in members {
+            if started.elapsed() > ARCHIVE_TIME_BUDGET {
+                skipped.push(format!("{}: archive time limit reached", member.path));
+                continue;
+            }
+            let inner = FileAnalysisRequest {
+                filename: member.path.clone(),
+                file_data: member.data,
+                file_hashes: None,
+                analysis_options: request.analysis_options.clone(),
+            };
+            match Box::pin(self.perform_analysis_at(&inner, depth + 1)).await {
+                Ok(result) => scanned.push((member.path, result)),
+                Err(e) => skipped.push(format!("{}: {e}", member.path)),
+            }
+        }
+        info!(
+            "Archive ({}) at depth {}: {} files scanned, {} skipped",
+            unpacked.format.name(),
+            depth,
+            scanned.len(),
+            skipped.len()
+        );
+        Some(archive_contents_detection(&unpacked, &scanned, &skipped))
     }
 
     async fn run_hash_analysis(
@@ -1465,6 +1524,149 @@ const MATCH_ONLY_ENGINES: [&str; 3] = ["YARA", "ClamAV", "Verdyx Signature Match
 /// file contains something known-bad, never that it's safe. Counting "no
 /// match" as a clean vote let two such engines outvote the engines that did
 /// flag a file; in the detection benchmark that hid most of the malware.
+/// Engine name for the verdict on an archive's contents.
+pub const ARCHIVE_CONTENTS: &str = "Archive contents";
+/// Archives inside archives are unpacked this many levels deep.
+const MAX_ARCHIVE_DEPTH: usize = 2;
+/// Time spent analysing one archive's files before the rest are skipped, so
+/// a large archive can't run past the overall analysis timeout.
+const ARCHIVE_TIME_BUDGET: Duration = Duration::from_secs(60);
+
+fn verdict_rank(v: &ThreatVerdict) -> u8 {
+    match v {
+        ThreatVerdict::Malicious => 3,
+        ThreatVerdict::Suspicious => 2,
+        ThreatVerdict::Benign => 1,
+        ThreatVerdict::Unknown => 0,
+    }
+}
+
+/// One vote for an archive, from the consensus verdicts of the files inside:
+/// the worst of them. A file inside judged Malicious decides the archive's
+/// verdict ([`INNER_FILE_KEY`]): engines reading the compressed container
+/// can't see that file, so their clean votes can't outweigh it.
+pub(crate) fn archive_contents_detection(
+    unpacked: &crate::scanners::unpack::Unpacked,
+    scanned: &[(String, AnalysisResult)],
+    skipped: &[String],
+) -> DetectionResult {
+    use crate::models::analysis_result::INNER_FILE_KEY;
+
+    let worst = scanned
+        .iter()
+        .map(|(_, r)| &r.consensus_verdict)
+        .max_by_key(|v| verdict_rank(v))
+        .cloned()
+        .unwrap_or(ThreatVerdict::Unknown);
+
+    let flagged: Vec<String> = scanned
+        .iter()
+        .filter(|(_, r)| verdict_rank(&r.consensus_verdict) >= 2)
+        .map(|(path, r)| {
+            let engines: Vec<&str> = r
+                .detections
+                .iter()
+                .filter(|d| d.non_vote().is_none() && verdict_rank(&d.verdict) >= 2)
+                .map(|d| d.engine_name.as_str())
+                .collect();
+            format!("{path}: {:?} ({})", r.consensus_verdict, engines.join(", "))
+        })
+        .collect();
+
+    let opened_with = unpacked
+        .password
+        .map(|p| format!(" Opened with the password \"{p}\"."))
+        .unwrap_or_default();
+    let summary = if scanned.is_empty() && unpacked.locked {
+        format!(
+            "Password-protected {}; none of the usual sample passwords ({}) opened it, so the files inside weren't scanned.",
+            unpacked.format.name(),
+            crate::scanners::unpack::COMMON_PASSWORDS.join(", ")
+        )
+    } else if scanned.is_empty() {
+        format!(
+            "Nothing inside this {} could be scanned.",
+            unpacked.format.name()
+        )
+    } else if flagged.is_empty() {
+        format!(
+            "{} file(s) inside this {} were scanned by every engine; none was flagged.{opened_with}",
+            scanned.len(),
+            unpacked.format.name()
+        )
+    } else {
+        format!(
+            "{} of {} file(s) inside this {} were flagged: {}.{opened_with}",
+            flagged.len(),
+            scanned.len(),
+            unpacked.format.name(),
+            flagged.join("; ")
+        )
+    };
+
+    let files: Vec<serde_json::Value> = scanned
+        .iter()
+        .map(|(path, r)| {
+            serde_json::json!({
+                "path": path,
+                "size": r.file_metadata.file_size,
+                "sha256": r.file_metadata.sha256,
+                "verdict": format!("{:?}", r.consensus_verdict),
+                "explanation": r.consensus_explanation,
+            })
+        })
+        .collect();
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "format".to_string(),
+        serde_json::json!(unpacked.format.name()),
+    );
+    metadata.insert("files".to_string(), serde_json::json!(files));
+    metadata.insert("skipped".to_string(), serde_json::json!(skipped));
+    metadata.insert("summary".to_string(), serde_json::json!(summary));
+    metadata.insert("reasons".to_string(), serde_json::json!(flagged));
+    if let Some(p) = unpacked.password {
+        metadata.insert("password_used".to_string(), serde_json::json!(p));
+    }
+    if worst == ThreatVerdict::Unknown {
+        metadata.insert("reason".to_string(), serde_json::json!(summary));
+    }
+    if worst == ThreatVerdict::Malicious {
+        metadata.insert(INNER_FILE_KEY.to_string(), serde_json::json!(true));
+    }
+
+    let confidence = scanned
+        .iter()
+        .filter(|(_, r)| r.consensus_verdict == worst)
+        .map(|(_, r)| r.consensus_confidence)
+        .fold(0.0_f32, f32::max);
+    let severity = scanned
+        .iter()
+        .map(|(_, r)| r.consensus_severity.clone())
+        .fold(SeverityLevel::Info, SeverityLevel::max);
+    let categories = if verdict_rank(&worst) >= 2 {
+        vec![ThreatCategory::Malware]
+    } else {
+        vec![]
+    };
+
+    DetectionResult {
+        detection_id: Uuid::new_v4(),
+        engine_name: ARCHIVE_CONTENTS.to_string(),
+        engine_version: "1".to_string(),
+        engine_type: EngineType::Static,
+        verdict: worst,
+        confidence,
+        severity,
+        categories,
+        metadata,
+        detected_at: Utc::now(),
+        processing_time_ms: 0,
+        error_message: None,
+    }
+}
+
 pub(crate) fn no_match_is_no_record(d: &mut DetectionResult) {
     if d.verdict == ThreatVerdict::Benign && MATCH_ONLY_ENGINES.contains(&d.engine_name.as_str()) {
         d.verdict = ThreatVerdict::Unknown;
@@ -1552,5 +1754,118 @@ mod tests {
         stat.verdict = ThreatVerdict::Benign;
         no_match_is_no_record(&mut stat);
         assert_eq!(stat.verdict, ThreatVerdict::Benign);
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use std::io::{Cursor, Write};
+
+    const EICAR: &[u8] = br"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
+
+    fn zip_of(files: &[(&str, &[u8])], password: Option<&str>) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(Cursor::new(&mut buf));
+            for (name, body) in files {
+                let mut opts = zip::write::SimpleFileOptions::default();
+                if let Some(p) = password {
+                    opts = opts.with_aes_encryption(zip::AesMode::Aes256, p);
+                }
+                w.start_file(*name, opts).unwrap();
+                w.write_all(body).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        buf
+    }
+
+    async fn engine() -> AnalysisEngine {
+        let mut config = AnalysisEngineConfig::default();
+        config.hash_analyzer.virustotal_api_key = None;
+        config.hash_analyzer.malwarebazaar_api_key = None;
+        config.hash_analyzer.hybrid_analysis_api_key = None;
+        config.clamav_analyzer.enabled = false;
+        config.yara_engine.rules_directory = "rules/yara".into();
+        AnalysisEngine::new(config).await.unwrap()
+    }
+
+    async fn analyse(name: &str, data: Vec<u8>) -> AnalysisResult {
+        engine()
+            .await
+            .analyze_file(FileAnalysisRequest {
+                filename: name.to_string(),
+                file_data: data,
+                file_hashes: None,
+                analysis_options: AnalysisOptions::default(),
+            })
+            .await
+            .unwrap()
+    }
+
+    fn contents(r: &AnalysisResult) -> &DetectionResult {
+        r.detections
+            .iter()
+            .find(|d| d.engine_name == ARCHIVE_CONTENTS)
+            .expect("archive contents row")
+    }
+
+    #[tokio::test]
+    async fn malware_in_an_infected_zip_makes_the_zip_malicious() {
+        let bare = analyse("eicar.com", EICAR.to_vec()).await;
+        assert_eq!(bare.consensus_verdict, ThreatVerdict::Malicious);
+
+        let z = zip_of(
+            &[("readme.txt", b"Invoice attached."), ("eicar.com", EICAR)],
+            Some("infected"),
+        );
+        let r = analyse("invoice.zip", z).await;
+        let row = contents(&r);
+        assert_eq!(row.verdict, ThreatVerdict::Malicious);
+        assert_eq!(row.metadata["password_used"], "infected");
+        assert!(row.metadata["summary"]
+            .as_str()
+            .unwrap()
+            .contains("eicar.com: Malicious"));
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Malicious);
+        assert!(r.consensus_explanation.contains("a file inside it"));
+    }
+
+    #[tokio::test]
+    async fn nested_archives_are_followed() {
+        let inner = zip_of(&[("eicar.com", EICAR)], None);
+        let outer = zip_of(&[("inner.zip", &inner)], None);
+        let r = analyse("outer.zip", outer).await;
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Malicious);
+    }
+
+    #[tokio::test]
+    async fn a_zip_of_clean_files_stays_clean() {
+        let z = zip_of(
+            &[
+                ("notes.txt", b"Meeting at 10."),
+                ("data.csv", b"a,b\n1,2\n"),
+            ],
+            None,
+        );
+        let r = analyse("notes.zip", z).await;
+        let row = contents(&r);
+        assert_eq!(row.verdict, ThreatVerdict::Benign);
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Malicious);
+        assert!(row.metadata["summary"]
+            .as_str()
+            .unwrap()
+            .contains("none was flagged"));
+    }
+
+    #[tokio::test]
+    async fn a_locked_archive_says_so_and_does_not_vote() {
+        let z = zip_of(&[("eicar.com", EICAR)], Some("not-a-common-one"));
+        let r = analyse("locked.zip", z).await;
+        let row = contents(&r);
+        assert_eq!(row.verdict, ThreatVerdict::Unknown);
+        let (_, reason) = row.non_vote().expect("doesn't vote");
+        assert!(reason.contains("Password-protected"));
     }
 }

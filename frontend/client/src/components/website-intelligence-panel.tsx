@@ -17,7 +17,6 @@ import {
   Bot,
   Activity,
   Compass,
-  GitBranch,
   FileText,
   Wifi,
   Cpu,
@@ -468,30 +467,6 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                     <p className="text-xs text-muted-foreground">
                       No additional co-hosted domains reported on this IP.
                     </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* 7. Traceroute */}
-            {showCategory("network", "Traceroute") && (
-              <Card className="bento-card border-primary/20">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <GitBranch className="h-4 w-4 text-primary" />
-                    Traceroute
-                  </CardTitle>
-                  <CardDescription>The network path packets travel to reach the server</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2 text-xs">
-                  {(intel.traceroute?.hops || []).map(
-                    (hop: { hop: number; node: string; ip: string; rttMs: number }) => (
-                      <div key={hop.hop} className="flex items-center justify-between py-1 border-b border-border/30">
-                        <span className="font-mono text-muted-foreground">#{hop.hop}</span>
-                        <span className="truncate max-w-[160px] font-medium">{hop.node}</span>
-                        <span className="font-mono text-primary">{hop.rttMs} ms</span>
-                      </div>
-                    )
                   )}
                 </CardContent>
               </Card>
@@ -1306,9 +1281,9 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Ban className="h-4 w-4 text-primary" />
-                    Malware, Phishing &amp; Blocklists
+                    Malware &amp; Phishing
                   </CardTitle>
-                  <CardDescription>Threat heuristics and protective DNS resolver block checks</CardDescription>
+                  <CardDescription>Warning signs in the address and page</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-xs">
                   <div className="flex justify-between">
@@ -1318,18 +1293,6 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                     </Badge>
                   </div>
                   <div className="text-muted-foreground">{intel.malwarePhishing?.verdict}</div>
-                  <div className="pt-1 space-y-1">
-                    {(intel.blockDetection?.resolvers || []).map(
-                      (r: { provider: string; blocked: boolean }) => (
-                        <div key={r.provider} className="flex justify-between">
-                          <span>{r.provider}</span>
-                          <span className={r.blocked ? "text-destructive" : "text-emerald-400"}>
-                            {r.blocked ? "Blocked" : "Allowed"}
-                          </span>
-                        </div>
-                      )
-                    )}
-                  </div>
                 </CardContent>
               </Card>
             )}
@@ -1390,21 +1353,17 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
               </Card>
             )}
 
-            {/* 39. Archive History & Global Ranking */}
+            {/* 39. Archive History */}
             {showCategory("threat", "Archive History") && (
               <Card className="bento-card border-primary/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <History className="h-4 w-4 text-primary" />
-                    Archive History &amp; Global Rank
+                    Archive History
                   </CardTitle>
-                  <CardDescription>Wayback Machine snapshots and domain ranking tier</CardDescription>
+                  <CardDescription>Wayback Machine snapshots of the site</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Global Tier</span>
-                    <Badge variant="outline">{intel.globalRanking?.tier}</Badge>
-                  </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Wayback Archive</span>
                     <span>{intel.archiveHistory?.available ? "Archived" : "No Snapshot"}</span>

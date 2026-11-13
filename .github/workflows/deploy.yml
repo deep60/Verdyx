@@ -347,9 +347,15 @@ jobs:
       - run: python -m pytest -q tests
 
   # ── Build & push Docker images ─────────────────────────────────────────────
+  # Each image is built twice, once per CPU type, each on a machine of that
+  # type (GitHub's arm64 runners are free for public repositories). Emulating
+  # arm64 with QEMU on an amd64 machine took 2 hours for analysis-engine and
+  # over 6 hours (GitHub's job limit) for frontend. Each build pushes its
+  # image by digest only; publish-images below joins the two under the tags.
   build-and-push:
-    name: Build ${{ matrix.service }}
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.service }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
     needs: [changes, test-frontend, test-backend, test-ml, security-scan]
     permissions:
       contents: read
@@ -374,6 +380,150 @@ jobs:
         needs.changes.outputs.user-service == 'true' ||
         needs.changes.outputs.ml-service == 'true'
       )
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [frontend, api-gateway, analysis-engine, bounty-manager, consensus-service, notification-service, payment-service, reputation-service, submission-service, user-service, ml-service]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - service: frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+            changed:   frontend
+            shared:    false
+          - service: api-gateway
+            context: ./backend
+            dockerfile: ./backend/api-gateway/Dockerfile
+            changed:   api-gateway
+            shared:    true
+          - service: analysis-engine
+            context: ./backend
+            dockerfile: ./backend/analysis-engine/Dockerfile
+            changed:   analysis-engine
+            shared:    true
+          - service: bounty-manager
+            context: ./backend
+            dockerfile: ./backend/bounty-manager/Dockerfile
+            changed:   bounty-manager
+            shared:    true
+          - service: consensus-service
+            context: ./backend
+            dockerfile: ./backend/consensus-service/Dockerfile
+            changed:   consensus-service
+            shared:    true
+          - service: notification-service
+            context: ./backend
+            dockerfile: ./backend/notification-service/Dockerfile
+            changed:   notification-service
+            shared:    true
+          - service: payment-service
+            context: ./backend
+            dockerfile: ./backend/payment-service/Dockerfile
+            changed:   payment-service
+            shared:    true
+          - service: reputation-service
+            context: ./backend
+            dockerfile: ./backend/reputation-service/Dockerfile
+            changed:   reputation-service
+            shared:    true
+          - service: submission-service
+            context: ./backend
+            dockerfile: ./backend/submission-service/Dockerfile
+            changed:   submission-service
+            shared:    true
+          - service: user-service
+            context: ./backend
+            dockerfile: ./backend/user-service/Dockerfile
+            changed:   user-service
+            shared:    true
+          # Runs on the A1 worker (deploy/worker), which is arm64.
+          - service: ml-service
+            context: ./ml
+            dockerfile: ./ml/Dockerfile
+            changed:   ml-service
+            shared:    false
+    steps:
+      - name: Decide whether to build
+        id: should
+        run: |
+          if [[ "${{ needs.changes.outputs[matrix.changed] }}" == "true" ]] || \
+             ( [[ "${{ matrix.shared }}" == "true" ]] && [[ "${{ needs.changes.outputs.shared }}" == "true" ]] ); then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping ${{ matrix.service }} — no changes detected"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.should.outputs.build == 'true'
+
+      - name: Set up Docker Buildx
+        if: steps.should.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      # Push to GHCR — this is the registry docker-compose.yml pulls from on the
+      # VM. Uses the built-in GITHUB_TOKEN, so no extra registry secrets needed.
+      - name: Login to GHCR
+        if: steps.should.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract labels
+        if: steps.should.outputs.build == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/verdyx-${{ matrix.service }}
+
+      - name: Build and push by digest
+        if: steps.should.outputs.build == 'true'
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/verdyx-${{ matrix.service }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.service }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}-${{ matrix.arch }}
+
+      - name: Save digest
+        if: steps.should.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: steps.should.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.service }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Join the amd64 and arm64 images of each service under one set of tags
+  # (latest, branch, branch-sha), so the VM pulls the right one for its CPU.
+  publish-images:
+    name: Publish ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: [changes, build-and-push]
+    permissions:
+      contents: read
+      packages: write
+    if: |
+      always() &&
+      needs.build-and-push.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -447,20 +597,18 @@ jobs:
             echo "Skipping ${{ matrix.service }} — no changes detected"
           fi
 
-      - uses: actions/checkout@v4
+      - name: Download digests
         if: steps.should.outputs.build == 'true'
-
-      # QEMU enables the arm64 cross-build below (Oracle Ampere hosts are ARM).
-      - name: Set up QEMU
-        if: steps.should.outputs.build == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.service }}-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         if: steps.should.outputs.build == 'true'
         uses: docker/setup-buildx-action@v3
 
-      # Push to GHCR — this is the registry docker-compose.yml pulls from on the
-      # VM. Uses the built-in GITHUB_TOKEN, so no extra registry secrets needed.
       - name: Login to GHCR
         if: steps.should.outputs.build == 'true'
         uses: docker/login-action@v3
@@ -480,20 +628,23 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
+      - name: Create multi-arch tags
         if: steps.should.outputs.build == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/verdyx-${{ matrix.service }}
+        run: |
+          count=$(ls | wc -l)
+          if [[ "$count" -ne 2 ]]; then
+            echo "::error::Expected 2 digests (amd64 + arm64), found $count"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "$IMAGE@sha256:%s " *)
+          docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
 
-      # Trivy scan of built image
+      # Trivy scan of the published image
       - name: Trivy image scan
         if: steps.should.outputs.build == 'true'
         uses: aquasecurity/trivy-action@master
@@ -508,11 +659,13 @@ jobs:
   deploy:
     name: Deploy to Server
     runs-on: ubuntu-latest
-    needs: [changes, build-and-push]
+    needs: [changes, build-and-push, publish-images]
     if: |
       always() &&
       !contains(needs.build-and-push.result, 'failure') &&
-      !contains(needs.build-and-push.result, 'cancelled')
+      !contains(needs.build-and-push.result, 'cancelled') &&
+      !contains(needs.publish-images.result, 'failure') &&
+      !contains(needs.publish-images.result, 'cancelled')
     environment:
       name: production
       url: https://api.verdyx.dev
