@@ -86,52 +86,18 @@ The report includes:
 
 ## Deploy it
 
-1. Copy the bundle to the server:
-
-   ```bash
-   ssh -i ~/.ssh/verdyx-oracle ubuntu@<server> 'sudo mkdir -p /opt/verdyx/ml-models/pe'
-   ```
-
-   ```bash
-   scp -i ~/.ssh/verdyx-oracle bundle/model.txt bundle/calibration.json bundle/bundle.json bundle/report.md ubuntu@<server>:/tmp/
-   ```
-
-   ```bash
-   ssh -i ~/.ssh/verdyx-oracle ubuntu@<server> 'sudo mv /tmp/model.txt /tmp/calibration.json /tmp/bundle.json /tmp/report.md /opt/verdyx/ml-models/pe/'
-   ```
-
-2. On the server, start the service:
-
-   ```bash
-   cd /opt/verdyx && sudo docker compose -f docker-compose.gcp.yml --profile ml up -d ml-service
-   ```
-
-   ```bash
-   sudo docker exec verdyx-ml-service python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8090/health').read().decode())"
-   ```
-
-   The health output should say `"loaded": true`, with your model version.
-
-3. Point the analysis engine at it. Add these lines to `/opt/verdyx/.env`:
-
-   ```
-   PE_MODEL_URL=http://ml-service:8090
-   PE_MODEL_VOTE=auto
-   ```
-
-   Then recreate the engine:
-
-   ```bash
-   cd /opt/verdyx && sudo docker compose -f docker-compose.gcp.yml up -d --force-recreate --no-deps analysis-engine
-   ```
+The service runs on the **worker**, an Always Free Ampere A1 VM next to the main
+1 GB VM, together with ClamAV. Its setup, from creating the VM to pointing the
+engine at it, is in [`deploy/worker/README.md`](../deploy/worker/README.md).
 
 The engine status page now lists **Windows Program Model (EMBER2024)**, and
 every scanned `.exe` or `.dll` gets a detection with a `summary`
 ("Main reasons: …") and full `explanation` metadata. Non-PE files are never
 sent to the service.
 
-To update the model, replace the bundle files and run
-`docker restart verdyx-ml-service`. The image itself is rebuilt by CI and kept
+To update the model, replace the bundle files in
+`/opt/verdyx-worker/ml-models/pe` on the worker and run
+`sudo docker restart verdyx-ml-service`. The image itself is rebuilt by CI and kept
 up to date by Watchtower.
 
 Settings on the engine side, in `.env`:

@@ -15,7 +15,8 @@
 #                so it needs its own machine with ~3 GB+ (a free 1 GB E2.1.Micro
 #                was tried and was far too slow). Run clamd there, reachable
 #                only over a private network, and set ENABLE_CLAMAV=true and
-#                CLAMAV_HOST=<private-ip>:3310 in .env.
+#                CLAMAV_HOST=<private-ip>:3310 in .env. deploy/worker runs it,
+#                and the ML model (PE_MODEL_URL), on an Always Free A1 VM.
 #   frontend  -> Cloudflare Pages. The Node BFF is redundant there because
 #                functions/api/[[path]].ts does the same /api proxying at the
 #                edge, for free, without using VM memory.
@@ -390,24 +391,6 @@ services:
   # Same pull-based CD as the old AWS box: push to main -> deploy.yml pushes
   # :latest to GHCR -> this polls and rolling-restarts. Outbound only, so the
   # firewall stays closed. Redis and Caddy are excluded by not being listed.
-  # EMBER2024-trained Windows-program model (ml/). Off until you have trained
-  # a bundle: start it with `--profile ml`, then set PE_MODEL_URL in .env (see
-  # ml/README.md). Internal only, no published port.
-  ml-service:
-    image: ghcr.io/deep60/verdyx-ml-service:latest
-    container_name: verdyx-ml-service
-    restart: unless-stopped
-    profiles: [ml]
-    environment:
-      - ML_PE_BUNDLE_DIR=/models/pe
-      - ML_SERVICE_TOKEN=${ML_SERVICE_TOKEN:-}
-      # One file at a time keeps peak memory near ~200 MB on this box.
-      - ML_MAX_CONCURRENT=1
-    volumes:
-      - ./ml-models/pe:/models/pe:ro
-    mem_limit: 320m
-    networks: [verdyx-network]
-
   watchtower:
     image: containrrr/watchtower:latest
     container_name: verdyx-watchtower
@@ -433,7 +416,6 @@ services:
       verdyx-payment-service
       verdyx-reputation-service
       verdyx-notification-service
-      verdyx-ml-service
     networks: [verdyx-network]
 
 networks:
