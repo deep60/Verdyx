@@ -126,10 +126,11 @@ scoring with SHAP. On macOS, if LightGBM can't find `libomp`, either
 
 Everything in `requirements.txt` is exact, because the model is only as good as
 the match between training features and production features. EMBER2024
-(`thrember`) is pinned to a commit. `signify` is held at 0.7.1, the version
-thrember was written for: 0.9 removed `SignedPEFile`, which thrember imports, and
-0.8 made the certificate list unsliceable, so every **signed** file (most
-legitimate software) failed to score with a `TypeError`.
+(`thrember`) is pinned to a commit. `signify` is held at 0.9.3: every version
+below 0.9.2 has a high-severity advisory in the authenticode parser this service
+runs on untrusted uploads. thrember was written for 0.7's API, so
+`pe_features.py` adapts 0.9's to it. On 229 real Windows programs (120 signed)
+the features are identical to 0.7.1's, value for value.
 
 ## Roadmap
 

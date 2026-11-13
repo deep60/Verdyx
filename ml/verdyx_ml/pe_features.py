@@ -38,9 +38,63 @@ FEATURE_VERSION = "ember-v3"
 CATEGORICAL_FEATURES = [2, 3, 4, 5, 6, 701, 702]
 
 
+class _SignedDataCompat:
+    """One embedded signature, shaped like signify 0.7's SignedData.
+
+    thrember slices ``certificates`` (``certs[:-1]``); since signify 0.8 that is
+    a CertificateStore, which can't be sliced, so it is handed over as a list
+    in the same order.
+    """
+
+    def __init__(self, signature: Any) -> None:
+        self._signature = signature
+
+    @property
+    def signer_info(self) -> Any:
+        return self._signature.signer_info
+
+    @property
+    def certificates(self) -> list:
+        return list(self._signature.certificates)
+
+
+class _SignedPEFileCompat:
+    """signify 0.7's ``SignedPEFile`` API, backed by signify >= 0.9.2.
+
+    thrember (EMBER2024's extractor) was written for signify 0.7, whose
+    authenticode parser has a high-severity advisory (GHSA-p4hh-mq57-gq8x,
+    fixed in 0.9.2), and this service parses signatures in untrusted uploads.
+    0.9 moved the class and renamed ``iter_signed_datas``. Error handling
+    matches what thrember got from 0.7's defaults: certificate-table errors
+    (including "no certificate table" on unsigned files) end the iteration
+    quietly, while errors inside a signature still reach thrember, which
+    records them as its ``parse_error`` feature.
+    """
+
+    def __init__(self, file_obj: Any) -> None:
+        from signify.authenticode.signed_file.pe import SignedPEFile
+
+        self._file = SignedPEFile(file_obj)
+
+    def iter_signed_datas(self) -> Any:
+        for signature in self._file.iter_embedded_signatures(
+            include_nested=True, ignore_parse_errors=True
+        ):
+            yield _SignedDataCompat(signature)
+
+
+def _install_signify_compat() -> None:
+    """Make ``from signify.authenticode import SignedPEFile`` work on signify 0.9+."""
+    import signify.authenticode as authenticode
+
+    if not hasattr(authenticode, "SignedPEFile"):
+        authenticode.SignedPEFile = _SignedPEFileCompat
+
+
 @lru_cache(maxsize=1)
 def _features_module() -> ModuleType:
     """Load thrember/features.py by path, without the package __init__."""
+    _install_signify_compat()
     spec = importlib.util.find_spec("thrember")
     if spec is None or not spec.submodule_search_locations:
         raise ImportError(

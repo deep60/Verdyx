@@ -69,3 +69,21 @@ def test_vectorize_raw_matches_extract():
     data = build_pe(b"UPX0", bytes(range(256)) * 8)
     ext = pf.extract(data)
     assert np.array_equal(pf.vectorize_raw(ext.raw), ext.vector)
+
+
+def test_signify_has_the_parser_fix():
+    # GHSA-p4hh-mq57-gq8x: authenticode parsing before 0.9.2 is vulnerable, and
+    # this service parses signatures in untrusted uploads.
+    from importlib.metadata import version
+
+    major, minor, patch = (int(x) for x in version("signify").split(".")[:3])
+    assert (major, minor, patch) >= (0, 9, 2)
+
+
+def test_unsigned_pe_reads_as_unsigned_not_as_a_parse_error():
+    # signify 0.9 reports "no certificate table" as an error; thrember must
+    # still see an unsigned file, as it did with 0.7 (all zeros).
+    raw = pf.extract(build_pe()).raw["authenticode"]
+    assert raw["num_certs"] == 0
+    assert raw["parse_error"] == 0
+    assert raw["chain_max_depth"] == 0
