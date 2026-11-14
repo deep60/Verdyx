@@ -1,0 +1,24 @@
+# Runtime and training dependencies for the Verdyx ML service.
+#
+# Everything is pinned exactly. The model is only as good as the match between
+# the features it was trained on and the features it sees in production, so the
+# extractor and every library that shapes a feature value must not drift.
+
+# EMBER2024's official feature extractor (EMBER feature version 3, 2568 dims).
+# Pinned to a commit: the repo has no releases.
+thrember @ git+https://github.com/FutureComputing4AI/EMBER2024@0ef753e81d98bf209f71b03cd331dfc190b5b54d
+
+# thrember was written for signify 0.7, but every version below 0.9.2 has a
+# high-severity advisory in its authenticode parser (GHSA-p4hh-mq57-gq8x), and
+# this service parses signatures in untrusted uploads. 0.9 moved SignedPEFile
+# and renamed its iterator; pe_features.py adapts it so thrember's code runs
+# unchanged. Checked on 229 real Windows programs (120 signed): every feature
+# value is identical to signify 0.7.1's.
+signify==0.9.3
+
+# These change feature values or model output, so they stay exact.
+pefile==2024.8.26
+scikit-learn==1.9.1
+lightgbm==4.7.0
+numpy==2.4.6
+scipy==1.17.1

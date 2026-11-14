@@ -1,0 +1,65 @@
+# Verdyx worker: the memory-hungry engines, on an Oracle Always Free
+# Ampere A1 VM (arm64) next to the main 1 GB VM.
+#
+#   clamav      clamd, ~1.2 GB for its signature database
+#   ml-service  the EMBER2024 Windows-program model, ~200 MB
+#
+# Both listen on the worker's PRIVATE address only, so they are reachable from
+# the main VM over the VCN and never from the internet. setup.sh also limits
+# them to the main VM's address. Neither has its own login beyond the ML token,
+# so never publish these ports on 0.0.0.0.
+#
+# The main VM's .env then points at them:
+#   ENABLE_CLAMAV=true
+#   CLAMAV_HOST=<WORKER_PRIVATE_IP>:3310
+#   PE_MODEL_URL=http://<WORKER_PRIVATE_IP>:8090
+#   ML_SERVICE_TOKEN=<same token as here>
+
+services:
+  clamav:
+    # The Debian image is multi-arch; clamav/clamav is amd64-only.
+    image: clamav/clamav-debian:stable
+    container_name: verdyx-clamav
+    restart: unless-stopped
+    ports:
+      - "${WORKER_PRIVATE_IP:?set WORKER_PRIVATE_IP in .env}:3310:3310"
+    volumes:
+      - clamav_db:/var/lib/clamav
+    mem_limit: 3g
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      # First start downloads the signature database (~300 MB) and loads it.
+      start_period: 10m
+
+  ml-service:
+    image: ghcr.io/deep60/verdyx-ml-service:latest
+    container_name: verdyx-ml-service
+    restart: unless-stopped
+    ports:
+      - "${WORKER_PRIVATE_IP:?set WORKER_PRIVATE_IP in .env}:8090:8090"
+    environment:
+      - ML_PE_BUNDLE_DIR=/models/pe
+      - ML_SERVICE_TOKEN=${ML_SERVICE_TOKEN:?set ML_SERVICE_TOKEN in .env}
+      # The A1 has room for a few at once.
+      - ML_MAX_CONCURRENT=${ML_MAX_CONCURRENT:-2}
+    volumes:
+      - ./ml-models/pe:/models/pe:ro
+    mem_limit: 1g
+
+  # Same pull-based updates as the main VM: CI pushes :latest, this restarts.
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: verdyx-worker-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_CLEANUP=true
+    command: verdyx-clamav verdyx-ml-service
+
+volumes:
+  clamav_db:
