@@ -99,7 +99,11 @@ export function Footer({ tag = "commit · reveal" }: FooterProps) {
 
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
           <p className="font-mono">Every engine shown · thirty-six site checks · one verdict</p>
-          <p className="font-mono">© {new Date().getFullYear()} Verdyx Labs</p>
+          <div className="flex items-center gap-4 font-mono">
+            <Link href="/privacy" className="hover:text-primary transition-colors">Privacy</Link>
+            <Link href="/terms" className="hover:text-primary transition-colors">Terms</Link>
+            <span>© {new Date().getFullYear()} Verdyx</span>
+          </div>
         </div>
       </div>
     </footer>
