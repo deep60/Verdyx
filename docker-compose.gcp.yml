@@ -15,7 +15,8 @@
 #                so it needs its own machine with ~3 GB+ (a free 1 GB E2.1.Micro
 #                was tried and was far too slow). Run clamd there, reachable
 #                only over a private network, and set ENABLE_CLAMAV=true and
-#                CLAMAV_HOST=<private-ip>:3310 in .env.
+#                CLAMAV_HOST=<private-ip>:3310 in .env. deploy/worker runs it,
+#                and the ML model (PE_MODEL_URL), on an Always Free A1 VM.
 #   frontend  -> Cloudflare Pages. The Node BFF is redundant there because
 #                functions/api/[[path]].ts does the same /api proxying at the
 #                edge, for free, without using VM memory.
