@@ -33,6 +33,7 @@ pub struct DetailedEngineReport {
 }
 
 // Re-export all analyzer modules
+pub mod apk_analyzer;
 pub mod dynamic_analyzer;
 pub mod hash_analyzer;
 pub mod heuristic_engine;
@@ -746,6 +747,10 @@ impl AnalysisEngine {
             detections.push(office_det);
         }
 
+        if let Some(apk_det) = self.run_apk_analysis(request).await {
+            detections.push(apk_det);
+        }
+
         if depth < MAX_ARCHIVE_DEPTH {
             if let Some(det) = self.scan_archive_contents(request, depth).await {
                 detections.push(det);
@@ -1255,6 +1260,24 @@ impl AnalysisEngine {
         }
     }
 
+    /// Android apps: manifest, DEX APIs, packers, payloads and signing.
+    /// `None` for other files. Shares the static-analysis switch.
+    async fn run_apk_analysis(&self, request: &FileAnalysisRequest) -> Option<DetectionResult> {
+        if !request.analysis_options.enable_static_analysis {
+            return None;
+        }
+        let data = request.file_data.clone();
+        match tokio::task::spawn_blocking(move || apk_analyzer::analyze(&data)).await {
+            Ok(det) => det,
+            Err(e) => Some(Self::create_unavailable_detection(
+                apk_analyzer::ENGINE_NAME,
+                "1.0.0",
+                EngineType::Static,
+                format!("app analysis failed: {e}"),
+            )),
+        }
+    }
+
     /// Create an explicit DetectionResult representing an unavailable or disabled engine
     pub fn create_unavailable_detection(
         engine_name: &str,
@@ -1349,6 +1372,18 @@ impl AnalysisEngine {
             status: "online".to_string(),
             version: "1.0.0".to_string(),
             details: "VBA macro extraction and scoring, Excel 4.0 macro sheets, remote templates, DDE and embedded objects in Word, Excel and PowerPoint files".to_string(),
+            error: None,
+        });
+
+        // Android apps (Default; only reports on APKs)
+        engines.push(EngineStatusItem {
+            id: "apk_analyzer".to_string(),
+            name: apk_analyzer::ENGINE_NAME.to_string(),
+            engine_type: "static".to_string(),
+            is_optional: false,
+            status: "online".to_string(),
+            version: "1.0.0".to_string(),
+            details: "Binary manifest (permissions, accessibility and device-admin services, launcher), DEX API strings, packers, hidden payloads and signing for Android APKs".to_string(),
             error: None,
         });
 
@@ -1506,6 +1541,7 @@ impl AnalysisEngine {
                 "heuristic_engine".to_string(),
                 "signature_matcher".to_string(),
                 "office_analyzer".to_string(),
+                "apk_analyzer".to_string(),
             ],
             optional_engines: vec![
                 "yara_engine".to_string(),
@@ -1959,5 +1995,46 @@ mod office_tests {
     async fn non_office_files_get_no_office_row() {
         let r = analyse("notes.txt", b"just some text".to_vec()).await;
         assert!(office_row(&r).is_none());
+    }
+}
+
+#[cfg(test)]
+mod apk_tests {
+    use super::apk_analyzer::tests::banker;
+    use super::*;
+
+    #[tokio::test]
+    async fn banking_trojan_apk_is_flagged_by_the_engine() {
+        let mut config = AnalysisEngineConfig::default();
+        config.hash_analyzer.virustotal_api_key = None;
+        config.hash_analyzer.malwarebazaar_api_key = None;
+        config.hash_analyzer.hybrid_analysis_api_key = None;
+        config.clamav_analyzer.enabled = false;
+        config.yara_engine.rules_directory = "rules/yara".into();
+        let r = AnalysisEngine::new(config)
+            .await
+            .unwrap()
+            .analyze_file(FileAnalysisRequest {
+                filename: "update.apk".to_string(),
+                file_data: banker(),
+                file_hashes: None,
+                analysis_options: AnalysisOptions::default(),
+            })
+            .await
+            .unwrap();
+        let row = r
+            .detections
+            .iter()
+            .find(|d| d.engine_name == apk_analyzer::ENGINE_NAME)
+            .expect("apk row");
+        assert_eq!(row.verdict, ThreatVerdict::Malicious);
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Benign);
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Unknown);
+        // An APK isn't also treated as an Office file or an archive.
+        assert!(!r
+            .detections
+            .iter()
+            .any(|d| d.engine_name == office_analyzer::ENGINE_NAME
+                || d.engine_name == ARCHIVE_CONTENTS));
     }
 }

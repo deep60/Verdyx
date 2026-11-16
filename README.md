@@ -66,6 +66,7 @@ Solidity contracts (Hardhat), with Slither and Mythril static analysis configs i
 | Signatures and heuristics | Verdyx's own byte signatures and scored behaviour patterns |
 | Known-malware lookups | MalwareBazaar by file hash; URLhaus and ThreatFox for URLs, hosts and C2 indicators (abuse.ch) |
 | Office documents | Word, Excel and PowerPoint (old OLE and new XML formats): VBA macro source is extracted, decompressed and scored; also hidden Excel 4.0 macro sheets with Auto_Open, remote template and `ms-msdt:` (Follina) links, DDE fields, embedded programs and encrypted documents |
+| Android apps (APK) | The binary manifest (permissions, accessibility and device-admin services, notification listeners, boot receivers, launcher icon), risky APIs in the DEX code (SMS, dynamic code loading, root, icon hiding, Telegram bots, mining pools), commercial packers, hidden payloads and signing. Flags banking-trojan, SMS-fraud, dropper and spyware combinations rather than single permissions |
 | Archives and email | Zip and other archives (including `infected`-password zips) are unpacked two levels deep and each file is scanned; `.eml` files get header, SPF/DKIM/DMARC and attachment checks |
 | ML | ONNX models load, but their weights are hand-set, not trained, so they are advisory: shown in the report, never counted in the verdict |
 | Windows program model (EMBER2024) | Trained; off until the ML worker host is up (`deploy/worker`) |
