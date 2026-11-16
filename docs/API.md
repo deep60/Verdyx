@@ -9,13 +9,32 @@ This guide documents the currently implemented API gateway surface at `backend/a
 
 ## Authentication
 
-Most write routes require JWT authentication.
-
-Use header:
+Most write routes require authentication: a session token from sign-in, or an API key.
 
 ```http
-Authorization: Bearer <jwt>
+Authorization: Bearer <session token or API key>
+X-API-Key: vdx_…
 ```
+
+### API keys
+
+Create keys on your profile page (**API keys** tab) or with `POST /auth/api-key` while signed in:
+
+```json
+{ "name": "SOC pipeline", "scopes": ["read", "scan"], "expires_in_days": 90 }
+```
+
+The response holds the key (`vdx_` plus 64 hex characters) once; only its SHA-256 is stored. `scopes` defaults to `["read", "scan"]`, and `expires_in_days` (1–365) is optional. An account can hold 10 active keys; a request for an eleventh returns `409`.
+
+| Scope | Allows |
+|---|---|
+| `read` | GET requests |
+| `scan` | Submitting files and URLs, starting analyses |
+| `write` | Other changes: webhooks, bounties, votes |
+
+A key acts as its owner, never as an admin. Whatever its scopes, it can't sign in, create, list or revoke keys, change or delete the account, or move funds: those need a signed-in session. An unknown, revoked or expired key gets `401`; a request outside its scopes gets `403` with the reason.
+
+List keys with `GET /users/me/api-keys` (name, prefix, scopes, created, last used, expiry) and revoke one with `DELETE /users/me/api-keys/{id}`.
 
 ### Auth Endpoints
 

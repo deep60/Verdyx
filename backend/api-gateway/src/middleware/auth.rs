@@ -1,15 +1,17 @@
 use axum::{
     body::Body,
-    extract::{FromRequestParts, State},
+    extract::{FromRequestParts, OriginalUri, State},
     http::{header, HeaderMap, HeaderValue, Request, StatusCode},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
+    Json,
 };
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::api_key;
 use crate::models::error::ApiError;
 use crate::AppState;
 
@@ -219,25 +221,66 @@ pub fn clear_session_cookies() -> HeaderMap {
     headers
 }
 
-/// Authentication middleware
+/// The full path of a request, even inside a nested router.
+fn full_path(request: &Request<Body>) -> String {
+    request
+        .extensions()
+        .get::<OriginalUri>()
+        .map(|u| u.path().to_string())
+        .unwrap_or_else(|| request.uri().path().to_string())
+}
+
+fn denied(status: StatusCode, message: &str) -> Response {
+    (status, Json(serde_json::json!({ "error": message }))).into_response()
+}
+
+/// Authenticate a request that carries an API key and check its scopes.
+/// `Err` is the response to send instead.
+async fn authenticate_api_key(
+    state: &AppState,
+    request: &mut Request<Body>,
+    key: &str,
+) -> Result<(), Box<Response>> {
+    let found = api_key::authenticate(state, key).await.map_err(|e| {
+        tracing::error!("API key lookup failed: {}", e);
+        Box::new(denied(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not check the API key",
+        ))
+    })?;
+    let Some((claims, auth)) = found else {
+        return Err(Box::new(denied(
+            StatusCode::UNAUTHORIZED,
+            "invalid, revoked or expired API key",
+        )));
+    };
+    let path = full_path(request);
+    if let Err(why) = api_key::allows(request.method(), &path, &auth.scopes) {
+        return Err(Box::new(denied(StatusCode::FORBIDDEN, why)));
+    }
+    request.extensions_mut().insert(claims);
+    request.extensions_mut().insert(auth);
+    Ok(())
+}
+
+/// Authentication middleware: a session (Bearer or cookie) or an API key.
 pub async fn auth_middleware(
     State(state): State<AppState>,
     mut request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    if let Some(key) = api_key::from_headers(request.headers()) {
+        return Ok(
+            match authenticate_api_key(&state, &mut request, &key).await {
+                Ok(()) => next.run(request).await,
+                Err(response) => *response,
+            },
+        );
+    }
     match request_token(request.headers()) {
-        Some(token) => {
-            let token = token.as_str();
-
-            // Recreate JwtService here (in production, this should ideally be in AppState but for now we create it on fly or cached)
-            // However, JwtService construction is cheap (key derivation), or we can move it to AppState.
-            // Since AppState doesn't have it, we'll verify using the secret from config.
-
-            // NOTE: Ideally JwtService should be in AppState to avoid re-hashing key.
-            // But for this refactor, we instantiate it.
+        Some(bearer) => {
             let jwt_service = JwtService::new(&state.config.security.jwt_secret);
-
-            match jwt_service.validate_token(token) {
+            match jwt_service.validate_token(&bearer) {
                 Ok(claims) => {
                     request.extensions_mut().insert(claims);
                     Ok(next.run(request).await)
@@ -249,16 +292,24 @@ pub async fn auth_middleware(
     }
 }
 
-/// Optional authentication middleware (doesn't fail on missing token)
+/// Optional authentication: anonymous requests pass through. A request that
+/// presents an API key must present a valid one, so a typo isn't silently
+/// treated as anonymous.
 pub async fn optional_auth_middleware(
     State(state): State<AppState>,
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
-    if let Some(token) = request_token(request.headers()) {
+    if let Some(key) = api_key::from_headers(request.headers()) {
+        return match authenticate_api_key(&state, &mut request, &key).await {
+            Ok(()) => next.run(request).await,
+            Err(response) => *response,
+        };
+    }
+    if let Some(bearer) = request_token(request.headers()) {
         let jwt_service = JwtService::new(&state.config.security.jwt_secret);
 
-        if let Ok(claims) = jwt_service.validate_token(&token) {
+        if let Ok(claims) = jwt_service.validate_token(&bearer) {
             request.extensions_mut().insert(claims);
         }
     }
@@ -276,69 +327,6 @@ pub async fn require_admin(request: Request<Body>, next: Next) -> Result<Respons
     if claims.role != "admin" && claims.role != "moderator" && !claims.is_admin {
         return Err(StatusCode::FORBIDDEN);
     }
-
-    Ok(next.run(request).await)
-}
-
-/// API key authentication middleware
-pub async fn api_key_middleware(
-    State(state): State<AppState>,
-    mut request: Request<Body>,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    // Check for API key in header
-    let api_key = request
-        .headers()
-        .get("X-API-Key")
-        .and_then(|h| h.to_str().ok())
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    if !api_key.starts_with("nxs_") {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    // Hash the API key and look it up in the database
-    use sha2::{Digest, Sha256};
-    let key_hash = hex::encode(Sha256::digest(api_key.as_bytes()));
-
-    let row: Option<(Uuid, String, String)> = sqlx::query_as(
-        r#"SELECT u.id, u.email, u.role
-           FROM api_keys ak
-           JOIN users u ON u.id = ak.user_id
-           WHERE ak.key_hash = $1
-             AND ak.is_active = TRUE
-             AND (ak.expires_at IS NULL OR ak.expires_at > NOW())"#,
-    )
-    .bind(&key_hash)
-    .fetch_optional(state.db.pool())
-    .await
-    .map_err(|e| {
-        tracing::error!("API key lookup failed: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    let (user_id, email, role) = row.ok_or(StatusCode::UNAUTHORIZED)?;
-
-    // Update last_used_at
-    let _ = sqlx::query("UPDATE api_keys SET last_used_at = NOW() WHERE key_hash = $1")
-        .bind(&key_hash)
-        .execute(state.db.pool())
-        .await;
-
-    let claims = Claims {
-        sub: user_id,
-        is_admin: role == "admin",
-        email,
-        role,
-        exp: (Utc::now() + Duration::hours(24)).timestamp(),
-        iat: Utc::now().timestamp(),
-        nbf: Utc::now().timestamp(),
-        jti: Uuid::new_v4().to_string(),
-        username: String::new(),
-        token_type: "access".to_string(),
-    };
-
-    request.extensions_mut().insert(claims);
 
     Ok(next.run(request).await)
 }

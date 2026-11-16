@@ -781,8 +781,10 @@ impl UserService {
 
         let token_key = format!("password_reset:{token}");
         let mut conn = self.redis_conn.clone();
+        // GETDEL claims the token in one step, so two requests racing with
+        // the same link can't both use it.
         let user_id: Option<String> = conn
-            .get(&token_key)
+            .get_del(&token_key)
             .await
             .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
@@ -794,10 +796,6 @@ impl UserService {
             .bind(password_hash)
             .bind(user_id)
             .execute(&self.db_pool)
-            .await
-            .map_err(|e| UserError::DatabaseError(e.to_string()))?;
-
-        conn.del::<_, ()>(&token_key)
             .await
             .map_err(|e| UserError::DatabaseError(e.to_string()))?;
 
