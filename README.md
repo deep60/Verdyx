@@ -59,12 +59,19 @@ Solidity contracts (Hardhat), with Slither and Mythril static analysis configs i
 
 ### Detection status
 
-| Engine | Status |
+| Engine | Status in production |
 |---|---|
-| YARA, signatures, static, heuristic, hash lookups | Real, with a small starter rule set |
-| ClamAV | Real, but disabled on the 1 GB production box because it needs about 1.5 GB of RAM |
-| ML | Hand-set weights, not trained on data. Expect false positives on compressed files and executables |
-| IP and domain reputation | Simulated placeholder, needs a real threat feed |
+| Static analysis | PE, ELF and Mach-O parsing, section entropy, strings and IoC extraction |
+| YARA | The [YARA Forge](https://github.com/YARAHQ/yara-forge) core pack (high accuracy, low false positives), pinned, checksum-verified and bumped weekly, plus Verdyx's own rules |
+| Signatures and heuristics | Verdyx's own byte signatures and scored behaviour patterns |
+| Known-malware lookups | MalwareBazaar by file hash; URLhaus and ThreatFox for URLs, hosts and C2 indicators (abuse.ch) |
+| Archives and email | Zip and other archives (including `infected`-password zips) are unpacked two levels deep and each file is scanned; `.eml` files get header, SPF/DKIM/DMARC and attachment checks |
+| ML | ONNX models load, but their weights are hand-set, not trained, so they are advisory: shown in the report, never counted in the verdict |
+| Windows program model (EMBER2024) | Trained; off until the ML worker host is up (`deploy/worker`) |
+| ClamAV | Supported, but off: clamd needs about 1.2 GB of RAM, more than the production host has |
+| Dynamic sandbox | Code exists; not running anywhere |
+
+Detection benchmark (static engines only, known-malware lookups off so they can't simply look the samples up): 46.2% of malware flagged, 0.9% false positives on clean files.
 
 ### Frontend (`frontend/`)
 
@@ -131,7 +138,7 @@ cd blockchain && npx hardhat test
 The gateway exposes a REST API under `/api/v1` (auth, bounties, submissions, wallet, webhooks). See [`docs/API.md`](docs/API.md) for the full route reference and [`docs/api/openapi.yaml`](docs/api/openapi.yaml) for the OpenAPI spec.
 
 ```bash
-curl -X POST https://api.verdyx.com/api/v1/bounties \
+curl -X POST https://api.verdyx.dev/api/v1/bounties \
   -H "Authorization: Bearer <TOKEN>" \
   -F "file=@/path/to/sample.exe" \
   -F "bounty=0.05"

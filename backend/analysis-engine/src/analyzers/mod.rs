@@ -303,9 +303,11 @@ pub mod ml_stub {
             };
 
             let mut metadata = HashMap::new();
+            // Not a trained model: fixed entropy and keyword rules, used only
+            // in builds without the `ml-engine` feature.
             metadata.insert(
                 "model".to_string(),
-                serde_json::json!("verdyx-byte-ngram-gbdt-v2.1"),
+                serde_json::json!("byte-profile-rules (not machine learning)"),
             );
             metadata.insert(
                 "shannon_entropy".to_string(),
@@ -335,8 +337,8 @@ pub mod ml_stub {
 
             Ok(DetectionResult {
                 detection_id: Uuid::new_v4(),
-                engine_name: "Verdyx ML Classifier".to_string(),
-                engine_version: "2.1.0-gbdt".to_string(),
+                engine_name: "Byte Profile Rules".to_string(),
+                engine_version: "fallback".to_string(),
                 engine_type: EngineType::Ml,
                 verdict,
                 confidence,

@@ -5,8 +5,7 @@ This guide documents the currently implemented API gateway surface at `backend/a
 ## Base URLs
 
 - Local: `http://localhost:8080/api/v1`
-- Staging (example): `https://api-staging.verdyx.com/api/v1`
-- Production (example): `https://api.verdyx.com/api/v1`
+- Production: `https://api.verdyx.dev/api/v1`
 
 ## Authentication
 
