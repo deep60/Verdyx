@@ -60,6 +60,8 @@ pub struct FileSubmissionResponse {
     pub submission_type: String,
     pub analysis_status: String,
     pub description: Option<String>,
+    /// The team the scan was saved to, if any.
+    pub organization_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -101,6 +103,8 @@ pub struct FileSubmissionListItem {
     /// Bounty opened for this upload, when one exists. Commit-reveal and
     /// disputes are keyed by this id, not by the submission id.
     pub bounty_id: Option<Uuid>,
+    /// The team the scan is saved to; its members can read it.
+    pub organization_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     /// Why the scan failed, when it did. Only filled in on the single-scan
     /// endpoint, so a failed report can say what went wrong.
@@ -143,6 +147,8 @@ pub struct SubmissionFilters {
     pub limit: Option<u32>,
     /// `bounties` lists every scan carrying a bounty; otherwise only the caller's own.
     pub scope: Option<String>,
+    /// List this team's scans instead (members only).
+    pub organization: Option<Uuid>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -857,6 +863,39 @@ async fn process_single_submission(
     }
 }
 
+/// Which team an upload is saved to. A team key always saves to its team; a
+/// person may name a team they can scan into (owner, admin or member).
+async fn resolve_team(
+    state: &AppState,
+    claims: Option<&crate::middleware::auth::Claims>,
+    team_key: Option<Uuid>,
+    requested: Option<String>,
+) -> Result<Option<Uuid>, StatusCode> {
+    let requested = match requested.as_deref().map(str::trim) {
+        None | Some("") | Some("personal") => None,
+        Some(raw) => Some(Uuid::parse_str(raw).map_err(|_| StatusCode::BAD_REQUEST)?),
+    };
+    match (team_key, requested) {
+        (Some(team), None) => Ok(Some(team)),
+        (Some(team), Some(r)) if r == team => Ok(Some(team)),
+        (Some(_), Some(_)) => Err(StatusCode::FORBIDDEN),
+        (None, None) => Ok(None),
+        (None, Some(r)) => {
+            let claims = claims.ok_or(StatusCode::UNAUTHORIZED)?;
+            let role = crate::handlers::organization::member_role(state.db.pool(), r, claims.sub)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to check team membership: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            match role {
+                Some(role) if crate::handlers::organization::can_scan(&role) => Ok(Some(r)),
+                _ => Err(StatusCode::FORBIDDEN),
+            }
+        }
+    }
+}
+
 /// User-facing file submission handler.
 ///
 /// POST /api/v1/submissions/file
@@ -870,7 +909,9 @@ pub async fn create_file_submission(
     claims: Option<crate::middleware::auth::Claims>,
     mut multipart: Multipart,
 ) -> Result<Json<FileSubmissionResponse>, StatusCode> {
-    let submitter_id = claims.map(|c| c.sub).unwrap_or_else(Uuid::nil);
+    let submitter_id = claims.as_ref().map(|c| c.sub).unwrap_or_else(Uuid::nil);
+    let team_key = claims.as_ref().and_then(|c| c.org_id);
+    let mut requested_team: Option<String> = None;
     let mut filename: Option<String> = None;
     let mut file_bytes: Option<Vec<u8>> = None;
     let mut target_url: Option<String> = None;
@@ -905,10 +946,13 @@ pub async fn create_file_submission(
                 "url" => target_url = Some(text),
                 "submissionType" | "submission_type" => submission_type_override = Some(text),
                 "filename" if filename.is_none() => filename = Some(text),
+                "organizationId" | "organization_id" => requested_team = Some(text),
                 _ => {}
             }
         }
     }
+
+    let organization_id = resolve_team(&state, claims.as_ref(), team_key, requested_team).await?;
 
     let submission_id = Uuid::new_v4();
     let now = Utc::now();
@@ -983,9 +1027,9 @@ pub async fn create_file_submission(
         INSERT INTO submissions (
             id, submitter_id, original_filename, file_hash, url, file_size,
             mime_type, file_path, submission_type, analysis_status,
-            metadata, created_at, updated_at
+            metadata, created_at, updated_at, organization_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11, $12)
         RETURNING id
         "#,
     )
@@ -1000,6 +1044,7 @@ pub async fn create_file_submission(
     .bind(&submission_type)
     .bind(&metadata)
     .bind(now)
+    .bind(organization_id)
     .fetch_one(state.db.pool())
     .await
     .map(|row: (Uuid,)| {
@@ -1020,6 +1065,7 @@ pub async fn create_file_submission(
             submission_type,
             analysis_status: "pending".to_string(),
             description,
+            organization_id,
             created_at: now,
         })
     })
@@ -1057,7 +1103,29 @@ pub async fn list_submissions(
     let limit = filters.limit.unwrap_or(50).clamp(1, 200) as i64;
     let offset = (filters.page.unwrap_or(1).max(1) as i64 - 1) * limit;
 
-    let rows = if filters.scope.as_deref() == Some("bounties") {
+    // A team key lists its team's scans; a person may ask for a team they're in.
+    let team = match (claims.org_id, filters.organization) {
+        (Some(key_team), Some(asked)) if asked != key_team => return Err(StatusCode::FORBIDDEN),
+        (Some(key_team), _) => Some(key_team),
+        (None, Some(asked)) => {
+            crate::handlers::organization::member_role(state.db.pool(), asked, claims.sub)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to check team membership: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?
+                .ok_or(StatusCode::NOT_FOUND)?;
+            Some(asked)
+        }
+        (None, None) => None,
+    };
+
+    let rows = if let Some(team) = team {
+        state
+            .db
+            .list_file_submissions_for_team(team, limit, offset)
+            .await
+    } else if filters.scope.as_deref() == Some("bounties") {
         // Scans carrying a bounty are posted for analysts to work on.
         state.db.list_bounty_file_submissions(limit, offset).await
     } else {
@@ -1085,25 +1153,72 @@ pub async fn get_submission(
         .map(Json)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Access {
+    Allowed,
+    Denied,
+    /// Allowed if the caller is in this team.
+    IfMemberOf(Uuid),
+}
+
 /// Who may read a scan and its results.
 ///
 /// - A signed-out upload has no owner, so its unguessable link is the only key.
 /// - A scan with a bounty is posted for analysts, so any signed-in user may.
-/// - Otherwise only the person who submitted it, or an admin.
+/// - A team key may read its team's scans, and nothing else private.
+/// - Otherwise the person who submitted it, an admin, or anyone in the team
+///   it was saved to.
 pub(crate) fn can_view(
     submission: &FileSubmissionListItem,
     claims: Option<&crate::middleware::auth::Claims>,
-) -> bool {
+) -> Access {
     if submission.submitter_id.is_nil() {
-        return true;
+        return Access::Allowed;
     }
     let Some(claims) = claims else {
-        return false;
+        return Access::Denied;
     };
-    submission.bounty_id.is_some()
-        || claims.sub == submission.submitter_id
-        || claims.is_admin
-        || claims.role == "admin"
+    if submission.bounty_id.is_some() {
+        return Access::Allowed;
+    }
+    if let Some(key_team) = claims.org_id {
+        return if submission.organization_id == Some(key_team) {
+            Access::Allowed
+        } else {
+            Access::Denied
+        };
+    }
+    if claims.sub == submission.submitter_id || claims.is_admin || claims.role == "admin" {
+        return Access::Allowed;
+    }
+    match submission.organization_id {
+        Some(team) => Access::IfMemberOf(team),
+        None => Access::Denied,
+    }
+}
+
+/// [`can_view`], checking team membership when it depends on it.
+pub(crate) async fn may_view(
+    state: &AppState,
+    submission: &FileSubmissionListItem,
+    claims: Option<&crate::middleware::auth::Claims>,
+) -> Result<bool, StatusCode> {
+    match can_view(submission, claims) {
+        Access::Allowed => Ok(true),
+        Access::Denied => Ok(false),
+        Access::IfMemberOf(team) => {
+            let Some(claims) = claims else {
+                return Ok(false);
+            };
+            crate::handlers::organization::member_role(state.db.pool(), team, claims.sub)
+                .await
+                .map(|role| role.is_some())
+                .map_err(|e| {
+                    tracing::error!("Failed to check team membership: {}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })
+        }
+    }
 }
 
 /// Loads a scan the caller may read. A scan they may not read answers 404,
@@ -1122,7 +1237,7 @@ pub(crate) async fn load_visible_submission(
             StatusCode::INTERNAL_SERVER_ERROR
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
-    if can_view(&submission, claims) {
+    if may_view(state, &submission, claims).await? {
         Ok(submission)
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -1375,6 +1490,7 @@ pub async fn get_my_submissions(
         page: Some(1),
         limit: Some(20),
         scope: None,
+        organization: None,
     };
 
     let (submissions, total) = state
@@ -1437,7 +1553,7 @@ pub async fn start_analysis(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Some(sub) = &found {
-        if !can_view(sub, claims.as_ref()) {
+        if !may_view(&state, sub, claims.as_ref()).await? {
             return Err(StatusCode::NOT_FOUND);
         }
     }
@@ -1689,6 +1805,7 @@ mod tests {
             bounty_amount: None,
             priority: None,
             bounty_id: bounty,
+            organization_id: None,
             created_at: Utc::now(),
         }
     }
@@ -1704,18 +1821,53 @@ mod tests {
     fn only_the_owner_or_an_admin_can_read_a_private_scan() {
         let (owner, other) = (Uuid::new_v4(), Uuid::new_v4());
         let s = sub(owner, None);
-        assert!(!can_view(&s, None), "signed out");
-        assert!(!can_view(&s, Some(&claims(other, "user"))), "someone else");
-        assert!(can_view(&s, Some(&claims(owner, "user"))));
-        assert!(can_view(&s, Some(&claims(other, "admin"))));
+        assert_eq!(can_view(&s, None), Access::Denied, "signed out");
+        assert_eq!(
+            can_view(&s, Some(&claims(other, "user"))),
+            Access::Denied,
+            "someone else"
+        );
+        assert_eq!(can_view(&s, Some(&claims(owner, "user"))), Access::Allowed);
+        assert_eq!(can_view(&s, Some(&claims(other, "admin"))), Access::Allowed);
     }
 
     #[test]
     fn ownerless_and_bounty_scans_are_shared_as_documented() {
-        assert!(can_view(&sub(Uuid::nil(), None), None));
+        assert_eq!(can_view(&sub(Uuid::nil(), None), None), Access::Allowed);
         let bounty = sub(Uuid::new_v4(), Some(Uuid::new_v4()));
-        assert!(!can_view(&bounty, None));
-        assert!(can_view(&bounty, Some(&claims(Uuid::new_v4(), "user"))));
+        assert_eq!(can_view(&bounty, None), Access::Denied);
+        assert_eq!(
+            can_view(&bounty, Some(&claims(Uuid::new_v4(), "user"))),
+            Access::Allowed
+        );
+    }
+
+    #[test]
+    fn team_scans_are_shared_with_the_team_and_its_keys() {
+        let (owner, other, team) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let mut s = sub(owner, None);
+        s.organization_id = Some(team);
+        assert_eq!(can_view(&s, Some(&claims(owner, "user"))), Access::Allowed);
+        assert_eq!(
+            can_view(&s, Some(&claims(other, "user"))),
+            Access::IfMemberOf(team)
+        );
+        assert_eq!(can_view(&s, None), Access::Denied);
+
+        let mut key = claims(other, "user");
+        key.org_id = Some(team);
+        assert_eq!(can_view(&s, Some(&key)), Access::Allowed);
+        key.org_id = Some(Uuid::new_v4());
+        assert_eq!(
+            can_view(&s, Some(&key)),
+            Access::Denied,
+            "another team's key"
+        );
+
+        // A team key can't read its maker's personal scans.
+        let mut team_key = claims(owner, "user");
+        team_key.org_id = Some(team);
+        assert_eq!(can_view(&sub(owner, None), Some(&team_key)), Access::Denied);
     }
 
     #[test]

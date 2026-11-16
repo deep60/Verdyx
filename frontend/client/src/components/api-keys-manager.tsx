@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ export interface ApiKeyItem {
   lastUsedAt?: string | null;
   createdAt: string;
   expiresAt?: string | null;
+  /** Team keys: who made it. */
+  createdBy?: string | null;
 }
 
 interface CreatedKey {
@@ -52,7 +54,26 @@ export function keyStatus(k: ApiKeyItem): "active" | "expired" | "revoked" {
   return k.isActive ? "active" : "revoked";
 }
 
-export function ApiKeysManager() {
+export interface KeyEndpoints {
+  list: string;
+  create: string;
+  revoke: (id: string) => string;
+}
+
+export const PERSONAL_KEYS: KeyEndpoints = {
+  list: "/api/users/me/api-keys",
+  create: "/api/auth/api-key",
+  revoke: (id) => `/api/users/me/api-keys/${id}`,
+};
+
+interface ApiKeysManagerProps {
+  endpoints?: KeyEndpoints;
+  /** Replaces the explanation under "Create an API key". */
+  intro?: ReactNode;
+  listTitle?: string;
+}
+
+export function ApiKeysManager({ endpoints = PERSONAL_KEYS, intro, listTitle = "Your keys" }: ApiKeysManagerProps = {}) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -61,12 +82,12 @@ export function ApiKeysManager() {
   const [created, setCreated] = useState<CreatedKey | null>(null);
 
   const { data: keys = [], isLoading } = useQuery<ApiKeyItem[]>({
-    queryKey: ["/api/users/me/api-keys"],
+    queryKey: [endpoints.list],
   });
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/auth/api-key", {
+      const res = await apiRequest("POST", endpoints.create, {
         name: name.trim() || "API key",
         scopes,
         expires_in_days: expiryDays > 0 ? expiryDays : null,
@@ -76,14 +97,14 @@ export function ApiKeysManager() {
     onSuccess: (data) => {
       setCreated(data);
       setName("");
-      queryClient.invalidateQueries({ queryKey: ["/api/users/me/api-keys"] });
+      queryClient.invalidateQueries({ queryKey: [endpoints.list] });
     },
     onError: (err) => {
       const msg = err instanceof Error ? err.message : "";
       toast({
         title: "Could not create the key",
         description: msg.startsWith("409")
-          ? "You already have 10 active keys. Revoke one first."
+          ? "There are already 10 active keys. Revoke one first."
           : "Please try again.",
         variant: "destructive",
       });
@@ -92,11 +113,11 @@ export function ApiKeysManager() {
 
   const revokeMutation = useMutation({
     mutationFn: async (id: string) => {
-      await apiRequest("DELETE", `/api/users/me/api-keys/${id}`);
+      await apiRequest("DELETE", endpoints.revoke(id));
     },
     onSuccess: () => {
       toast({ title: "Key revoked", description: "Requests using it are now refused." });
-      queryClient.invalidateQueries({ queryKey: ["/api/users/me/api-keys"] });
+      queryClient.invalidateQueries({ queryKey: [endpoints.list] });
     },
     onError: () => toast({ title: "Could not revoke the key", variant: "destructive" }),
   });
@@ -122,9 +143,13 @@ export function ApiKeysManager() {
             Create an API key
           </CardTitle>
           <CardDescription>
-            Send it as <code className="font-mono">X-API-Key: vdx_…</code> or{" "}
-            <code className="font-mono">Authorization: Bearer vdx_…</code>. Keys act as you, but can never sign in,
-            manage keys, change your account or move funds.
+            {intro ?? (
+              <>
+                Send it as <code className="font-mono">X-API-Key: vdx_…</code> or{" "}
+                <code className="font-mono">Authorization: Bearer vdx_…</code>. Keys act as you, but can never sign
+                in, manage keys or teams, change your account or move funds.
+              </>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -207,7 +232,7 @@ export function ApiKeysManager() {
 
       <Card className="glassmorphism">
         <CardHeader>
-          <CardTitle>Your keys</CardTitle>
+          <CardTitle>{listTitle}</CardTitle>
           <CardDescription>Up to 10 active keys. Revoking takes effect immediately.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -237,7 +262,8 @@ export function ApiKeysManager() {
                         ))}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Created {formatWhen(k.createdAt)} · last used {formatWhen(k.lastUsedAt)} ·{" "}
+                        Created {formatWhen(k.createdAt)}
+                        {k.createdBy ? ` by ${k.createdBy}` : ""} · last used {formatWhen(k.lastUsedAt)} ·{" "}
                         {k.expiresAt ? `expires ${formatWhen(k.expiresAt)}` : "no expiry"}
                       </div>
                     </div>

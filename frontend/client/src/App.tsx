@@ -24,6 +24,7 @@ const ApiDocs = lazy(() => import("@/pages/api-docs"));
 const Login = lazy(() => import("@/pages/login"));
 const Register = lazy(() => import("@/pages/register"));
 const Profile = lazy(() => import("@/pages/profile"));
+const Teams = lazy(() => import("@/pages/teams"));
 const AnalysisDetails = lazy(() => import("@/pages/analysis-details"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const Pricing = lazy(() => import("@/pages/pricing"));
@@ -71,6 +72,11 @@ function Router() {
         </Route>
         <Route path="/analysis/:id" component={AnalysisDetails} />
         <Route path="/api" component={ApiDocs} />
+        <Route path="/teams">
+          <ProtectedRoute>
+            <Teams />
+          </ProtectedRoute>
+        </Route>
         <Route path="/profile">
           <ProtectedRoute>
             <Profile />

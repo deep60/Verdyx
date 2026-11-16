@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Menu, User, LogOut, Wallet, Search } from "lucide-react";
+import { Menu, User, Users, LogOut, Wallet, Search } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
 const navItems = [
@@ -139,6 +139,12 @@ export function Navigation() {
                       <span>Analyst Profile</span>
                     </Link>
                   </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/teams" className="flex w-full cursor-pointer items-center">
+                      <Users className="mr-2 h-4 w-4" />
+                      <span>Teams</span>
+                    </Link>
+                  </DropdownMenuItem>
                   {!user.walletAddress && (
                     <DropdownMenuItem onClick={connectWallet}>
                       <Wallet className="mr-2 h-4 w-4" />
@@ -218,6 +224,12 @@ export function Navigation() {
                           <Button variant="outline" className="w-full justify-start border-[#32342C] text-[#F3F1EA]">
                             <User className="mr-2 h-4 w-4" />
                             Analyst Profile
+                          </Button>
+                        </Link>
+                        <Link href="/teams" onClick={() => setMobileOpen(false)}>
+                          <Button variant="outline" className="w-full justify-start border-[#32342C] text-[#F3F1EA]">
+                            <Users className="mr-2 h-4 w-4" />
+                            Teams
                           </Button>
                         </Link>
                         {!user.walletAddress && (

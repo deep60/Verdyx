@@ -518,7 +518,7 @@ impl DatabaseService {
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at,
+                is_malicious, created_at, organization_id,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
@@ -563,6 +563,7 @@ impl DatabaseService {
                 bounty_amount: r.get("bounty_amount"),
                 priority: r.get("priority"),
                 bounty_id: r.get("bounty_id"),
+                organization_id: r.get("organization_id"),
                 created_at: r.get("created_at"),
             }
         }))
@@ -580,7 +581,7 @@ impl DatabaseService {
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at,
+                is_malicious, created_at, organization_id,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
@@ -627,6 +628,7 @@ impl DatabaseService {
                     bounty_amount: r.get("bounty_amount"),
                     priority: r.get("priority"),
                     bounty_id: r.get("bounty_id"),
+                    organization_id: r.get("organization_id"),
                     created_at: r.get("created_at"),
                 }
             })
@@ -646,7 +648,7 @@ impl DatabaseService {
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at,
+                is_malicious, created_at, organization_id,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
@@ -688,6 +690,7 @@ impl DatabaseService {
                 bounty_amount: r.get("bounty_amount"),
                 priority: r.get("priority"),
                 bounty_id: r.get("bounty_id"),
+                organization_id: r.get("organization_id"),
                 created_at: r.get("created_at"),
             }
         }))
@@ -696,21 +699,24 @@ impl DatabaseService {
     /// File paths for a user's uploads, used to delete objects when the account
     /// or those submissions are explicitly removed.
     pub async fn file_paths_for_user(&self, submitter_id: Uuid) -> Result<Vec<String>> {
-        let rows: Vec<(Option<String>,)> =
-            sqlx::query_as("SELECT file_path FROM submissions WHERE submitter_id = $1")
-                .bind(submitter_id)
-                .fetch_all(&self.pool)
-                .await
-                .context("Failed to list artifact paths")?;
+        let rows: Vec<(Option<String>,)> = sqlx::query_as(
+            "SELECT file_path FROM submissions WHERE submitter_id = $1 AND organization_id IS NULL",
+        )
+        .bind(submitter_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to list artifact paths")?;
         Ok(rows.into_iter().filter_map(|(p,)| p).collect())
     }
 
     pub async fn delete_file_submissions_for_user(&self, submitter_id: Uuid) -> Result<u64> {
-        let result = sqlx::query("DELETE FROM submissions WHERE submitter_id = $1")
-            .bind(submitter_id)
-            .execute(&self.pool)
-            .await
-            .context("Failed to delete user submissions")?;
+        let result = sqlx::query(
+            "DELETE FROM submissions WHERE submitter_id = $1 AND organization_id IS NULL",
+        )
+        .bind(submitter_id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to delete user submissions")?;
         Ok(result.rows_affected())
     }
 
@@ -729,30 +735,55 @@ impl DatabaseService {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<crate::handlers::submission::FileSubmissionListItem>> {
-        let rows = sqlx::query(
+        self.list_file_submissions_where("submitter_id", submitter_id, limit, offset)
+            .await
+    }
+
+    /// Scans saved to a team, newest first.
+    pub async fn list_file_submissions_for_team(
+        &self,
+        organization_id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::handlers::submission::FileSubmissionListItem>> {
+        self.list_file_submissions_where("organization_id", organization_id, limit, offset)
+            .await
+    }
+
+    /// `column` is one of two fixed names, never user input.
+    async fn list_file_submissions_where(
+        &self,
+        column: &'static str,
+        id: Uuid,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<crate::handlers::submission::FileSubmissionListItem>> {
+        debug_assert!(matches!(column, "submitter_id" | "organization_id"));
+        let sql = format!(
             r#"
             SELECT
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at,
+                is_malicious, created_at, organization_id,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'bountyAmount' AS bounty_amount,
                 (metadata ->> 'priority')::boolean AS priority,
                 (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id
             FROM submissions
-            WHERE submitter_id = $1
+            WHERE {column} = $1
             ORDER BY created_at DESC
             LIMIT $2 OFFSET $3
-            "#,
-        )
-        .bind(submitter_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to list file submissions for user")?;
+            "#
+        );
+        let rows = sqlx::query(&sql)
+            .bind(id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to list file submissions")?;
 
         Ok(rows
             .into_iter()
@@ -781,6 +812,7 @@ impl DatabaseService {
                     bounty_amount: r.get("bounty_amount"),
                     priority: r.get("priority"),
                     bounty_id: r.get("bounty_id"),
+                    organization_id: r.get("organization_id"),
                     created_at: r.get("created_at"),
                 }
             })

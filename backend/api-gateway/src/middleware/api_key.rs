@@ -14,7 +14,13 @@
 //! - `write`: other changes (webhooks, bounties, votes).
 //!
 //! Whatever the scopes, a key can't sign in, create or revoke keys, change or
-//! delete the account, or move money: those need the owner's own session.
+//! delete the account, manage teams, or move money: those need the owner's
+//! own session.
+//!
+//! A **team key** (one with an `organization_id`) acts for its team: it may
+//! only use scans and engine status, its scans are saved to the team, and it
+//! reads only the team's scans. It works while the admin who made it is still
+//! an owner or admin of that team.
 
 use axum::http::{HeaderMap, Method};
 use chrono::{Duration, Utc};
@@ -40,6 +46,8 @@ pub const MAX_ACTIVE_KEYS: i64 = 10;
 pub struct ApiKeyAuth {
     pub key_id: Uuid,
     pub scopes: Vec<String>,
+    /// The team, for a team key.
+    pub org_id: Option<Uuid>,
 }
 
 /// A new random key.
@@ -105,7 +113,12 @@ pub fn parse_scopes(requested: Option<&serde_json::Value>) -> Result<Vec<String>
 
 /// Whether a key with `scopes` may make this request. `Err` says why not.
 /// `path` is the full request path (`/api/v1/...` or `/api/...`).
-pub fn allows(method: &Method, path: &str, scopes: &[String]) -> Result<(), &'static str> {
+pub fn allows(
+    method: &Method,
+    path: &str,
+    scopes: &[String],
+    team_key: bool,
+) -> Result<(), &'static str> {
     let p = path
         .strip_prefix("/api/v1")
         .or_else(|| path.strip_prefix("/api"))
@@ -115,6 +128,14 @@ pub fn allows(method: &Method, path: &str, scopes: &[String]) -> Result<(), &'st
 
     if p.starts_with("/auth/") || p.starts_with("/users/me/api-keys") {
         return Err("API keys can't sign in or manage keys; use your account");
+    }
+    if p.starts_with("/orgs") || p.starts_with("/invitations") {
+        return Err("API keys can't manage teams; use your account");
+    }
+    if team_key
+        && !(p.starts_with("/submissions") || p.starts_with("/engines") || p.starts_with("/health"))
+    {
+        return Err("team keys can only scan, read the team's scans and check engines");
     }
     if !reading && (p == "/users/me" || p.starts_with("/users/me/")) {
         return Err("API keys can't change or delete the account");
@@ -153,19 +174,31 @@ pub async fn authenticate(
     }
     let key_hash = hash(key);
     #[allow(clippy::type_complexity)]
-    let row: Option<(Uuid, Uuid, String, String, Option<Vec<String>>)> = sqlx::query_as(
-        r#"SELECT ak.id, u.id, u.email, u.username, ak.permissions
+    let row: Option<(
+        Uuid,
+        Uuid,
+        String,
+        String,
+        Option<Vec<String>>,
+        Option<Uuid>,
+    )> = sqlx::query_as(
+        r#"SELECT ak.id, u.id, u.email, u.username, ak.permissions, ak.organization_id
            FROM api_keys ak
            JOIN users u ON u.id = ak.user_id
            WHERE ak.key_hash = $1
              AND ak.is_active = TRUE
              AND u.is_active IS NOT FALSE
-             AND (ak.expires_at IS NULL OR ak.expires_at > NOW())"#,
+             AND (ak.expires_at IS NULL OR ak.expires_at > NOW())
+             AND (ak.organization_id IS NULL OR EXISTS (
+                    SELECT 1 FROM organization_members m
+                    WHERE m.organization_id = ak.organization_id
+                      AND m.user_id = ak.user_id
+                      AND m.role IN ('owner', 'admin')))"#,
     )
     .bind(&key_hash)
     .fetch_optional(state.db.pool())
     .await?;
-    let Some((key_id, user_id, email, username, scopes)) = row else {
+    let Some((key_id, user_id, email, username, scopes, org_id)) = row else {
         return Ok(None);
     };
 
@@ -193,9 +226,17 @@ pub async fn authenticate(
         is_admin: false,
         username,
         token_type: "api_key".to_string(),
+        org_id,
     };
     let scopes = scopes.unwrap_or_else(|| vec!["read".to_string()]);
-    Ok(Some((claims, ApiKeyAuth { key_id, scopes })))
+    Ok(Some((
+        claims,
+        ApiKeyAuth {
+            key_id,
+            scopes,
+            org_id,
+        },
+    )))
 }
 
 #[cfg(test)]
@@ -256,16 +297,22 @@ mod tests {
     #[test]
     fn scopes_gate_requests() {
         let rs = scopes(&["read", "scan"]);
-        assert!(allows(&Method::GET, "/api/v1/submissions/abc", &rs).is_ok());
-        assert!(allows(&Method::POST, "/api/v1/submissions/file", &rs).is_ok());
-        assert!(allows(&Method::POST, "/api/analysis/submit", &rs).is_ok());
-        assert!(allows(&Method::POST, "/api/v1/webhooks", &rs).is_err());
-        assert!(allows(&Method::POST, "/api/v1/webhooks", &scopes(&["write"])).is_ok());
+        assert!(allows(&Method::GET, "/api/v1/submissions/abc", &rs, false).is_ok());
+        assert!(allows(&Method::POST, "/api/v1/submissions/file", &rs, false).is_ok());
+        assert!(allows(&Method::POST, "/api/analysis/submit", &rs, false).is_ok());
+        assert!(allows(&Method::POST, "/api/v1/webhooks", &rs, false).is_err());
+        assert!(allows(
+            &Method::POST,
+            "/api/v1/webhooks",
+            &scopes(&["write"]),
+            false
+        )
+        .is_ok());
 
         let read_only = scopes(&["read"]);
-        assert!(allows(&Method::GET, "/api/v1/engines/status", &read_only).is_ok());
-        assert!(allows(&Method::POST, "/api/v1/submissions/file", &read_only).is_err());
-        assert!(allows(&Method::GET, "/api/v1/engines", &scopes(&["scan"])).is_err());
+        assert!(allows(&Method::GET, "/api/v1/engines/status", &read_only, false).is_ok());
+        assert!(allows(&Method::POST, "/api/v1/submissions/file", &read_only, false).is_err());
+        assert!(allows(&Method::GET, "/api/v1/engines", &scopes(&["scan"]), false).is_err());
     }
 
     #[test]
@@ -280,8 +327,27 @@ mod tests {
             (Method::POST, "/api/v1/wallet/withdraw"),
             (Method::POST, "/api/auth/logout"),
         ] {
-            assert!(allows(&m, p, &all).is_err(), "{m} {p}");
+            assert!(allows(&m, p, &all, false).is_err(), "{m} {p}");
         }
-        assert!(allows(&Method::GET, "/api/v1/users/me", &all).is_ok());
+        assert!(allows(&Method::GET, "/api/v1/users/me", &all, false).is_ok());
+        assert!(allows(&Method::GET, "/api/v1/orgs", &all, false).is_err());
+        assert!(allows(&Method::POST, "/api/v1/invitations/accept", &all, false).is_err());
+    }
+
+    #[test]
+    fn team_keys_only_scan() {
+        let all = scopes(&["read", "scan", "write"]);
+        assert!(allows(&Method::POST, "/api/v1/submissions/file", &all, true).is_ok());
+        assert!(allows(&Method::GET, "/api/v1/submissions/abc", &all, true).is_ok());
+        assert!(allows(&Method::GET, "/api/v1/engines/status", &all, true).is_ok());
+        for (m, p) in [
+            (Method::GET, "/api/v1/users/me"),
+            (Method::POST, "/api/v1/webhooks"),
+            (Method::POST, "/api/v1/analysis/submit"),
+            (Method::GET, "/api/v1/wallet/balance"),
+            (Method::GET, "/api/v1/orgs/x"),
+        ] {
+            assert!(allows(&m, p, &all, true).is_err(), "{m} {p}");
+        }
     }
 }

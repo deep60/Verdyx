@@ -439,6 +439,11 @@ pub async fn delete_account(
             }
         }
         let _ = state.db.delete_file_submissions_for_user(_claims.sub).await;
+        // Their scans saved to teams stay with the teams.
+        if let Err(e) = crate::handlers::organization::leave_all(state.db.pool(), _claims.sub).await
+        {
+            tracing::error!("Failed to remove {} from their teams: {}", _claims.sub, e);
+        }
         return Ok(StatusCode::NO_CONTENT);
     }
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -496,7 +501,7 @@ pub async fn list_api_keys(
         r#"
         SELECT id, name, key_prefix, COALESCE(permissions, ARRAY['read']), rate_limit, is_active, last_used_at, created_at, expires_at
         FROM api_keys
-        WHERE user_id = $1
+        WHERE user_id = $1 AND organization_id IS NULL
         ORDER BY created_at DESC
         "#,
     )
@@ -549,15 +554,17 @@ pub async fn revoke_api_key(
     claims: crate::middleware::auth::Claims,
     Path(key_id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
-    let result = sqlx::query("DELETE FROM api_keys WHERE id = $1 AND user_id = $2")
-        .bind(key_id)
-        .bind(claims.sub)
-        .execute(state.db.pool())
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to revoke API key: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let result = sqlx::query(
+        "DELETE FROM api_keys WHERE id = $1 AND user_id = $2 AND organization_id IS NULL",
+    )
+    .bind(key_id)
+    .bind(claims.sub)
+    .execute(state.db.pool())
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to revoke API key: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
