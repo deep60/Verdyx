@@ -25,7 +25,7 @@ jobs:
     services:
       # Scratch server the dumps are restored into, to prove they work.
       restore:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: restore-check-only
         ports: ["5432:5432"]
@@ -48,7 +48,7 @@ jobs:
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install the Postgres 17 client
+      - name: Install the Postgres 18 client (must be >= the Neon server version)
         if: steps.cfg.outputs.ok == 'true'
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -56,8 +56,8 @@ jobs:
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17
-          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y -qq postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
       - name: Back up, verify, encrypt, upload
         if: steps.cfg.outputs.ok == 'true'
