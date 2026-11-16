@@ -10,6 +10,7 @@ import { CommitRevealPanel } from "@/components/commit-reveal-panel";
 import { WebsiteIntelligencePanel } from "@/components/website-intelligence-panel";
 import { EmailForensicsPanel } from "@/components/email-forensics-panel";
 import { OfficeForensicsPanel, hasOfficeAnalysis } from "@/components/office-forensics-panel";
+import { ApkForensicsPanel, hasApkAnalysis } from "@/components/apk-forensics-panel";
 import { AttackMatrix } from "@/components/attack-matrix";
 import { IocGraph } from "@/components/ioc-graph";
 import { mapAttackTechniques } from "@/lib/attack-mapping";
@@ -197,6 +198,7 @@ export default function AnalysisDetails() {
   );
   const targetType = isUrlTarget ? "url" : isEmailTarget ? "email" : "file";
   const isOfficeTarget = !isUrlTarget && hasOfficeAnalysis(analyses);
+  const isApkTarget = !isUrlTarget && hasApkAnalysis(analyses);
 
   const { data: recentSubmissions = [] } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
@@ -430,6 +432,8 @@ export default function AnalysisDetails() {
                 ? "email-forensics"
                 : isOfficeTarget
                   ? "office-forensics"
+                  : isApkTarget
+                    ? "apk-forensics"
                   : "details"
           }
           className="space-y-6"
@@ -439,6 +443,11 @@ export default function AnalysisDetails() {
             {isEmailTarget && (
               <TabsTrigger value="email-forensics" data-testid="tab-email-forensics">
                 Email forensics
+              </TabsTrigger>
+            )}
+            {isApkTarget && (
+              <TabsTrigger value="apk-forensics" data-testid="tab-apk-forensics">
+                App forensics
               </TabsTrigger>
             )}
             {isOfficeTarget && (
@@ -459,6 +468,11 @@ export default function AnalysisDetails() {
           {isEmailTarget && (
             <TabsContent value="email-forensics">
               <EmailForensicsPanel analyses={analyses} />
+            </TabsContent>
+          )}
+          {isApkTarget && (
+            <TabsContent value="apk-forensics">
+              <ApkForensicsPanel analyses={analyses} />
             </TabsContent>
           )}
           {isOfficeTarget && (
