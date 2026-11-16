@@ -56,12 +56,20 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_thread_ids(true)
-        .with_line_number(true)
-        .json()
-        .init();
+    let _error_reporting =
+        shared::observability::error_reporting::init("payment-service", env!("CARGO_PKG_VERSION"));
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::fmt()
+            .with_target(false)
+            .with_thread_ids(true)
+            .with_line_number(true)
+            .json()
+            .finish()
+            .with(shared::observability::error_reporting::layer())
+            .init();
+    }
 
     info!("Starting Payment Service...");
 

@@ -126,6 +126,10 @@ export function PrivacyContent() {
           <li>Cloudflare serves the website and stores uploaded files (R2).</li>
           <li>Neon hosts the database.</li>
           <li>Brevo sends account emails, such as password resets.</li>
+          <li>
+            Sentry receives error reports when something breaks: the error, the page address without its query string,
+            and your browser and system type. Not your IP address, cookies, form input or files.
+          </li>
           <li>Google and GitHub, only if you choose to sign in with them.</li>
           <li>
             abuse.ch (URLhaus, ThreatFox, MalwareBazaar): we send a file&apos;s hash, or the web address you scanned, to

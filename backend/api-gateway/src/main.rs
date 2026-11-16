@@ -237,11 +237,19 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     // Initialize tracing for logging
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
-        .compact()
-        .init();
+    let _error_reporting =
+        shared::observability::error_reporting::init("api-gateway", env!("CARGO_PKG_VERSION"));
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_target(false)
+            .compact()
+            .finish()
+            .with(shared::observability::error_reporting::layer())
+            .init();
+    }
 
     info!("Starting Verdyx API Gateway v{}", env!("CARGO_PKG_VERSION"));
 

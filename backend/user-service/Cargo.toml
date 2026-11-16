@@ -74,7 +74,7 @@ aws-config = { version = "1.0", default-features = false, features = ["default-h
 # Async trait support
 async-trait = "0.1"
 
-shared = { path = "../shared", features = ["axum-mw", "redis"] }
+shared = { path = "../shared", features = ["axum-mw", "redis", "error-reporting"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

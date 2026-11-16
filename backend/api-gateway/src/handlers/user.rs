@@ -61,7 +61,8 @@ pub async fn get_current_user(
     // An API key can't be forwarded to user-service (it only knows session
     // tokens), so answer from the gateway's copy of the account.
     if api_key.is_some() {
-        let row: Option<(String, Option<String>, Option<bool>, DateTime<Utc>)> = sqlx::query_as(
+        type AccountRow = (String, Option<String>, Option<bool>, DateTime<Utc>);
+        let row: Option<AccountRow> = sqlx::query_as(
             "SELECT username, wallet_address, is_verified, created_at FROM users WHERE id = $1",
         )
         .bind(claims.sub)
