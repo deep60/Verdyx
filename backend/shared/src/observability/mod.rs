@@ -2,6 +2,8 @@
 //!
 //! Provides centralized observability setup for all services
 
+#[cfg(feature = "error-reporting")]
+pub mod error_reporting;
 #[cfg(feature = "logging")]
 pub mod logging;
 pub mod metrics;

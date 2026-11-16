@@ -56,7 +56,7 @@ url = "2"
 chrono = { workspace = true }
 
 # Shared utilities
-shared = { path = "../shared", features = ["axum-mw"] }
+shared = { path = "../shared", features = ["axum-mw", "error-reporting"] }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

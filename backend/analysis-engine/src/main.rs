@@ -107,10 +107,18 @@ impl EngineStatus {
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::time())
-        .init();
+    let _error_reporting =
+        shared::observability::error_reporting::init("analysis-engine", env!("CARGO_PKG_VERSION"));
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::fmt()
+            .with_target(false)
+            .with_timer(tracing_subscriber::fmt::time::time())
+            .finish()
+            .with(shared::observability::error_reporting::layer())
+            .init();
+    }
 
     info!("Starting Verdyx Analysis Engine");
 

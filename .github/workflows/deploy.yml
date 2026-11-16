@@ -137,6 +137,11 @@ jobs:
         if: steps.creds.outputs.ok == 'true'
       - run: npm run build:pages
         if: steps.creds.outputs.ok == 'true'
+        env:
+          # Error reporting is off unless this repository variable is set.
+          # A browser DSN is public by design (it ships in the page).
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN }}
+          VITE_RELEASE: website@${{ github.sha }}
       - name: Publish
         if: steps.creds.outputs.ok == 'true'
         run: npx --yes wrangler@3 pages deploy dist/public --project-name=verdyx --branch=main --commit-hash="$GITHUB_SHA" --commit-dirty=true
