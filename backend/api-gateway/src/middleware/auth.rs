@@ -40,6 +40,10 @@ pub struct Claims {
     pub username: String, // Username (user-service tokens)
     #[serde(default)]
     pub token_type: String, // "access" | "refresh" (user-service tokens)
+    /// Set only for a request made with a team API key: the team it acts for.
+    /// Never read from a token.
+    #[serde(skip)]
+    pub org_id: Option<Uuid>,
 }
 
 fn default_role() -> String {
@@ -62,6 +66,7 @@ impl Claims {
             jti: Uuid::new_v4().to_string(),
             username: String::new(),
             token_type: "access".to_string(),
+            org_id: None,
         }
     }
 
@@ -255,7 +260,8 @@ async fn authenticate_api_key(
         )));
     };
     let path = full_path(request);
-    if let Err(why) = api_key::allows(request.method(), &path, &auth.scopes) {
+    if let Err(why) = api_key::allows(request.method(), &path, &auth.scopes, auth.org_id.is_some())
+    {
         return Err(Box::new(denied(StatusCode::FORBIDDEN, why)));
     }
     request.extensions_mut().insert(claims);

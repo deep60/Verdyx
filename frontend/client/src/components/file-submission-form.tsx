@@ -6,8 +6,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CloudUpload, Globe, Mail, Rocket } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/auth-context";
+import { canScan, type TeamSummary } from "@/lib/teams";
 
 export function FileSubmissionForm() {
   const [submissionMode, setSubmissionMode] = useState<"file" | "url" | "email">("file");
@@ -17,6 +19,13 @@ export function FileSubmissionForm() {
   const [analysisType, setAnalysisType] = useState("full");
   const [bountyAmount, setBountyAmount] = useState("0.1");
   const [description, setDescription] = useState("");
+  const [saveTo, setSaveTo] = useState("personal");
+  const { isAuthenticated } = useAuth();
+  const { data: teams = [] } = useQuery<TeamSummary[]>({
+    queryKey: ["/api/orgs"],
+    enabled: isAuthenticated,
+  });
+  const scanTeams = teams.filter((t) => canScan(t.role));
   const [priority, setPriority] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -152,6 +161,9 @@ export function FileSubmissionForm() {
     body.append("bountyAmount", priority ? (parsedBounty + 0.05).toString() : parsedBounty.toString());
     body.append("priority", String(priority));
     if (description) body.append("description", description);
+    if (saveTo !== "personal" && scanTeams.some((t) => t.id === saveTo)) {
+      body.append("organizationId", saveTo);
+    }
     submitMutation.mutate(body);
   };
 
@@ -275,6 +287,29 @@ export function FileSubmissionForm() {
       )}
 
       <div className="space-y-4">
+        {scanTeams.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium mb-2">Save to</label>
+            <Select value={saveTo} onValueChange={setSaveTo}>
+              <SelectTrigger data-testid="select-save-to" aria-label="Save to">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="personal">Just me</SelectItem>
+                {scanTeams.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    Team: {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">
+              {saveTo === "personal"
+                ? "Only you can see this scan."
+                : "Everyone in the team can see this scan and its results."}
+            </p>
+          </div>
+        )}
         <div>
           <label className="block text-sm font-medium mb-2">Analysis Type</label>
           <Select value={analysisType} onValueChange={setAnalysisType}>

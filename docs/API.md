@@ -32,7 +32,7 @@ The response holds the key (`vdx_` plus 64 hex characters) once; only its SHA-25
 | `scan` | Submitting files and URLs, starting analyses |
 | `write` | Other changes: webhooks, bounties, votes |
 
-A key acts as its owner, never as an admin. Whatever its scopes, it can't sign in, create, list or revoke keys, change or delete the account, or move funds: those need a signed-in session. An unknown, revoked or expired key gets `401`; a request outside its scopes gets `403` with the reason.
+A key acts as its owner, never as an admin. Whatever its scopes, it can't sign in, create, list or revoke keys, change or delete the account, manage teams, or move funds: those need a signed-in session. An unknown, revoked or expired key gets `401`; a request outside its scopes gets `403` with the reason.
 
 List keys with `GET /users/me/api-keys` (name, prefix, scopes, created, last used, expiry) and revoke one with `DELETE /users/me/api-keys/{id}`.
 
@@ -92,12 +92,48 @@ List keys with `GET /users/me/api-keys` (name, prefix, scopes, created, last use
 - `GET /reputation/history/:user_id`
 - `POST /reputation/claim-badge`
 
+## Teams
+
+A team shares scans and API keys between people. Each member has one role:
+
+| Role | See team scans | Scan into the team | Invite, remove, change roles, team keys, rename | Delete the team |
+|---|:-:|:-:|:-:|:-:|
+| `owner` | ✓ | ✓ | ✓ | ✓ |
+| `admin` | ✓ | ✓ | ✓ (not owners; can't make owners) | |
+| `member` | ✓ | ✓ | | |
+| `viewer` | ✓ | | | |
+
+A team always keeps an owner: its last owner can't leave or step down. Someone can own up to 5 teams, and a team holds up to 50 members and open invitations. A team you aren't in answers `404`.
+
+| Request | Who | What |
+|---|---|---|
+| `GET /orgs` | anyone | Your teams, with your role |
+| `POST /orgs` `{"name"}` | anyone | Create a team; you become its owner |
+| `GET /orgs/{id}` | members | The team and its members; owners and admins also see open invitations |
+| `PATCH /orgs/{id}` `{"name"}` | owner, admin | Rename |
+| `DELETE /orgs/{id}` | owner | Delete. Scans go back to whoever uploaded them; keys and invitations are deleted |
+| `PATCH /orgs/{id}/members/{user_id}` `{"role"}` | owner, admin | Change a role |
+| `DELETE /orgs/{id}/members/{user_id}` | owner, admin, or yourself | Remove someone, or leave |
+| `POST /orgs/{id}/invitations` `{"email","role"}` | owner, admin | Invite. Returns `code` once; the website link is `/teams?invite=<code>`. Valid 7 days |
+| `DELETE /orgs/{id}/invitations/{invitation_id}` | owner, admin | Withdraw an invitation |
+| `GET /invitations` | anyone | Open invitations to your address |
+| `POST /invitations/accept` `{"code"}` or `{"id"}` | the invitee | Join. Only works signed in with the invited address; accepting by `id` also needs a verified address |
+| `DELETE /invitations/{invitation_id}` | the invitee | Decline |
+| `GET`, `POST /orgs/{id}/api-keys`, `DELETE /orgs/{id}/api-keys/{key_id}` | owner, admin | Team keys (same body as personal keys; 10 active per team) |
+
+**Team scans.** Add the form field `organizationId=<team id>` to `POST /submissions/file` to save a scan to a team (owners, admins and members). Everyone in the team can then read it and its results. `GET /submissions?organization=<team id>` lists the team's scans.
+
+**Team keys** act for the team: their scans are always saved to it, `GET /submissions` lists the team's scans, and they can read only the team's scans. They may use only `/submissions`, `/engines` and `/health`. A team key stops working when the admin who made it leaves the team or stops being an owner or admin.
+
+When someone deletes their account, the scans they saved to teams stay with the teams. A team they alone owned passes to its longest-standing admin (or member, then viewer), or is deleted if nobody else is in it.
+
 ## Protected User/Wallet/Submission/Webhook Routes
 
 - User profile: `GET /users/me`, `PUT /users/me`, `GET /users/me/stats`
 - Wallet: `POST /wallet/connect`, `GET /wallet/balance`, `POST /wallet/stake`, etc.
 - Submissions: `GET /submissions`, `POST /submissions`, `POST /submissions/:id/vote`
 - Webhooks: CRUD and delivery routes under ` /webhooks`
+- Teams: `/orgs` and `/invitations` (see [Teams](#teams))
 
 ## Minimal Example: Login
 

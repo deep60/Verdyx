@@ -1,13 +1,13 @@
 use axum::{
     middleware,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 
 use crate::{
     handlers::{
-        analysis, auth, bounty, consensus_proxy, engines, health, oauth, reputation, submission,
-        user, wallet, web_intel, webhook,
+        analysis, auth, bounty, consensus_proxy, engines, health, oauth, organization, reputation,
+        submission, user, wallet, web_intel, webhook,
     },
     middleware::{auth as auth_mw, rate_limiter},
     AppState,
@@ -55,6 +55,8 @@ pub fn create_routes(state: AppState) -> Router {
         .nest("/users", user_routes())
         .nest("/wallet", wallet_routes())
         .nest("/webhooks", webhook_routes())
+        .nest("/orgs", team_routes())
+        .nest("/invitations", invitation_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_mw::auth_middleware,
@@ -241,6 +243,40 @@ fn submission_routes(state: AppState) -> Router<AppState> {
             get(submission::get_submission_consensus),
         )
         .route("/my-submissions", get(submission::get_my_submissions))
+}
+
+fn team_routes() -> Router<AppState> {
+    use organization as o;
+    Router::new()
+        .route("/", get(o::list_teams).post(o::create_team))
+        .route(
+            "/{org_id}",
+            get(o::get_team)
+                .patch(o::rename_team)
+                .delete(o::delete_team),
+        )
+        .route(
+            "/{org_id}/members/{user_id}",
+            patch(o::set_member_role).delete(o::remove_member),
+        )
+        .route("/{org_id}/invitations", post(o::invite))
+        .route(
+            "/{org_id}/invitations/{invitation_id}",
+            delete(o::revoke_invitation),
+        )
+        .route(
+            "/{org_id}/api-keys",
+            get(o::list_team_keys).post(o::create_team_key),
+        )
+        .route("/{org_id}/api-keys/{key_id}", delete(o::revoke_team_key))
+}
+
+fn invitation_routes() -> Router<AppState> {
+    use organization as o;
+    Router::new()
+        .route("/", get(o::my_invitations))
+        .route("/accept", post(o::accept_invitation))
+        .route("/{invitation_id}", delete(o::decline_invitation))
 }
 
 fn engine_routes() -> Router<AppState> {

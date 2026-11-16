@@ -31,6 +31,8 @@ export interface ApiSubmission {
   description?: string;
   bountyAmount?: string | number;
   bountyId?: string | null;
+  /** The team the scan is saved to. */
+  organizationId?: string | null;
   priority?: boolean;
   metadata?: Record<string, unknown>;
   createdAt?: string;

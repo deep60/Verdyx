@@ -531,8 +531,8 @@ pub async fn generate_api_key(
     };
 
     let active: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND is_active = TRUE
-           AND (expires_at IS NULL OR expires_at > NOW())",
+        "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND organization_id IS NULL
+           AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())",
     )
     .bind(user_id)
     .fetch_one(state.db.pool())
