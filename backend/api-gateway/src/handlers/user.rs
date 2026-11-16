@@ -55,8 +55,39 @@ pub struct UserStats {
 pub async fn get_current_user(
     State(state): State<AppState>,
     headers: HeaderMap,
-    _claims: crate::middleware::auth::Claims,
+    claims: crate::middleware::auth::Claims,
+    api_key: Option<axum::Extension<crate::middleware::api_key::ApiKeyAuth>>,
 ) -> Result<Json<UserProfile>, StatusCode> {
+    // An API key can't be forwarded to user-service (it only knows session
+    // tokens), so answer from the gateway's copy of the account.
+    if api_key.is_some() {
+        let row: Option<(String, Option<String>, Option<bool>, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT username, wallet_address, is_verified, created_at FROM users WHERE id = $1",
+        )
+        .bind(claims.sub)
+        .fetch_optional(state.db.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let (username, wallet, verified, created_at) = row.ok_or(StatusCode::UNAUTHORIZED)?;
+        let u = UserIdentity {
+            id: claims.sub,
+            username,
+            email: claims.email.clone(),
+            ethereum_address: wallet,
+            email_verified: verified.unwrap_or(false),
+            kyc_status: String::new(),
+            is_admin: false,
+            created_at,
+        };
+        let rep: i32 = sqlx::query_scalar("SELECT reputation_score FROM users WHERE id = $1")
+            .bind(claims.sub)
+            .fetch_optional(state.db.pool())
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+        return Ok(Json(identity_to_profile_with_stats(&state, u, rep).await));
+    }
     let hm = bearer_map(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
     let u = fetch_identity(&state, hm)
         .await
@@ -453,6 +484,7 @@ pub async fn list_api_keys(
     let rows: Vec<(
         Uuid,
         String,
+        Option<String>,
         Vec<String>,
         Option<i32>,
         Option<bool>,
@@ -461,7 +493,7 @@ pub async fn list_api_keys(
         Option<DateTime<Utc>>,
     )> = sqlx::query_as(
         r#"
-        SELECT id, name, COALESCE(permissions, ARRAY['read']), rate_limit, is_active, last_used_at, created_at, expires_at
+        SELECT id, name, key_prefix, COALESCE(permissions, ARRAY['read']), rate_limit, is_active, last_used_at, created_at, expires_at
         FROM api_keys
         WHERE user_id = $1
         ORDER BY created_at DESC
@@ -481,6 +513,7 @@ pub async fn list_api_keys(
             |(
                 id,
                 name,
+                prefix,
                 permissions,
                 rate_limit,
                 is_active,
@@ -488,12 +521,16 @@ pub async fn list_api_keys(
                 created_at,
                 expires_at,
             )| {
+                let expired = expires_at.is_some_and(|e| e <= Utc::now());
                 serde_json::json!({
                     "id": id,
                     "name": name,
+                    // Keys from before prefixes were stored have none.
+                    "prefix": prefix,
                     "permissions": permissions,
                     "rateLimit": rate_limit.unwrap_or(1000),
-                    "isActive": is_active.unwrap_or(true),
+                    "isActive": is_active.unwrap_or(true) && !expired,
+                    "expired": expired,
                     "lastUsedAt": last_used_at,
                     "createdAt": created_at,
                     "expiresAt": expires_at,

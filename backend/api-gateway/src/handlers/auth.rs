@@ -13,7 +13,6 @@ use uuid::Uuid;
 
 use crate::handlers::identity::{bearer_map, fetch_identity, UserIdentity};
 use crate::models::user::User;
-use crate::utils::crypto::hash_password;
 use crate::utils::{ApiError, ApiResult};
 use crate::{ApiResponse, AppState};
 
@@ -509,27 +508,60 @@ pub async fn generate_api_key(
             }
         };
 
-    let key_name = payload
-        .as_ref()
+    use crate::middleware::api_key;
+
+    let body = payload.as_ref().map(|p| &p.0);
+    let key_name: String = body
         .and_then(|p| p.get("name"))
         .and_then(|v| v.as_str())
-        .unwrap_or("Default API Key");
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .unwrap_or("Default API Key")
+        .chars()
+        .take(100)
+        .collect();
+    let scopes = api_key::parse_scopes(body.and_then(|p| p.get("scopes")))
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let expires_at = match body.and_then(|p| p.get("expires_in_days")) {
+        None | Some(serde_json::Value::Null) => None,
+        Some(v) => {
+            let days = v.as_i64().filter(|d| (1..=365).contains(d));
+            Some(Utc::now() + chrono::Duration::days(days.ok_or(StatusCode::BAD_REQUEST)?))
+        }
+    };
 
-    // Generate a random API key
-    let raw_key = format!("vdx_{}", Uuid::new_v4().to_string().replace("-", ""));
-    let key_hash = hash_password(&raw_key).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let active: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND is_active = TRUE
+           AND (expires_at IS NULL OR expires_at > NOW())",
+    )
+    .bind(user_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to count API keys: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    if active >= api_key::MAX_ACTIVE_KEYS {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    // Only the SHA-256 is stored; the key is shown once, here.
+    let raw_key = api_key::generate();
     let key_id = Uuid::new_v4();
     let now = Utc::now();
 
-    // Store hashed key in database
     sqlx::query(
-        "INSERT INTO api_keys (id, user_id, key_hash, name, created_at) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO api_keys (id, user_id, key_hash, key_prefix, name, permissions, created_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(key_id)
     .bind(user_id)
-    .bind(&key_hash)
-    .bind(key_name)
+    .bind(api_key::hash(&raw_key))
+    .bind(api_key::display_prefix(&raw_key))
+    .bind(&key_name)
+    .bind(&scopes)
     .bind(now)
+    .bind(expires_at)
     .execute(state.db.pool())
     .await
     .map_err(|e| {
@@ -542,7 +574,10 @@ pub async fn generate_api_key(
         "api_key": raw_key,
         "key_id": key_id,
         "name": key_name,
+        "prefix": api_key::display_prefix(&raw_key),
+        "scopes": scopes,
         "created_at": now,
+        "expires_at": expires_at,
         "message": "Store this key securely — it will not be shown again"
     })))
 }

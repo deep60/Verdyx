@@ -12,6 +12,9 @@
 #                            gateway accepts a token user-service minted
 #   4. authenticated call   (GET /users/me on a strict-auth route)  <-- proves
 #                            gateway middleware authorizes that same token
+#   5-9. API keys           create one, use it (X-API-Key and Bearer), check
+#                            it can't manage keys or the account or write
+#                            outside its scopes, see it listed, revoke it
 #
 # Steps 3 and 4 are the ones that would break if the JWT contract or shared
 # secret were wrong — i.e. the actual risk introduced by the auth migration.
@@ -92,4 +95,50 @@ ME_EMAIL="$(json_get '.email' "$ME_BODY")"
   || fail "/users/me returned wrong/no email (got '$ME_EMAIL'). Body: $ME_BODY"
 log "  ✓ authenticated request accepted and proxied to user-service"
 
-log "AUTH SMOKE TEST PASSED — register → login → verify → authenticated call all work end-to-end"
+# ── 5-9. API keys ────────────────────────────────────────────────
+# HTTP status of a request, without failing the script on 4xx.
+status() { curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$@"; }
+
+log "5/9 create an API key (read + scan)"
+KEY_BODY="$(curl -fsS --max-time 15 -X POST "$BASE_URL/api/v1/auth/api-key" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"smoke","scopes":["read","scan"],"expires_in_days":1}')" \
+  || fail "creating an API key failed"
+API_KEY="$(json_get '.api_key' "$KEY_BODY")"
+KEY_ID="$(json_get '.key_id' "$KEY_BODY")"
+[[ "$API_KEY" == vdx_* ]] || fail "no vdx_ key returned. Body: $KEY_BODY"
+log "  ✓ key created"
+
+log "6/9 the key authenticates (X-API-Key and Bearer)"
+ME_KEY="$(curl -fsS --max-time 15 "$BASE_URL/api/v1/users/me" -H "X-API-Key: $API_KEY")" \
+  || fail "GET /users/me with X-API-Key failed"
+[[ "$(json_get '.email' "$ME_KEY")" == "$EMAIL" ]] || fail "key resolved to the wrong user: $ME_KEY"
+[[ "$(status "$BASE_URL/api/v1/users/me/stats" -H "Authorization: Bearer $API_KEY")" == 200 ]] \
+  || fail "Bearer API key was not accepted on a strict route"
+log "  ✓ key accepted both ways, as the right user"
+
+log "7/9 the key stays within its limits"
+[[ "$(status "$BASE_URL/api/v1/users/me/api-keys" -H "X-API-Key: $API_KEY")" == 403 ]] \
+  || fail "a key could list keys"
+[[ "$(status -X DELETE "$BASE_URL/api/v1/users/me" -H "X-API-Key: $API_KEY")" == 403 ]] \
+  || fail "a key could delete the account"
+[[ "$(status -X POST "$BASE_URL/api/v1/webhooks" -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' -d '{}')" == 403 ]] \
+  || fail "a key without the write scope could create a webhook"
+[[ "$(status "$BASE_URL/api/v1/users/me/stats" -H "X-API-Key: vdx_0000000000000000000000000000000000000000")" == 401 ]] \
+  || fail "an unknown key was accepted"
+log "  ✓ key management, account deletion and unscoped writes refused; unknown key rejected"
+
+log "8/9 the owner sees the key, by prefix and last use"
+LIST_BODY="$(curl -fsS --max-time 15 "$BASE_URL/api/v1/users/me/api-keys" -H "Authorization: Bearer $TOKEN")" \
+  || fail "listing keys failed"
+printf '%s' "$LIST_BODY" | grep -q "\"prefix\":\"${API_KEY:0:12}\"" || fail "key prefix missing from list: $LIST_BODY"
+log "  ✓ listed with its prefix"
+
+log "9/9 a revoked key stops working"
+[[ "$(status -X DELETE "$BASE_URL/api/v1/users/me/api-keys/$KEY_ID" -H "Authorization: Bearer $TOKEN")" == 204 ]] \
+  || fail "revoking the key failed"
+[[ "$(status "$BASE_URL/api/v1/users/me/stats" -H "X-API-Key: $API_KEY")" == 401 ]] \
+  || fail "a revoked key still works"
+log "  ✓ revoked key rejected"
+
+log "AUTH SMOKE TEST PASSED — register → login → verify → authenticated call → API keys all work end-to-end"
