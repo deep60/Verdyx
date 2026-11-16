@@ -68,6 +68,8 @@ flate2 = "1"
 tar = { version = "0.4", default-features = false }
 sevenz-rust2 = { version = "0.25", default-features = false, features = ["aes256"] }
 async-trait = "0.1"
+# OLE2 compound files (.doc/.xls/.ppt, vbaProject.bin) for the Office analyzer.
+cfb = "0.16"
 # Used to inspect the peer certificate after a real TLS handshake. Issuer and
 # expiry are reported only from this parse — never from placeholders.
 native-tls = "0.2.18"
