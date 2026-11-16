@@ -8,6 +8,7 @@ use thiserror::Error;
 
 // Handler modules
 pub mod analysis;
+pub mod audit;
 pub mod auth;
 pub mod bounty;
 pub mod consensus_proxy;

@@ -1022,7 +1022,7 @@ pub async fn create_file_submission(
         "description": description,
     });
 
-    sqlx::query_as::<_, (Uuid,)>(
+    let response = sqlx::query_as::<_, (Uuid,)>(
         r#"
         INSERT INTO submissions (
             id, submitter_id, original_filename, file_hash, url, file_size,
@@ -1072,7 +1072,19 @@ pub async fn create_file_submission(
     .map_err(|e| {
         tracing::error!("Failed to insert submission: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
-    })
+    })?;
+
+    // Signed-out scans have nobody to show the event to.
+    if let Some(claims) = claims.as_ref() {
+        let mut event = crate::services::audit::Event::by(claims, "scan.created")
+            .target("submission", response.id)
+            .detail("type", response.submission_type.clone());
+        if let Some(team) = organization_id {
+            event = event.team(team);
+        }
+        event.record(state.db.pool()).await;
+    }
+    Ok(response)
 }
 
 // Router setup

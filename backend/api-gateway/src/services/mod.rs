@@ -1,4 +1,5 @@
 pub mod abi_loader;
+pub mod audit;
 pub mod auth_service;
 pub mod blockchain;
 pub mod cache_service;

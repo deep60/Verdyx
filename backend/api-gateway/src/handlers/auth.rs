@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use crate::handlers::identity::{bearer_map, fetch_identity, UserIdentity};
 use crate::models::user::User;
+use crate::services::audit;
 use crate::utils::{ApiError, ApiResult};
 use crate::{ApiResponse, AppState};
 
@@ -164,7 +165,18 @@ pub async fn login(
         "email": payload.identifier,
         "password": payload.password,
     });
-    forward_auth(&state, &headers, "/api/v1/auth/login", body).await
+    let result = forward_auth(&state, &headers, "/api/v1/auth/login", body).await;
+    if matches!(result, Err(ApiError::Unauthorized)) {
+        // Shown to the account's owner; unknown identifiers aren't recorded.
+        if let Some(owner) = audit::user_for_identifier(state.db.pool(), &payload.identifier).await
+        {
+            audit::Event::anonymous("auth.login_failed")
+                .subject(owner)
+                .record(state.db.pool())
+                .await;
+        }
+    }
+    result
 }
 
 pub async fn logout(
@@ -435,6 +447,12 @@ pub async fn forgot_password(
     if resp.status().is_server_error() {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
+    if let Some(owner) = audit::user_for_identifier(state.db.pool(), email).await {
+        audit::Event::anonymous("auth.password_reset_requested")
+            .subject(owner)
+            .record(state.db.pool())
+            .await;
+    }
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -569,6 +587,14 @@ pub async fn generate_api_key(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    audit::Event::by_user(user_id, "api_key.created")
+        .target("api_key", key_id)
+        .detail("name", key_name.clone())
+        .detail("scopes", scopes.clone())
+        .detail("prefix", api_key::display_prefix(&raw_key))
+        .record(state.db.pool())
+        .await;
+
     Ok(Json(serde_json::json!({
         "success": true,
         "api_key": raw_key,
@@ -682,6 +708,15 @@ async fn forward_auth(
             .await
             .map_err(|e| ApiError::Internal(format!("invalid user-service response: {e}")))?;
         let rep = sync_user_to_gateway_db(state, &ua.user).await;
+        let action = if path.ends_with("/register") {
+            "auth.register"
+        } else {
+            "auth.login"
+        };
+        audit::Event::by_user(ua.user.id, action)
+            .detail("method", "password")
+            .record(state.db.pool())
+            .await;
         let expires_in = if ua.expires_in > 0 {
             ua.expires_in
         } else {

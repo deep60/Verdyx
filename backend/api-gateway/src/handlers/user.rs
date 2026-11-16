@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::handlers::identity::{bearer_map, fetch_identity, UserIdentity};
+use crate::services::audit;
 use crate::AppState;
 
 /// User profile response
@@ -246,6 +247,20 @@ pub async fn update_profile(
         )
     })?;
     let rep = crate::handlers::auth::sync_user_to_gateway_db(&state, &u).await;
+    let mut fields = Vec::new();
+    if payload.username.is_some() {
+        fields.push("username");
+    }
+    if payload.email.is_some() {
+        fields.push("email");
+    }
+    if payload.bio.is_some() {
+        fields.push("bio");
+    }
+    audit::Event::by(&_claims, "account.updated")
+        .detail("fields", fields)
+        .record(state.db.pool())
+        .await;
     Ok(Json(identity_to_profile_with_stats(&state, u, rep).await))
 }
 
@@ -439,6 +454,25 @@ pub async fn delete_account(
             }
         }
         let _ = state.db.delete_file_submissions_for_user(_claims.sub).await;
+        audit::Event::by(&_claims, "account.deleted")
+            .record(state.db.pool())
+            .await;
+        // Clear the gateway's copy of the account the way user-service does,
+        // so logs and member lists show a deleted account, not the person.
+        let gone = _claims.sub.simple();
+        if let Err(e) = sqlx::query(
+            "UPDATE users SET username = $2, email = $3, wallet_address = NULL, is_active = FALSE,
+                              updated_at = NOW()
+             WHERE id = $1",
+        )
+        .bind(_claims.sub)
+        .bind(format!("deleted_{gone}"))
+        .bind(format!("deleted_{}@removed.invalid", _claims.sub))
+        .execute(state.db.pool())
+        .await
+        {
+            tracing::error!("Failed to clear the gateway copy of {}: {}", _claims.sub, e);
+        }
         // Their scans saved to teams stay with the teams.
         if let Err(e) = crate::handlers::organization::leave_all(state.db.pool(), _claims.sub).await
         {
@@ -569,6 +603,10 @@ pub async fn revoke_api_key(
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+    audit::Event::by(&claims, "api_key.revoked")
+        .target("api_key", key_id)
+        .record(state.db.pool())
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -64,6 +64,12 @@ export function PrivacyContent() {
             <strong>Technical data:</strong> your IP address, used to enforce scan limits and stop abuse, and standard
             server logs (time, address requested, response status).
           </li>
+          <li>
+            <strong>Activity log:</strong> a record of sign-ins (including failed attempts on your account), account,
+            API key and team changes, and scans, with the IP address and browser they came from. You can see and export
+            yours under Profile → Activity. Owners and admins of a team you&apos;re in see what was done in that team,
+            without IP addresses or browsers.
+          </li>
         </ul>
       </section>
 
@@ -146,7 +152,7 @@ export function PrivacyContent() {
         <h2>How long we keep it</h2>
         <p>
           Accounts, scans, uploaded files and results are kept until you delete them. Scan-limit counters expire after a
-          day. Database backups follow our provider&apos;s retention window.
+          day. The activity log is kept for 12 months and then deleted. Encrypted database backups are kept for 30 days.
         </p>
       </section>
 
@@ -154,7 +160,9 @@ export function PrivacyContent() {
         <h2>Deleting your data</h2>
         <p>
           You can delete your account from your profile page. That removes your account details, including anything
-          received from Google or GitHub, and the scans you made while signed in, along with their files. To remove a
+          received from Google or GitHub, and the scans you made for yourself while signed in, along with their files.
+          Scans you saved to a team stay with that team. Activity-log entries stay until they expire, showing a deleted
+          account instead of your name. To remove a
           single scan, or one made while signed out, email <ContactLink /> with its link.
         </p>
       </section>

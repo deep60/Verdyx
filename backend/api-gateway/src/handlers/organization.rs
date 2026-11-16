@@ -36,6 +36,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::middleware::{api_key, auth::Claims};
+use crate::services::audit;
 use crate::AppState;
 
 pub const ROLES: [&str; 4] = ["owner", "admin", "member", "viewer"];
@@ -349,6 +350,11 @@ pub async fn create_team(
     .await
     .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    audit::Event::by(&claims, "team.created")
+        .team(id)
+        .detail("name", name.clone())
+        .record(state.db.pool())
+        .await;
     Ok((
         StatusCode::CREATED,
         Json(json!({ "id": id, "name": name, "role": "owner", "memberCount": 1 })),
@@ -430,6 +436,11 @@ pub async fn rename_team(
         .execute(state.db.pool())
         .await
         .map_err(db_err)?;
+    audit::Event::by(&claims, "team.renamed")
+        .team(org_id)
+        .detail("name", name.clone())
+        .record(state.db.pool())
+        .await;
     Ok(Json(json!({ "id": org_id, "name": name })))
 }
 
@@ -452,6 +463,10 @@ pub async fn delete_team(
         .execute(state.db.pool())
         .await
         .map_err(db_err)?;
+    audit::Event::by(&claims, "team.deleted")
+        .team(org_id)
+        .record(state.db.pool())
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -512,6 +527,13 @@ pub async fn set_member_role(
         .map_err(db_err)?;
     }
     tx.commit().await.map_err(db_err)?;
+    audit::Event::by(&claims, "team.member.role_changed")
+        .team(org_id)
+        .subject(user_id)
+        .detail("from", current.clone())
+        .detail("to", body.role.clone())
+        .record(state.db.pool())
+        .await;
     Ok(Json(json!({ "userId": user_id, "role": body.role })))
 }
 
@@ -555,6 +577,17 @@ pub async fn remove_member(
     .await
     .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    let action = if user_id == claims.sub {
+        "team.member.left"
+    } else {
+        "team.member.removed"
+    };
+    audit::Event::by(&claims, action)
+        .team(org_id)
+        .subject(user_id)
+        .detail("role", target.clone())
+        .record(state.db.pool())
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -642,6 +675,13 @@ pub async fn invite(
     .await
     .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    audit::Event::by(&claims, "team.invitation.sent")
+        .team(org_id)
+        .target("invitation", id)
+        .detail("email", email.clone())
+        .detail("role", role.clone())
+        .record(state.db.pool())
+        .await;
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -670,6 +710,11 @@ pub async fn revoke_invitation(
     if done.rows_affected() == 0 {
         return Err(err(StatusCode::NOT_FOUND, "invitation not found"));
     }
+    audit::Event::by(&claims, "team.invitation.withdrawn")
+        .team(org_id)
+        .target("invitation", invitation_id)
+        .record(state.db.pool())
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -791,6 +836,12 @@ pub async fn accept_invitation(
         .await
         .map_err(db_err)?;
     tx.commit().await.map_err(db_err)?;
+    audit::Event::by(&claims, "team.invitation.accepted")
+        .team(org_id)
+        .target("invitation", invitation_id)
+        .detail("role", role.clone())
+        .record(state.db.pool())
+        .await;
     Ok(Json(
         json!({ "teamId": org_id, "teamName": name, "role": role }),
     ))
@@ -802,17 +853,21 @@ pub async fn decline_invitation(
     claims: Claims,
     Path(invitation_id): Path<Uuid>,
 ) -> ApiResult<StatusCode> {
-    let done = sqlx::query(
-        "DELETE FROM organization_invitations WHERE id = $1 AND email = $2 AND accepted_at IS NULL",
+    let team: Option<Uuid> = sqlx::query_scalar(
+        "DELETE FROM organization_invitations WHERE id = $1 AND email = $2 AND accepted_at IS NULL
+         RETURNING organization_id",
     )
     .bind(invitation_id)
     .bind(claims.email.trim().to_lowercase())
-    .execute(state.db.pool())
+    .fetch_optional(state.db.pool())
     .await
     .map_err(db_err)?;
-    if done.rows_affected() == 0 {
-        return Err(err(StatusCode::NOT_FOUND, "invitation not found"));
-    }
+    let team = team.ok_or_else(|| err(StatusCode::NOT_FOUND, "invitation not found"))?;
+    audit::Event::by(&claims, "team.invitation.declined")
+        .team(team)
+        .target("invitation", invitation_id)
+        .record(state.db.pool())
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -935,6 +990,14 @@ pub async fn create_team_key(
     .execute(state.db.pool())
     .await
     .map_err(db_err)?;
+    audit::Event::by(&claims, "team.api_key.created")
+        .team(org_id)
+        .target("api_key", key_id)
+        .detail("name", name.clone())
+        .detail("scopes", scopes.clone())
+        .detail("prefix", api_key::display_prefix(&raw_key))
+        .record(state.db.pool())
+        .await;
     Ok((
         StatusCode::CREATED,
         Json(json!({
@@ -960,6 +1023,11 @@ pub async fn revoke_team_key(
     if done.rows_affected() == 0 {
         return Err(err(StatusCode::NOT_FOUND, "key not found"));
     }
+    audit::Event::by(&claims, "team.api_key.revoked")
+        .team(org_id)
+        .target("api_key", key_id)
+        .record(state.db.pool())
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
