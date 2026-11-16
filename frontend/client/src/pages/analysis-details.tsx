@@ -9,6 +9,7 @@ import { ExportReport } from "@/components/export-report";
 import { CommitRevealPanel } from "@/components/commit-reveal-panel";
 import { WebsiteIntelligencePanel } from "@/components/website-intelligence-panel";
 import { EmailForensicsPanel } from "@/components/email-forensics-panel";
+import { OfficeForensicsPanel, hasOfficeAnalysis } from "@/components/office-forensics-panel";
 import { AttackMatrix } from "@/components/attack-matrix";
 import { IocGraph } from "@/components/ioc-graph";
 import { mapAttackTechniques } from "@/lib/attack-mapping";
@@ -195,6 +196,7 @@ export default function AnalysisDetails() {
         analyses.some((a) => (a.engine?.name || "").toLowerCase().includes("email"))),
   );
   const targetType = isUrlTarget ? "url" : isEmailTarget ? "email" : "file";
+  const isOfficeTarget = !isUrlTarget && hasOfficeAnalysis(analyses);
 
   const { data: recentSubmissions = [] } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
@@ -421,7 +423,15 @@ export default function AnalysisDetails() {
 
         {/* Further detail */}
         <Tabs
-          defaultValue={isUrlTarget ? "web-intel" : isEmailTarget ? "email-forensics" : "details"}
+          defaultValue={
+            isUrlTarget
+              ? "web-intel"
+              : isEmailTarget
+                ? "email-forensics"
+                : isOfficeTarget
+                  ? "office-forensics"
+                  : "details"
+          }
           className="space-y-6"
         >
           <TabsList className="flex h-auto flex-wrap">
@@ -429,6 +439,11 @@ export default function AnalysisDetails() {
             {isEmailTarget && (
               <TabsTrigger value="email-forensics" data-testid="tab-email-forensics">
                 Email forensics
+              </TabsTrigger>
+            )}
+            {isOfficeTarget && (
+              <TabsTrigger value="office-forensics" data-testid="tab-office-forensics">
+                Document forensics
               </TabsTrigger>
             )}
             {!isUrlTarget && <TabsTrigger value="attack">ATT&amp;CK ({attackTechniques.length})</TabsTrigger>}
@@ -444,6 +459,11 @@ export default function AnalysisDetails() {
           {isEmailTarget && (
             <TabsContent value="email-forensics">
               <EmailForensicsPanel analyses={analyses} />
+            </TabsContent>
+          )}
+          {isOfficeTarget && (
+            <TabsContent value="office-forensics">
+              <OfficeForensicsPanel analyses={analyses} />
             </TabsContent>
           )}
           {!isUrlTarget && (

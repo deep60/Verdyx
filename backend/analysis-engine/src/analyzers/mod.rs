@@ -36,6 +36,7 @@ pub struct DetailedEngineReport {
 pub mod dynamic_analyzer;
 pub mod hash_analyzer;
 pub mod heuristic_engine;
+pub mod office_analyzer;
 pub mod pe_model_analyzer;
 pub mod signature_matcher;
 pub mod static_analyzer;
@@ -741,6 +742,10 @@ impl AnalysisEngine {
             detections.push(email_det);
         }
 
+        if let Some(office_det) = self.run_office_analysis(request).await {
+            detections.push(office_det);
+        }
+
         if depth < MAX_ARCHIVE_DEPTH {
             if let Some(det) = self.scan_archive_contents(request, depth).await {
                 detections.push(det);
@@ -1229,6 +1234,27 @@ impl AnalysisEngine {
         }
     }
 
+    /// Office documents: VBA macros, Excel 4.0 macro sheets, remote
+    /// templates, DDE and embedded objects. `None` for other files. Shares
+    /// the static-analysis switch.
+    async fn run_office_analysis(&self, request: &FileAnalysisRequest) -> Option<DetectionResult> {
+        if !request.analysis_options.enable_static_analysis {
+            return None;
+        }
+        let data = request.file_data.clone();
+        // CPU-bound parsing of an untrusted file: keep it off the runtime's
+        // worker threads.
+        match tokio::task::spawn_blocking(move || office_analyzer::analyze(&data)).await {
+            Ok(det) => det,
+            Err(e) => Some(Self::create_unavailable_detection(
+                office_analyzer::ENGINE_NAME,
+                "1.0.0",
+                EngineType::Static,
+                format!("document analysis failed: {e}"),
+            )),
+        }
+    }
+
     /// Create an explicit DetectionResult representing an unavailable or disabled engine
     pub fn create_unavailable_detection(
         engine_name: &str,
@@ -1311,6 +1337,18 @@ impl AnalysisEngine {
                 "Pattern matching across {} active signature definitions",
                 sig_count
             ),
+            error: None,
+        });
+
+        // Office documents (Default; only reports on Office files)
+        engines.push(EngineStatusItem {
+            id: "office_analyzer".to_string(),
+            name: office_analyzer::ENGINE_NAME.to_string(),
+            engine_type: "static".to_string(),
+            is_optional: false,
+            status: "online".to_string(),
+            version: "1.0.0".to_string(),
+            details: "VBA macro extraction and scoring, Excel 4.0 macro sheets, remote templates, DDE and embedded objects in Word, Excel and PowerPoint files".to_string(),
             error: None,
         });
 
@@ -1467,6 +1505,7 @@ impl AnalysisEngine {
                 "hash_analyzer".to_string(),
                 "heuristic_engine".to_string(),
                 "signature_matcher".to_string(),
+                "office_analyzer".to_string(),
             ],
             optional_engines: vec![
                 "yara_engine".to_string(),
@@ -1869,5 +1908,56 @@ mod archive_tests {
         assert_eq!(row.verdict, ThreatVerdict::Unknown);
         let (_, reason) = row.non_vote().expect("doesn't vote");
         assert!(reason.contains("Password-protected"));
+    }
+}
+
+#[cfg(test)]
+mod office_tests {
+    use super::office_analyzer::tests::{ooxml, vba_project, DROPPER};
+    use super::*;
+
+    async fn analyse(name: &str, data: Vec<u8>) -> AnalysisResult {
+        let mut config = AnalysisEngineConfig::default();
+        config.hash_analyzer.virustotal_api_key = None;
+        config.hash_analyzer.malwarebazaar_api_key = None;
+        config.hash_analyzer.hybrid_analysis_api_key = None;
+        config.clamav_analyzer.enabled = false;
+        config.yara_engine.rules_directory = "rules/yara".into();
+        AnalysisEngine::new(config)
+            .await
+            .unwrap()
+            .analyze_file(FileAnalysisRequest {
+                filename: name.to_string(),
+                file_data: data,
+                file_hashes: None,
+                analysis_options: AnalysisOptions::default(),
+            })
+            .await
+            .unwrap()
+    }
+
+    fn office_row(r: &AnalysisResult) -> Option<&DetectionResult> {
+        r.detections
+            .iter()
+            .find(|d| d.engine_name == office_analyzer::ENGINE_NAME)
+    }
+
+    #[tokio::test]
+    async fn macro_dropper_docm_is_flagged_by_the_engine() {
+        let bin = vba_project("", &[("ThisDocument", DROPPER)]);
+        let r = analyse("invoice.docm", ooxml(&[("word/vbaProject.bin", &bin)])).await;
+        assert_eq!(
+            office_row(&r).expect("office row").verdict,
+            ThreatVerdict::Malicious
+        );
+        // A strong signal can't be outvoted into a clean verdict.
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Benign);
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Unknown);
+    }
+
+    #[tokio::test]
+    async fn non_office_files_get_no_office_row() {
+        let r = analyse("notes.txt", b"just some text".to_vec()).await;
+        assert!(office_row(&r).is_none());
     }
 }
