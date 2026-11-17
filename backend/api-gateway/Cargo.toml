@@ -35,7 +35,7 @@ md5 = "0.7"
 sha1 = "0.10"
 
 # UUID support
-uuid = { version = "1.0", features = ["serde", "v4"] }
+uuid = { version = "1.0", features = ["serde", "v4", "v5"] }
 
 # Date and time
 chrono = { version = "0.4", features = ["serde"] }

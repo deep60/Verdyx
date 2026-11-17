@@ -19,8 +19,30 @@ pub fn create_router(state: AppState) -> Router {
         .route("/ready", get(root_ready))
         .route("/metrics", get(root_metrics))
         .with_state(state.clone())
+        .merge(taxii_routes(state.clone()))
         .nest("/api/v1", v1::create_routes(state.clone()))
         .nest("/api", v1::create_routes(state))
+}
+
+/// TAXII 2.1 at the root, where TAXII clients look for it. Discovery and the
+/// API root say nothing about anyone's data; collections need an API key.
+fn taxii_routes(state: AppState) -> Router {
+    use crate::handlers::threat_feed as t;
+    let collections = Router::new()
+        .route("/taxii2/api/collections/", get(t::collections))
+        .route("/taxii2/api/collections/{id}/", get(t::collection))
+        .route("/taxii2/api/collections/{id}/objects/", get(t::objects))
+        .route("/taxii2/api/collections/{id}/manifest/", get(t::manifest))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::auth::auth_middleware,
+        ));
+    Router::new()
+        .route("/taxii2/", get(t::discovery))
+        .route("/taxii2", get(t::discovery))
+        .route("/taxii2/api/", get(t::api_root))
+        .merge(collections)
+        .with_state(state)
 }
 
 /// Liveness — always 200 when the process can answer HTTP.

@@ -246,6 +246,10 @@ fn submission_routes(state: AppState) -> Router<AppState> {
             post(submission::verify_submission),
         )
         .route(
+            "/{submission_id}/stix",
+            get(crate::handlers::threat_feed::submission_bundle),
+        )
+        .route(
             "/{submission_id}/analyses",
             get(submission::get_submission_analyses),
         )

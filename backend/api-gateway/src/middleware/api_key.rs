@@ -80,10 +80,24 @@ pub fn from_headers(headers: &HeaderMap) -> Option<String> {
     if let Some(v) = headers.get("x-api-key").and_then(|h| h.to_str().ok()) {
         return Some(v.trim().to_string());
     }
-    headers
+    let auth = headers
         .get(axum::http::header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "))
+        .and_then(|h| h.to_str().ok())?;
+    if let Some(basic) = auth.strip_prefix("Basic ") {
+        // TAXII clients send keys as HTTP Basic: either half may be the key.
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(basic.trim())
+            .ok()?;
+        let text = String::from_utf8(decoded).ok()?;
+        let (user, rest) = text.split_once(':').unwrap_or((text.as_str(), ""));
+        return [rest, user]
+            .into_iter()
+            .map(str::trim)
+            .find(|t| looks_like_key(t))
+            .map(str::to_string);
+    }
+    auth.strip_prefix("Bearer ")
         .map(str::trim)
         .filter(|t| looks_like_key(t))
         .map(str::to_string)
@@ -136,7 +150,10 @@ pub fn allows(
         return Err("API keys can't manage teams; use your account");
     }
     if team_key
-        && !(p.starts_with("/submissions") || p.starts_with("/engines") || p.starts_with("/health"))
+        && !(p.starts_with("/submissions")
+            || p.starts_with("/engines")
+            || p.starts_with("/health")
+            || (reading && p.starts_with("/taxii2")))
     {
         return Err("team keys can only scan, read the team's scans and check engines");
     }
@@ -288,6 +305,42 @@ mod tests {
             HeaderValue::from_static("Bearer eyJhbGciOi.x.y"),
         );
         assert!(from_headers(&h).is_none());
+    }
+
+    #[test]
+    fn keys_are_read_from_basic_auth_for_taxii_clients() {
+        use base64::Engine;
+        let k = generate();
+        for pair in [format!("taxii:{k}"), format!("{k}:"), format!("{k}:x")] {
+            let mut h = HeaderMap::new();
+            let v = base64::engine::general_purpose::STANDARD.encode(pair.as_bytes());
+            h.insert(
+                "authorization",
+                HeaderValue::from_str(&format!("Basic {v}")).unwrap(),
+            );
+            assert_eq!(from_headers(&h).as_deref(), Some(k.as_str()), "{pair}");
+        }
+        // A real username and login aren't a key.
+        let mut h = HeaderMap::new();
+        let v = base64::engine::general_purpose::STANDARD.encode(b"ana:hunter2");
+        h.insert(
+            "authorization",
+            HeaderValue::from_str(&format!("Basic {v}")).unwrap(),
+        );
+        assert!(from_headers(&h).is_none());
+    }
+
+    #[test]
+    fn team_keys_read_their_feed() {
+        let r = scopes(&["read"]);
+        assert!(allows(&Method::GET, "/taxii2/api/collections/", &r, true).is_ok());
+        assert!(allows(
+            &Method::POST,
+            "/taxii2/api/collections/x/objects/",
+            &r,
+            true
+        )
+        .is_err());
     }
 
     #[test]

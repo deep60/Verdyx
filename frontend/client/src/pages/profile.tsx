@@ -31,6 +31,7 @@ import { WebhooksManager } from "@/components/webhooks-manager";
 import { ApiKeysManager } from "@/components/api-keys-manager";
 import { AuditLog } from "@/components/audit-log";
 import { DataControls } from "@/components/data-controls";
+import { ThreatFeedCard } from "@/components/threat-feed-card";
 import { SEO } from "@/components/seo";
 import type { ApiSubmission } from "@/lib/api-types";
 
@@ -261,6 +262,7 @@ export default function Profile() {
               {/* API keys Tab */}
               <TabsContent value="api-keys" className="space-y-6">
                 <ApiKeysManager />
+                <ThreatFeedCard />
               </TabsContent>
 
               {/* Activity Tab */}

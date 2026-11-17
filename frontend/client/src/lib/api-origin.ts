@@ -18,6 +18,11 @@ export function webSocketUrl(origin: string = API_ORIGIN): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
+/** Where TAXII clients find the threat feed (served at the gateway's root). */
+export function taxiiDiscoveryUrl(origin: string = API_ORIGIN): string {
+  return `${origin || window.location.origin}/taxii2/`;
+}
+
 /** Header the gateway requires before it accepts the session cookie (CSRF guard). */
 export const WEB_CLIENT_HEADER = "X-Verdyx-Client";
 

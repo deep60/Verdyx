@@ -21,6 +21,7 @@ pub mod organization;
 pub mod reputation;
 pub mod retrohunt;
 pub mod submission;
+pub mod threat_feed;
 pub mod user;
 pub mod wallet;
 pub mod web_intel;
