@@ -36,6 +36,7 @@ pub mod idempotency;
 pub mod metrics_mw;
 #[cfg(feature = "validation")]
 pub mod validation;
+pub mod yara_rules;
 
 pub use service_metrics::MetricsRegistry;
 

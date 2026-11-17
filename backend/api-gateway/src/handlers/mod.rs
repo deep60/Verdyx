@@ -19,6 +19,7 @@ pub mod identity;
 pub mod oauth;
 pub mod organization;
 pub mod reputation;
+pub mod retrohunt;
 pub mod submission;
 pub mod user;
 pub mod wallet;

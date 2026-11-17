@@ -170,6 +170,7 @@ Both take:
 | `team.invitation.sent`, `.withdrawn`, `.accepted`, `.declined` | |
 | `team.api_key.created`, `team.api_key.revoked` | |
 | `account.retention_changed`, `team.retention_changed`, `account.exported` | |
+| `retrohunt.started` | a hunt was queued (`details.rules`) |
 | `scan.deleted`, `scan.expired` | deleted by hand, or by retention (`via: system`, `details.count`) |
 | `scan.created` | a signed-in scan (`targetId` is the submission; `teamId` when saved to a team) |
 
@@ -185,6 +186,26 @@ Both take:
 
 A scan whose file was deleted by retention has `filePurgedAt`. Running it again answers `409`. See [docs/operations/retention.md](operations/retention.md) for the rules.
 
+## Retrohunt
+
+Run a YARA rule over past uploads, on the server with real YARA (the analysis engine must be built with `--features yara-engine`, as the production image is).
+
+| Request | What |
+|---|---|
+| `POST /retrohunts` `{"rule": "...", "teamId": null}` | Queue a hunt over your own uploads, or a team's (`teamId`, any member). `201` with the job id. One hunt at a time (`409`), 20 a day (`429`) |
+| `GET /retrohunts` | Your last 50 hunts: status, progress (`filesTotal`, `filesScanned`, `filesFailed`), `matches`, `ruleNames` |
+| `GET /retrohunts/{id}` | One hunt with its rule and `results`: each matching scan (`submissionId`, file name or URL, SHA-256) and the rules that matched. Scans you can no longer see are left out |
+| `DELETE /retrohunts/{id}` | Cancel a queued or running hunt, or remove a finished one |
+
+Rules are checked before they're queued:
+- at most 64 KB and 50 rules;
+- no `include`, which the compiler also refuses;
+- `import` only of `pe`, `elf`, `math`, `hash`, `dotnet`, `time` and `string`.
+
+A rule that doesn't compile ends as `failed`, with the compiler's message.
+
+Each file gets 10 seconds. A hunt covers at most 5,000 files and runs for at most 15 minutes. Only stored files are searched, and those are kept for 30 days. API keys need the `scan` scope; team keys can't hunt.
+
 ## Protected User/Wallet/Submission/Webhook Routes
 
 - User profile: `GET /users/me`, `PUT /users/me`, `GET /users/me/stats`
@@ -194,6 +215,7 @@ A scan whose file was deleted by retention has `filePurgedAt`. Running it again 
 - Teams: `/orgs` and `/invitations` (see [Teams](#teams))
 - Audit log: `GET /users/me/audit`, `GET /orgs/{id}/audit` (see [Audit log](#audit-log))
 - Your data: retention, deleting scans, export (see [Your data](#your-data))
+- Retrohunt: `/retrohunts` (see [Retrohunt](#retrohunt))
 
 ## Minimal Example: Login
 

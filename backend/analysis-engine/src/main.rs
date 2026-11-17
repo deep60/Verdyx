@@ -229,6 +229,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         }
         _ => db_pool.clone(),
     };
+    {
+        let (redis_client, db) = (consumer_redis_client.clone(), consumer_db_pool.clone());
+        tokio::spawn(async move { crate::queue::retrohunt::run(redis_client, db).await });
+    }
     let consumer_s3_client = s3_client.clone();
     let consumer_url_scanner = app_state.url_scanner.clone();
     let consumer_analysis_engine = app_state.analysis_engine.clone();
