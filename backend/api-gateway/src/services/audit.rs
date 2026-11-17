@@ -34,6 +34,7 @@
 //! | `scan.expired` | retention deleted scans (`details.count`; via "system") |
 //! | `account.retention_changed`, `team.retention_changed` | a scan retention choice changed |
 //! | `account.exported` | someone downloaded their data |
+//! | `retrohunt.started` | a YARA hunt over past uploads was queued (`details.rules`) |
 
 use std::net::SocketAddr;
 

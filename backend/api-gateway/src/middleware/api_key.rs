@@ -154,8 +154,11 @@ pub fn allows(
         };
     }
     // Deleting a scan is a change, not a scan.
-    let is_scan =
-        (p.starts_with("/submissions") || p.starts_with("/analysis")) && *method != Method::DELETE;
+    // A retrohunt is a scan over past uploads.
+    let is_scan = (p.starts_with("/submissions")
+        || p.starts_with("/analysis")
+        || p.starts_with("/retrohunts"))
+        && *method != Method::DELETE;
     if is_scan && (has("scan") || has("write")) {
         return Ok(());
     }
@@ -305,6 +308,18 @@ mod tests {
         assert!(allows(&Method::GET, "/api/v1/submissions/abc", &rs, false).is_ok());
         assert!(allows(&Method::POST, "/api/v1/submissions/file", &rs, false).is_ok());
         assert!(allows(&Method::POST, "/api/analysis/submit", &rs, false).is_ok());
+        assert!(allows(&Method::POST, "/api/v1/retrohunts", &rs, false).is_ok());
+        assert!(allows(
+            &Method::POST,
+            "/api/v1/retrohunts",
+            &scopes(&["read"]),
+            false
+        )
+        .is_err());
+        assert!(
+            allows(&Method::POST, "/api/v1/retrohunts", &rs, true).is_err(),
+            "not team keys"
+        );
         assert!(allows(&Method::POST, "/api/v1/webhooks", &rs, false).is_err());
         assert!(
             allows(&Method::DELETE, "/api/v1/submissions/abc", &rs, false).is_err(),

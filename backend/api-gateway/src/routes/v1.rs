@@ -57,6 +57,7 @@ pub fn create_routes(state: AppState) -> Router {
         .nest("/webhooks", webhook_routes())
         .nest("/orgs", team_routes())
         .nest("/invitations", invitation_routes())
+        .nest("/retrohunts", retrohunt_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_mw::auth_middleware,
@@ -284,6 +285,13 @@ fn team_routes() -> Router<AppState> {
             "/{org_id}/retention",
             put(crate::handlers::data::set_team_retention),
         )
+}
+
+fn retrohunt_routes() -> Router<AppState> {
+    use crate::handlers::retrohunt as r;
+    Router::new()
+        .route("/", get(r::list).post(r::start))
+        .route("/{id}", get(r::get).delete(r::cancel_or_remove))
 }
 
 fn invitation_routes() -> Router<AppState> {

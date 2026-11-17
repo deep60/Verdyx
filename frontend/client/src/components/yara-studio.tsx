@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { runYaraSubset, type YaraRuleResult } from "@/lib/yara-subset";
 import type { ApiSubmission } from "@/lib/api-types";
 import { Binary, Download, Sparkles } from "lucide-react";
+import { RetrohuntPanel } from "@/components/retrohunt-panel";
 
 const RULE_PRESETS: Record<string, { label: string; rule: string }> = {
   injection: {
@@ -256,6 +257,9 @@ export function YaraStudio() {
               </ul>
             </div>
           ))}
+        </div>
+        <div className="lg:col-span-2">
+          <RetrohuntPanel rule={rule} />
         </div>
       </CardContent>
     </Card>

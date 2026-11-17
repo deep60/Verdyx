@@ -324,7 +324,7 @@ async fn drain_artifact_deletions(
 }
 
 /// An absolute path inside `UPLOAD_DIR` (no `..`), if `key` is one.
-fn local_upload(key: &str) -> Option<std::path::PathBuf> {
+pub(crate) fn local_upload(key: &str) -> Option<std::path::PathBuf> {
     use std::path::{Component, Path};
     let root = std::env::var("UPLOAD_DIR").ok()?;
     let path = Path::new(key);

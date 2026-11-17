@@ -449,6 +449,16 @@ impl RedisService {
         Ok(())
     }
 
+    /// Queue a retrohunt for the analysis engine (`retrohunt_queue`).
+    pub async fn queue_retrohunt(&self, id: uuid::Uuid) -> Result<()> {
+        let mut conn = self.connection_pool.clone();
+        let _: () = conn
+            .lpush("retrohunt_queue", id.to_string())
+            .await
+            .context("Failed to queue retrohunt")?;
+        Ok(())
+    }
+
     /// Queue a stored object for the analysis engine to delete. The engine
     /// reads the bare `artifact_deletions` list, not a `queue:` key.
     pub async fn queue_artifact_deletion(&self, key: &str) -> Result<()> {
