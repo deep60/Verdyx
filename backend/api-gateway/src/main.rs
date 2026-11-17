@@ -273,7 +273,8 @@ async fn main() -> Result<()> {
     let client_ip = ClientIp::from_env();
     let auth_rate_limit = Arc::new(AuthRateLimit::from_env(client_ip.clone()));
     let scan_rate_limit = Arc::new(UsageLimit::scans_from_env(client_ip.clone()));
-    let site_check_rate_limit = Arc::new(UsageLimit::site_checks_from_env(client_ip));
+    let site_check_rate_limit = Arc::new(UsageLimit::site_checks_from_env(client_ip.clone()));
+    let audit_client_ip = client_ip;
     {
         let (auth, scans, site_checks) = (
             auth_rate_limit.clone(),
@@ -339,7 +340,12 @@ async fn main() -> Result<()> {
     // `verdyx_http_errors_total` counters exposed by `/metrics`. Kept as a
     // tiny closure so we can hand each request a cheap clone of the registry.
     let prom_registry = state.prom_metrics.clone();
+    services::audit::spawn_retention(state.db.pool().clone());
     let app = routes::create_router(state)
+        .layer(axum::middleware::from_fn(move |req, next| {
+            let ip = audit_client_ip.clone();
+            async move { services::audit::with_request_meta(ip, req, next).await }
+        }))
         .layer(axum::middleware::from_fn(move |req, next| {
             let r = prom_registry.clone();
             async move { shared::metrics_mw::track_with(r, req, next).await }

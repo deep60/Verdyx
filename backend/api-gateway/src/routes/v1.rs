@@ -181,6 +181,7 @@ fn user_routes() -> Router<AppState> {
         .route("/me/stats", get(user::get_user_stats))
         .route("/{user_id}", get(user::get_user_by_id))
         .route("/{user_id}/stats", get(user::get_user_stats_by_id))
+        .route("/me/audit", get(crate::handlers::audit::my_audit))
         .route("/me/api-keys", get(user::list_api_keys))
         .route("/me/api-keys/{key_id}", delete(user::revoke_api_key))
 }
@@ -269,6 +270,7 @@ fn team_routes() -> Router<AppState> {
             get(o::list_team_keys).post(o::create_team_key),
         )
         .route("/{org_id}/api-keys/{key_id}", delete(o::revoke_team_key))
+        .route("/{org_id}/audit", get(crate::handlers::audit::team_audit))
 }
 
 fn invitation_routes() -> Router<AppState> {

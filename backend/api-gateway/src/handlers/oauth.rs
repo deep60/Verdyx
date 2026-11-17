@@ -235,6 +235,10 @@ pub async fn callback(
     };
 
     sync_user_to_gateway_db(&state, &auth.user).await;
+    crate::services::audit::Event::by_user(auth.user.id, "auth.login")
+        .detail("method", provider.clone())
+        .record(state.db.pool())
+        .await;
     let expires_in = if auth.expires_in > 0 {
         auth.expires_in
     } else {

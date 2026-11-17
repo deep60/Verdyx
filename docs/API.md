@@ -127,6 +127,50 @@ A team always keeps an owner: its last owner can't leave or step down. Someone c
 
 When someone deletes their account, the scans they saved to teams stay with the teams. A team they alone owned passes to its longest-standing admin (or member, then viewer), or is deleted if nobody else is in it.
 
+## Audit log
+
+Verdyx records who did what, when and from where. Rows can't be changed, and they are deleted after 12 months (`AUDIT_RETENTION_DAYS`, default 365, minimum 30).
+
+| Request | Who | Shows |
+|---|---|---|
+| `GET /users/me/audit` | you (a session, or a personal key with `read`) | What you did, and what happened to your account: failed sign-ins, reset requests, role changes made to you. Includes IP address and browser. |
+| `GET /orgs/{id}/audit` | team owners and admins | Everything done in the team, including by team keys. No IP addresses or browsers. |
+
+Both take:
+- `limit`: default 50, at most 200;
+- `before`: the `nextBefore` from the previous page;
+- `action`: a prefix such as `team.member` (lowercase letters, dots and underscores only);
+- `format=csv`: up to 10,000 events. Fields are quoted, and values starting with `=`, `+`, `-` or `@` are prefixed with `'` so spreadsheets don't run them as formulas.
+
+```json
+{
+  "events": [
+    {
+      "id": 812, "occurredAt": "2026-11-17T10:04:00Z", "action": "team.member.role_changed",
+      "actor": {"id": "…", "username": "ana"}, "via": "session", "apiKeyId": null, "teamId": "…",
+      "subject": {"id": "…", "username": "ben"}, "targetType": null, "targetId": null,
+      "details": {"from": "member", "to": "viewer"}
+    }
+  ],
+  "nextBefore": 790
+}
+```
+
+`via` is `session` or `api_key`. A deleted account appears as `deleted_<id>`.
+
+| Action | Recorded when |
+|---|---|
+| `auth.register`, `auth.login` | an account is created, a sign-in succeeds (`details.method`: `password`, `google`, `github`) |
+| `auth.login_failed` | a wrong password for an existing account (no actor; `subject` is the account). Unknown addresses aren't recorded |
+| `auth.password_reset_requested` | a reset link was asked for an existing account |
+| `account.updated`, `account.deleted` | profile changes (`details.fields`), account deletion |
+| `api_key.created`, `api_key.revoked` | personal keys (`details`: name, scopes, prefix; never the key) |
+| `team.created`, `team.renamed`, `team.deleted` | |
+| `team.member.role_changed`, `team.member.removed`, `team.member.left` | `subject` is the member |
+| `team.invitation.sent`, `.withdrawn`, `.accepted`, `.declined` | |
+| `team.api_key.created`, `team.api_key.revoked` | |
+| `scan.created` | a signed-in scan (`targetId` is the submission; `teamId` when saved to a team) |
+
 ## Protected User/Wallet/Submission/Webhook Routes
 
 - User profile: `GET /users/me`, `PUT /users/me`, `GET /users/me/stats`
@@ -134,6 +178,7 @@ When someone deletes their account, the scans they saved to teams stay with the 
 - Submissions: `GET /submissions`, `POST /submissions`, `POST /submissions/:id/vote`
 - Webhooks: CRUD and delivery routes under ` /webhooks`
 - Teams: `/orgs` and `/invitations` (see [Teams](#teams))
+- Audit log: `GET /users/me/audit`, `GET /orgs/{id}/audit` (see [Audit log](#audit-log))
 
 ## Minimal Example: Login
 

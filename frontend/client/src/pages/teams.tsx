@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigation } from "@/components/navigation";
 import { SEO } from "@/components/seo";
 import { ApiKeysManager } from "@/components/api-keys-manager";
+import { AuditLog } from "@/components/audit-log";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,7 +39,7 @@ import {
   type TeamRole,
   type TeamSummary,
 } from "@/lib/teams";
-import { Copy, FileSearch, KeyRound, LogOut, Mail, Plus, Trash2, Users } from "lucide-react";
+import { Copy, FileSearch, History, KeyRound, LogOut, Mail, Plus, Trash2, Users } from "lucide-react";
 
 const TEAMS = "/api/orgs";
 const MY_INVITES = "/api/invitations";
@@ -558,6 +559,11 @@ export function TeamPanel({ teamId, onGone }: { teamId: string; onGone: () => vo
                 <KeyRound className="mr-1 h-3.5 w-3.5" /> API keys
               </TabsTrigger>
             )}
+            {manager && (
+              <TabsTrigger value="audit">
+                <History className="mr-1 h-3.5 w-3.5" /> Audit log
+              </TabsTrigger>
+            )}
             <TabsTrigger value="settings">Settings</TabsTrigger>
           </TabsList>
           <TabsContent value="scans" className="pt-4">
@@ -588,6 +594,11 @@ export function TeamPanel({ teamId, onGone }: { teamId: string; onGone: () => vo
                   </>
                 }
               />
+            </TabsContent>
+          )}
+          {manager && (
+            <TabsContent value="audit" className="pt-4">
+              <AuditLog endpoint={`${TEAMS}/${team.id}/audit`} viewerId={team.members.find((m) => m.isYou)?.userId} />
             </TabsContent>
           )}
           <TabsContent value="settings" className="pt-4">
