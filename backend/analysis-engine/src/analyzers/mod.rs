@@ -38,6 +38,7 @@ pub mod dynamic_analyzer;
 pub mod hash_analyzer;
 pub mod heuristic_engine;
 pub mod office_analyzer;
+pub mod pdf_analyzer;
 pub mod pe_model_analyzer;
 pub mod signature_matcher;
 pub mod static_analyzer;
@@ -751,6 +752,10 @@ impl AnalysisEngine {
             detections.push(apk_det);
         }
 
+        if let Some(pdf_det) = self.run_pdf_analysis(request).await {
+            detections.push(pdf_det);
+        }
+
         if depth < MAX_ARCHIVE_DEPTH {
             if let Some(det) = self.scan_archive_contents(request, depth).await {
                 detections.push(det);
@@ -1278,6 +1283,25 @@ impl AnalysisEngine {
         }
     }
 
+    /// PDFs: JavaScript, actions that run on open, launch actions, embedded
+    /// files and links. `None` for other files. Shares the static-analysis
+    /// switch.
+    async fn run_pdf_analysis(&self, request: &FileAnalysisRequest) -> Option<DetectionResult> {
+        if !request.analysis_options.enable_static_analysis {
+            return None;
+        }
+        let data = request.file_data.clone();
+        match tokio::task::spawn_blocking(move || pdf_analyzer::analyze(&data)).await {
+            Ok(det) => det,
+            Err(e) => Some(Self::create_unavailable_detection(
+                pdf_analyzer::ENGINE_NAME,
+                "1.0.0",
+                EngineType::Static,
+                format!("PDF analysis failed: {e}"),
+            )),
+        }
+    }
+
     /// Create an explicit DetectionResult representing an unavailable or disabled engine
     pub fn create_unavailable_detection(
         engine_name: &str,
@@ -1372,6 +1396,18 @@ impl AnalysisEngine {
             status: "online".to_string(),
             version: "1.0.0".to_string(),
             details: "VBA macro extraction and scoring, Excel 4.0 macro sheets, remote templates, DDE and embedded objects in Word, Excel and PowerPoint files".to_string(),
+            error: None,
+        });
+
+        // PDFs (Default; only reports on PDFs)
+        engines.push(EngineStatusItem {
+            id: "pdf_analyzer".to_string(),
+            name: pdf_analyzer::ENGINE_NAME.to_string(),
+            engine_type: "static".to_string(),
+            is_optional: false,
+            status: "online".to_string(),
+            version: "1.0.0".to_string(),
+            details: "JavaScript (including in compressed object streams and XFA forms), actions that run on open, launch actions, embedded files, links, network-share paths and hidden content in PDF files".to_string(),
             error: None,
         });
 
@@ -1542,6 +1578,7 @@ impl AnalysisEngine {
                 "signature_matcher".to_string(),
                 "office_analyzer".to_string(),
                 "apk_analyzer".to_string(),
+                "pdf_analyzer".to_string(),
             ],
             optional_engines: vec![
                 "yara_engine".to_string(),
@@ -2036,5 +2073,79 @@ mod apk_tests {
             .iter()
             .any(|d| d.engine_name == office_analyzer::ENGINE_NAME
                 || d.engine_name == ARCHIVE_CONTENTS));
+    }
+}
+
+#[cfg(test)]
+mod pdf_tests {
+    use super::pdf_analyzer::tests::{pdf, stream_obj};
+    use super::*;
+
+    async fn analyse(name: &str, data: Vec<u8>) -> AnalysisResult {
+        let mut config = AnalysisEngineConfig::default();
+        config.hash_analyzer.virustotal_api_key = None;
+        config.hash_analyzer.malwarebazaar_api_key = None;
+        config.hash_analyzer.hybrid_analysis_api_key = None;
+        config.clamav_analyzer.enabled = false;
+        config.yara_engine.rules_directory = "rules/yara".into();
+        AnalysisEngine::new(config)
+            .await
+            .unwrap()
+            .analyze_file(FileAnalysisRequest {
+                filename: name.to_string(),
+                file_data: data,
+                file_hashes: None,
+                analysis_options: AnalysisOptions::default(),
+            })
+            .await
+            .unwrap()
+    }
+
+    fn pdf_row(r: &AnalysisResult) -> Option<&DetectionResult> {
+        r.detections
+            .iter()
+            .find(|d| d.engine_name == pdf_analyzer::ENGINE_NAME)
+    }
+
+    const CATALOG_OPEN: &[u8] = b"<< /Type /Catalog /Pages 2 0 R /OpenAction 4 0 R >>";
+    const PAGES: &[u8] = b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
+    const PAGE: &[u8] = b"<< /Type /Page /Parent 2 0 R >>";
+
+    #[tokio::test]
+    async fn a_launching_pdf_is_flagged_by_the_engine() {
+        let launch = b"<< /S /Launch /Win << /F (cmd.exe) /P (/c start calc) >> >>";
+        let r = analyse("invoice.pdf", pdf(&[CATALOG_OPEN, PAGES, PAGE, launch])).await;
+        assert_eq!(
+            pdf_row(&r).expect("pdf row").verdict,
+            ThreatVerdict::Malicious
+        );
+        // A strong signal can't be outvoted into a clean verdict.
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Benign);
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Unknown);
+    }
+
+    #[tokio::test]
+    async fn a_plain_pdf_stays_clean() {
+        let link = b"<< /Type /Annot /Subtype /Link /A << /S /URI /URI (https://example.com) >> >>";
+        let text = stream_obj("", b"BT /F1 12 Tf (Quarterly report) Tj ET");
+        let r = analyse(
+            "report.pdf",
+            pdf(&[
+                b"<< /Type /Catalog /Pages 2 0 R >>",
+                PAGES,
+                PAGE,
+                link,
+                &text,
+            ]),
+        )
+        .await;
+        assert_eq!(pdf_row(&r).expect("pdf row").verdict, ThreatVerdict::Benign);
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Malicious);
+    }
+
+    #[tokio::test]
+    async fn other_files_get_no_pdf_row() {
+        let r = analyse("notes.txt", b"just some text".to_vec()).await;
+        assert!(pdf_row(&r).is_none());
     }
 }
