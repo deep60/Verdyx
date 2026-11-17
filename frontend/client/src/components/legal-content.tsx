@@ -11,7 +11,7 @@
 export const LEGAL_CONTACT_EMAIL = "privacy@verdyx.dev";
 
 /** Date the current text took effect. Bump it whenever the wording changes. */
-export const LEGAL_UPDATED = "16 November 2026";
+export const LEGAL_UPDATED = "17 November 2026";
 
 export const PRIVACY_META = {
   title: "Privacy policy",
@@ -118,7 +118,8 @@ export function PrivacyContent() {
       <section>
         <h2>Who can see your scans</h2>
         <p>
-          Scans made while signed in are tied to your account and visible only to you. Scans made while signed out have
+          Scans made while signed in are tied to your account and visible only to you, unless you save them to a team:
+          then everyone in that team can see them. Scans made while signed out have
           no owner: anyone with the link can open the result, so don&apos;t scan anything confidential without signing
           in.
         </p>
@@ -151,8 +152,12 @@ export function PrivacyContent() {
       <section>
         <h2>How long we keep it</h2>
         <p>
-          Accounts, scans, uploaded files and results are kept until you delete them. Scan-limit counters expire after a
-          day. The activity log is kept for 12 months and then deleted. Encrypted database backups are kept for 30 days.
+          Uploaded files are deleted 30 days after they are scanned; the scan and its results stay. Scans made while
+          signed out are deleted after 90 days. Your other scans are kept until you delete them, or for the period you
+          choose under Profile → Data (30, 90, 180 or 365 days); a team&apos;s owners choose the same for its scans.
+          Scans that carry a bounty are kept while the bounty needs them. Accounts are kept until you delete them.
+          Scan-limit counters expire after a day. The activity log is kept for 12 months. Encrypted database backups
+          are kept for 30 days, so deleted data leaves them within 30 days.
         </p>
       </section>
 
@@ -162,8 +167,12 @@ export function PrivacyContent() {
           You can delete your account from your profile page. That removes your account details, including anything
           received from Google or GitHub, and the scans you made for yourself while signed in, along with their files.
           Scans you saved to a team stay with that team. Activity-log entries stay until they expire, showing a deleted
-          account instead of your name. To remove a
-          single scan, or one made while signed out, email <ContactLink /> with its link.
+          account instead of your name. Deleting your account also removes your API keys, webhooks and notification
+          settings.
+        </p>
+        <p>
+          You can delete a single scan from its report page. To remove one made while signed out, email{" "}
+          <ContactLink /> with its link. You can download a copy of your data at any time under Profile → Data.
         </p>
       </section>
 

@@ -449,6 +449,17 @@ impl RedisService {
         Ok(())
     }
 
+    /// Queue a stored object for the analysis engine to delete. The engine
+    /// reads the bare `artifact_deletions` list, not a `queue:` key.
+    pub async fn queue_artifact_deletion(&self, key: &str) -> Result<()> {
+        let mut conn = self.connection_pool.clone();
+        let _: () = conn
+            .rpush("artifact_deletions", key)
+            .await
+            .context("Failed to queue artifact deletion")?;
+        Ok(())
+    }
+
     /// Pop item from queue (FIFO using LPOP)
     pub async fn pop_from_queue(&self, queue_name: &str) -> Result<Option<String>> {
         let key = format!("queue:{queue_name}");

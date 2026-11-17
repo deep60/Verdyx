@@ -110,6 +110,9 @@ pub struct FileSubmissionListItem {
     /// endpoint, so a failed report can say what went wrong.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
+    /// When the stored sample was deleted by retention (single-scan endpoint).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_purged_at: Option<DateTime<Utc>>,
 }
 
 /// Turns the worker's stored diagnostic ("attempt 3/3: Could not fetch …")
@@ -1569,6 +1572,10 @@ pub async fn start_analysis(
             return Err(StatusCode::NOT_FOUND);
         }
     }
+    if found.as_ref().is_some_and(|s| s.file_purged_at.is_some()) {
+        // The sample was deleted by retention; there is nothing to analyse.
+        return Err(StatusCode::CONFLICT);
+    }
     if found.is_some() {
         sqlx::query(
             "UPDATE submissions SET analysis_status = 'analyzing', updated_at = NOW() WHERE id = $1",
@@ -1798,6 +1805,7 @@ mod tests {
     fn sub(owner: Uuid, bounty: Option<Uuid>) -> FileSubmissionListItem {
         FileSubmissionListItem {
             failure_reason: None,
+            file_purged_at: None,
             id: Uuid::new_v4(),
             submitter_id: owner,
             user_id: owner,

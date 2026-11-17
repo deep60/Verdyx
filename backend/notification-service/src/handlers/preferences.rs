@@ -145,3 +145,47 @@ struct PreferencesRow {
     push_token: Option<String>,
     webhook_url: Option<String>,
 }
+
+/// `DELETE /api/v1/notifications/user-data`: removes a deleted account's
+/// preferences (email address, webhook URL and signing secret) and its
+/// history. Called by the gateway, which sets `x-user-id`.
+pub async fn delete_user_data(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<Value>) {
+    let Some(user_id) = user_from_headers(&headers) else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "missing x-user-id" })),
+        );
+    };
+    let result = async {
+        let mut tx = state.db_pool.begin().await?;
+        let history = sqlx::query("DELETE FROM notification_history WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        let prefs = sqlx::query("DELETE FROM notification_preferences WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>((history, prefs))
+    }
+    .await;
+    match result {
+        Ok((history, prefs)) => (
+            StatusCode::OK,
+            Json(json!({ "deleted": { "history": history, "preferences": prefs } })),
+        ),
+        Err(e) => {
+            tracing::error!("Failed to delete notification data for {}: {}", user_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "could not delete notification data" })),
+            )
+        }
+    }
+}

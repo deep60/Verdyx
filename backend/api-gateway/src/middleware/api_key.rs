@@ -129,6 +129,9 @@ pub fn allows(
     if p.starts_with("/auth/") || p.starts_with("/users/me/api-keys") {
         return Err("API keys can't sign in or manage keys; use your account");
     }
+    if p == "/users/me/export" {
+        return Err("API keys can't export the account; use your account");
+    }
     if p.starts_with("/orgs") || p.starts_with("/invitations") {
         return Err("API keys can't manage teams; use your account");
     }
@@ -150,7 +153,9 @@ pub fn allows(
             Err("this key lacks the read scope")
         };
     }
-    let is_scan = p.starts_with("/submissions") || p.starts_with("/analysis");
+    // Deleting a scan is a change, not a scan.
+    let is_scan =
+        (p.starts_with("/submissions") || p.starts_with("/analysis")) && *method != Method::DELETE;
     if is_scan && (has("scan") || has("write")) {
         return Ok(());
     }
@@ -301,6 +306,17 @@ mod tests {
         assert!(allows(&Method::POST, "/api/v1/submissions/file", &rs, false).is_ok());
         assert!(allows(&Method::POST, "/api/analysis/submit", &rs, false).is_ok());
         assert!(allows(&Method::POST, "/api/v1/webhooks", &rs, false).is_err());
+        assert!(
+            allows(&Method::DELETE, "/api/v1/submissions/abc", &rs, false).is_err(),
+            "deleting needs write"
+        );
+        assert!(allows(
+            &Method::DELETE,
+            "/api/v1/submissions/abc",
+            &scopes(&["write"]),
+            false
+        )
+        .is_ok());
         assert!(allows(
             &Method::POST,
             "/api/v1/webhooks",
@@ -331,6 +347,8 @@ mod tests {
         }
         assert!(allows(&Method::GET, "/api/v1/users/me", &all, false).is_ok());
         assert!(allows(&Method::GET, "/api/v1/orgs", &all, false).is_err());
+        assert!(allows(&Method::GET, "/api/v1/users/me/export", &all, false).is_err());
+        assert!(allows(&Method::GET, "/api/v1/users/me/audit", &all, false).is_ok());
         assert!(allows(&Method::POST, "/api/v1/invitations/accept", &all, false).is_err());
     }
 

@@ -450,10 +450,33 @@ pub async fn delete_account(
         // their object keys for deletion. There is no time-based purge.
         if let Ok(paths) = state.db.file_paths_for_user(_claims.sub).await {
             for path in paths {
-                let _ = state.redis.push_to_queue("artifact_deletions", &path).await;
+                crate::services::retention::delete_artifact(&state, &path).await;
             }
         }
         let _ = state.db.delete_file_submissions_for_user(_claims.sub).await;
+        if let Err(e) = crate::handlers::data::delete_personal_records(&state, _claims.sub).await {
+            tracing::error!(
+                "Failed to delete keys and webhooks of {}: {}",
+                _claims.sub,
+                e
+            );
+        }
+        // Notification preferences hold an email address and webhook URL.
+        let who =
+            std::collections::HashMap::from([("x-user-id".to_string(), _claims.sub.to_string())]);
+        match state
+            .proxy
+            .delete(
+                "notification-service",
+                "/api/v1/notifications/user-data",
+                Some(who),
+            )
+            .await
+        {
+            Ok(r) if r.status().is_success() => {}
+            Ok(r) => tracing::error!("notification data deletion answered {}", r.status()),
+            Err(e) => tracing::error!("notification data deletion failed: {}", e),
+        }
         audit::Event::by(&_claims, "account.deleted")
             .record(state.db.pool())
             .await;

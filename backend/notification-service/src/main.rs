@@ -12,7 +12,7 @@ mod templates;
 
 use anyhow::Result;
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use std::sync::Arc;
@@ -199,6 +199,10 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/notifications/preferences",
             post(handlers::preferences::update_preferences),
+        )
+        .route(
+            "/api/v1/notifications/user-data",
+            delete(handlers::preferences::delete_user_data),
         )
         .route(
             "/api/v1/notifications/history",

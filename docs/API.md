@@ -169,7 +169,21 @@ Both take:
 | `team.member.role_changed`, `team.member.removed`, `team.member.left` | `subject` is the member |
 | `team.invitation.sent`, `.withdrawn`, `.accepted`, `.declined` | |
 | `team.api_key.created`, `team.api_key.revoked` | |
+| `account.retention_changed`, `team.retention_changed`, `account.exported` | |
+| `scan.deleted`, `scan.expired` | deleted by hand, or by retention (`via: system`, `details.count`) |
 | `scan.created` | a signed-in scan (`targetId` is the submission; `teamId` when saved to a team) |
+
+## Your data
+
+| Request | Who | What |
+|---|---|---|
+| `GET /users/me/retention` | you | Your scan retention (`scanRetentionDays`: null or 30/90/180/365), plus the platform rules (`sampleRetentionDays`, `guestScanRetentionDays`) |
+| `PUT /users/me/retention` `{"scanRetentionDays": 90}` | you | Delete your own scans after that many days; `null` keeps them |
+| `PUT /orgs/{id}/retention` `{"scanRetentionDays": 30}` | team owners, admins | The same for the team's scans (shown as `scanRetentionDays` in `GET /orgs/{id}`) |
+| `DELETE /submissions/{id}` | the scan's maker, or an owner or admin of its team | Delete a scan, its results and its file. `409` if it carries a bounty. API keys need `write` |
+| `GET /users/me/export` | you (sessions only) | A JSON download of your account, scans and results, keys (never the keys themselves), teams, webhooks and activity |
+
+A scan whose file was deleted by retention has `filePurgedAt`. Running it again answers `409`. See [docs/operations/retention.md](operations/retention.md) for the rules.
 
 ## Protected User/Wallet/Submission/Webhook Routes
 
@@ -179,6 +193,7 @@ Both take:
 - Webhooks: CRUD and delivery routes under ` /webhooks`
 - Teams: `/orgs` and `/invitations` (see [Teams](#teams))
 - Audit log: `GET /users/me/audit`, `GET /orgs/{id}/audit` (see [Audit log](#audit-log))
+- Your data: retention, deleting scans, export (see [Your data](#your-data))
 
 ## Minimal Example: Login
 

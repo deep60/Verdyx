@@ -22,6 +22,7 @@ import {
   Webhook,
   KeyRound,
   History,
+  Database,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { UserAnalyticsDashboard } from "@/components/user-analytics-dashboard";
@@ -29,6 +30,7 @@ import { WalletLedgerPanel } from "@/components/wallet-ledger-panel";
 import { WebhooksManager } from "@/components/webhooks-manager";
 import { ApiKeysManager } from "@/components/api-keys-manager";
 import { AuditLog } from "@/components/audit-log";
+import { DataControls } from "@/components/data-controls";
 import { SEO } from "@/components/seo";
 import type { ApiSubmission } from "@/lib/api-types";
 
@@ -163,7 +165,7 @@ export default function Profile() {
           {/* Profile Content */}
           <div className="lg:col-span-2">
             <Tabs defaultValue="overview" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 h-auto p-1 gap-1">
+              <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 h-auto p-1 gap-1">
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="wallet" data-testid="tab-profile-wallet">
                   <Wallet className="w-3.5 h-3.5 mr-1.5" />
@@ -180,6 +182,10 @@ export default function Profile() {
                 <TabsTrigger value="activity" data-testid="tab-profile-activity">
                   <History className="w-3.5 h-3.5 mr-1.5" />
                   Activity
+                </TabsTrigger>
+                <TabsTrigger value="data" data-testid="tab-profile-data">
+                  <Database className="w-3.5 h-3.5 mr-1.5" />
+                  Data
                 </TabsTrigger>
                 <TabsTrigger value="analytics">
                   <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
@@ -260,6 +266,11 @@ export default function Profile() {
               {/* Activity Tab */}
               <TabsContent value="activity" className="space-y-6">
                 <AuditLog endpoint="/api/users/me/audit" personal viewerId={user.id} />
+              </TabsContent>
+
+              {/* Data Tab */}
+              <TabsContent value="data" className="space-y-6">
+                <DataControls />
               </TabsContent>
 
               {/* Analytics Tab */}
