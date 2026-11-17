@@ -206,6 +206,32 @@ A rule that doesn't compile ends as `failed`, with the compiler's message.
 
 Each file gets 10 seconds. A hunt covers at most 5,000 files and runs for at most 15 minutes. Only stored files are searched, and those are kept for 30 days. API keys need the `scan` scope; team keys can't hunt.
 
+## Threat feed (STIX 2.1 / TAXII 2.1)
+
+Scans that end malicious or suspicious are published as STIX 2.1 `indicator`s:
+- one for the file's SHA-256 or the URL;
+- one for each URL, domain, IP address or hash an engine extracted (up to 100 per scan).
+
+Malicious scans are `malicious-activity` (confidence 85); suspicious ones are `anomalous-activity` (50). Extracted indicators get 60.
+
+Every indicator links to its Verdyx report (`external_references`) and is created by the Verdyx `identity`. Ids are UUID v5s of what they describe, so they stay the same between polls.
+
+**One scan:** `GET /api/v1/submissions/{id}/stix` returns a STIX bundle (`application/stix+json;version=2.1`) to anyone who can read the scan.
+
+**TAXII 2.1** (read-only) at the server root, `https://api.verdyx.dev/taxii2/`:
+
+| Request | What |
+|---|---|
+| `GET /taxii2/` | Discovery (public) |
+| `GET /taxii2/api/` | API root (public) |
+| `GET /taxii2/api/collections/` | "My scans", plus one collection per team you're in (its id is the team id) |
+| `GET /taxii2/api/collections/{id}/objects/` | Objects, oldest first. Takes `added_after`, `limit` (default 100, at most 500 objects), `next` and `match[type]` (`indicator`, `identity`). Sets `X-TAXII-Date-Added-First` and `-Last` |
+| `GET /taxii2/api/collections/{id}/manifest/` | The same objects' ids, versions and dates |
+
+Collections need an API key with the `read` scope: HTTP Basic (any username, the key as the password, as OpenCTI, MISP and `taxii2-client` send it), `X-API-Key`, or Bearer. A team key sees only its team's collection. Responses use `application/taxii+json;version=2.1`.
+
+The API root URL in discovery is absolute: `PUBLIC_API_URL` if set, otherwise the request's host.
+
 ## Protected User/Wallet/Submission/Webhook Routes
 
 - User profile: `GET /users/me`, `PUT /users/me`, `GET /users/me/stats`
@@ -216,6 +242,7 @@ Each file gets 10 seconds. A hunt covers at most 5,000 files and runs for at mos
 - Audit log: `GET /users/me/audit`, `GET /orgs/{id}/audit` (see [Audit log](#audit-log))
 - Your data: retention, deleting scans, export (see [Your data](#your-data))
 - Retrohunt: `/retrohunts` (see [Retrohunt](#retrohunt))
+- Threat feed: `/taxii2/`, `GET /submissions/{id}/stix` (see [Threat feed](#threat-feed-stix-21--taxii-21))
 
 ## Minimal Example: Login
 

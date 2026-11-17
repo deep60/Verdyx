@@ -5,6 +5,7 @@ import { Navigation } from "@/components/navigation";
 import { SEO } from "@/components/seo";
 import { ApiKeysManager } from "@/components/api-keys-manager";
 import { AuditLog } from "@/components/audit-log";
+import { ThreatFeedCard } from "@/components/threat-feed-card";
 import { RetentionSelect, retentionLabel } from "@/components/data-controls";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -620,6 +621,9 @@ export function TeamPanel({ teamId, onGone }: { teamId: string; onGone: () => vo
                   </>
                 }
               />
+              <div className="mt-6">
+                <ThreatFeedCard team={{ id: team.id, name: team.name }} />
+              </div>
             </TabsContent>
           )}
           {manager && (
