@@ -5,6 +5,7 @@ import { Navigation } from "@/components/navigation";
 import { SEO } from "@/components/seo";
 import { ApiKeysManager } from "@/components/api-keys-manager";
 import { AuditLog } from "@/components/audit-log";
+import { RetentionSelect, retentionLabel } from "@/components/data-controls";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -488,8 +489,33 @@ function TeamSettings({ team, onGone }: { team: TeamDetail; onGone: () => void }
     },
     onError: fail("Couldn't delete the team"),
   });
+  const retain = useMutation({
+    mutationFn: async (days: number | null) =>
+      apiRequest("PUT", `${TEAMS}/${team.id}/retention`, { scanRetentionDays: days }),
+    onSuccess: (_r, days) => {
+      toast({ title: "Saved", description: `Team scans: ${retentionLabel(days).toLowerCase()}.` });
+      refreshAll();
+    },
+    onError: fail("Couldn't save"),
+  });
   return (
     <div className="space-y-6">
+      <div className="space-y-2">
+        <h3 className="text-sm font-medium">Keep the team&apos;s scans</h3>
+        {canManage(team.role) ? (
+          <RetentionSelect
+            value={team.scanRetentionDays}
+            onChange={(d) => retain.mutate(d)}
+            disabled={retain.isPending}
+            label="How long to keep the team's scans"
+          />
+        ) : (
+          <p className="text-sm">{retentionLabel(team.scanRetentionDays)}</p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Older scans and their results are deleted every day. Scans that carry a bounty are kept.
+        </p>
+      </div>
       {canManage(team.role) && (
         <form
           className="flex gap-2"

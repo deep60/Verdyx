@@ -12,6 +12,8 @@ export interface ApiSubmission {
   id: string;
   /** Why the scan failed, when it did. */
   failureReason?: string;
+  /** When retention deleted the uploaded file (results stay). */
+  filePurgedAt?: string | null;
   submitterId?: string;
   userId?: string;
   fileHash?: string;

@@ -525,7 +525,8 @@ impl DatabaseService {
                 (metadata ->> 'priority')::boolean AS priority,
                 (SELECT b.id FROM bounties b WHERE b.submission_id = submissions.id ORDER BY b.created_at DESC LIMIT 1) AS bounty_id,
                 file_path,
-                metadata ->> 'last_error' AS last_error
+                metadata ->> 'last_error' AS last_error,
+                file_purged_at
             FROM submissions
             WHERE id = $1
             "#,
@@ -544,6 +545,7 @@ impl DatabaseService {
                     &analysis_status,
                     r.get("last_error"),
                 ),
+                file_purged_at: r.get("file_purged_at"),
                 id: r.get("id"),
                 submitter_id,
                 user_id: submitter_id,
@@ -609,6 +611,7 @@ impl DatabaseService {
                 let original_filename: Option<String> = r.get("original_filename");
                 crate::handlers::submission::FileSubmissionListItem {
                     failure_reason: None,
+                    file_purged_at: None,
                     id: r.get("id"),
                     submitter_id,
                     user_id: submitter_id,
@@ -671,6 +674,7 @@ impl DatabaseService {
             let original_filename: Option<String> = r.get("original_filename");
             crate::handlers::submission::FileSubmissionListItem {
                 failure_reason: None,
+                file_purged_at: None,
                 id: r.get("id"),
                 submitter_id,
                 user_id: submitter_id,
@@ -793,6 +797,7 @@ impl DatabaseService {
                 let original_filename: Option<String> = r.get("original_filename");
                 crate::handlers::submission::FileSubmissionListItem {
                     failure_reason: None,
+                    file_purged_at: None,
                     id: r.get("id"),
                     submitter_id,
                     user_id: submitter_id,

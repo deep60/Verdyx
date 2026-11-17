@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { useRoute } from "wouter";
+import { useLocation, useRoute } from "wouter";
+import { useAuth } from "@/contexts/auth-context";
+import { DeleteScanButton } from "@/components/data-controls";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Navigation } from "@/components/navigation";
 import { SEO } from "@/components/seo";
@@ -109,6 +111,8 @@ export default function AnalysisDetails() {
   const submissionId = params?.id;
   const { toast } = useToast();
   const [, setHideAnalystTally] = useState(false);
+  const { user } = useAuth();
+  const [, setLocation] = useLocation();
 
   const {
     data: submission,
@@ -313,8 +317,17 @@ export default function AnalysisDetails() {
               sha256={targetType === "url" ? undefined : submission.fileHash}
               targetUrl={isUrlTarget ? target : undefined}
             />
+            {user && (submission.submitterId === user.id || submission.organizationId) && (
+              <DeleteScanButton submissionId={submission.id} onDeleted={() => setLocation("/dashboard")} />
+            )}
           </div>
         </header>
+        {submission.filePurgedAt && (
+          <p className="mb-6 border border-border bg-card/50 px-4 py-3 text-sm text-muted-foreground" data-testid="file-purged-note">
+            The uploaded file was deleted on {new Date(submission.filePurgedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}{" "}
+            under the retention policy. These results are kept; to scan it again, upload it again.
+          </p>
+        )}
 
         {/* Verdict */}
         {inProgress ? (

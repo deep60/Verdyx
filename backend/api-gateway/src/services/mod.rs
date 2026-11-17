@@ -8,3 +8,4 @@ pub mod database;
 pub mod event_bus;
 pub mod proxy_service;
 pub mod redis;
+pub mod retention;

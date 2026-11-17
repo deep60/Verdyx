@@ -30,6 +30,10 @@
 //! | `team.invitation.sent`, `team.invitation.withdrawn`, `team.invitation.accepted`, `team.invitation.declined` | |
 //! | `team.api_key.created`, `team.api_key.revoked` | |
 //! | `scan.created` | a file, URL or email was submitted |
+//! | `scan.deleted` | someone deleted a scan |
+//! | `scan.expired` | retention deleted scans (`details.count`; via "system") |
+//! | `account.retention_changed`, `team.retention_changed` | a scan retention choice changed |
+//! | `account.exported` | someone downloaded their data |
 
 use std::net::SocketAddr;
 
@@ -111,6 +115,14 @@ impl Event {
             target_type: None,
             target_id: None,
             details: Map::new(),
+        }
+    }
+
+    /// An event done by Verdyx itself (retention).
+    pub fn system(action: &'static str) -> Self {
+        Self {
+            via: "system",
+            ..Self::anonymous(action)
         }
     }
 

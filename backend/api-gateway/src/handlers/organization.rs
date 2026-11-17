@@ -369,12 +369,13 @@ pub async fn get_team(
     Path(org_id): Path<Uuid>,
 ) -> ApiResult<Json<Value>> {
     let role = require_member(&state, org_id, &claims).await?;
-    let (name, created_at): (String, DateTime<Utc>) =
-        sqlx::query_as("SELECT name, created_at FROM organizations WHERE id = $1")
-            .bind(org_id)
-            .fetch_one(state.db.pool())
-            .await
-            .map_err(db_err)?;
+    let (name, created_at, retention_days): (String, DateTime<Utc>, Option<i32>) = sqlx::query_as(
+        "SELECT name, created_at, scan_retention_days FROM organizations WHERE id = $1",
+    )
+    .bind(org_id)
+    .fetch_one(state.db.pool())
+    .await
+    .map_err(db_err)?;
     let members: Vec<(Uuid, String, DateTime<Utc>, Option<String>, Option<String>)> =
         sqlx::query_as(
             r#"SELECT m.user_id, m.role, m.joined_at, u.username, u.email
@@ -413,6 +414,7 @@ pub async fn get_team(
         "name": name,
         "role": role,
         "createdAt": created_at,
+        "scanRetentionDays": retention_days,
         "members": members.into_iter().map(|(user_id, role, joined_at, username, email)| json!({
             "userId": user_id, "role": role, "joinedAt": joined_at,
             "username": username, "email": email, "isYou": user_id == claims.sub,

@@ -34,6 +34,8 @@ export interface TeamDetail {
   name: string;
   role: TeamRole;
   createdAt: string;
+  /** Delete the team's scans after this many days; null keeps them. */
+  scanRetentionDays?: number | null;
   members: TeamMember[];
   invitations: TeamInvitation[];
 }

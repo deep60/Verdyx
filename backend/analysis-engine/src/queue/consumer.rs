@@ -296,6 +296,22 @@ async fn drain_artifact_deletions(
             .await
             .map_err(|e| anyhow!("Failed to pop artifact deletion: {e}"))?;
         let Some(key) = key else { break };
+        // The gateway stores uploads on the shared volume by absolute path;
+        // those aren't storage keys, so remove them here.
+        if let Some(file) = local_upload(&key) {
+            match tokio::fs::remove_file(&file).await {
+                Ok(()) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    warn!("Failed to delete local artifact {key}: {e}");
+                    let _: i32 = conn
+                        .lpush("artifact_deletions:dead", format!("{e}: {key}"))
+                        .await
+                        .unwrap_or(0);
+                    continue;
+                }
+            }
+        }
         if let Err(e) = s3_client.delete_file(&key).await {
             warn!("Failed to delete artifact {key}: {e}");
             let _: i32 = conn
@@ -305,6 +321,18 @@ async fn drain_artifact_deletions(
         }
     }
     Ok(())
+}
+
+/// An absolute path inside `UPLOAD_DIR` (no `..`), if `key` is one.
+fn local_upload(key: &str) -> Option<std::path::PathBuf> {
+    use std::path::{Component, Path};
+    let root = std::env::var("UPLOAD_DIR").ok()?;
+    let path = Path::new(key);
+    let safe = path.is_absolute()
+        && !path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::CurDir));
+    (safe && path.starts_with(&root)).then(|| path.to_path_buf())
 }
 
 async fn dead_letter(redis_client: &redis::Client, raw: &str, reason: &str) -> Result<()> {
