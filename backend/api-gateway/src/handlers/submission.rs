@@ -319,7 +319,7 @@ pub async fn upload_file(
             // Store file metadata in the database
             // The file_metadata table stores upload artifacts independently of analysis results.
             let upload_timestamp = Utc::now();
-            let file_type_str = detect_file_type(&data);
+            let file_type_str = detect_file_type(&data, filename.as_deref().unwrap_or(""));
 
             if let Err(e) = sqlx::query(
                 r#"
@@ -380,7 +380,7 @@ pub async fn upload_file(
                 file_id,
                 file_hash,
                 file_size: data.len() as u64,
-                file_type: detect_file_type(&data),
+                file_type: detect_file_type(&data, filename.as_deref().unwrap_or("")),
                 upload_timestamp,
                 analysis_status: "queued".to_string(),
             }));
@@ -838,19 +838,76 @@ async fn trigger_automatic_analysis(state: &AppState, _file_hash: &str) {
     let _ = state.redis.queue_for_analysis(analysis_id, 1).await;
 }
 
-fn detect_file_type(data: &[u8]) -> String {
-    // Simple file type detection based on magic bytes
-    if data.len() < 4 {
-        return "unknown".to_string();
-    }
-
-    match &data[0..4] {
-        [0x4D, 0x5A, _, _] => "executable".to_string(), // PE
-        [0x7F, 0x45, 0x4C, 0x46] => "elf".to_string(),  // ELF
-        [0x50, 0x4B, 0x03, 0x04] => "zip".to_string(),  // ZIP/JAR
-        [0x25, 0x50, 0x44, 0x46] => "pdf".to_string(),  // PDF
-        _ => "unknown".to_string(),
-    }
+/// The file's MIME type from its first bytes. ZIP-based formats (Office,
+/// APK, JAR) are told apart by the file name, since their bytes all start
+/// the same way.
+fn detect_file_type(data: &[u8], filename: &str) -> String {
+    let ext = filename
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    let starts = |magic: &[u8]| data.starts_with(magic);
+    let mime = if starts(b"MZ") {
+        "application/vnd.microsoft.portable-executable"
+    } else if starts(b"\x7FELF") {
+        "application/x-executable"
+    } else if starts(&[0xCF, 0xFA, 0xED, 0xFE])
+        || starts(&[0xCE, 0xFA, 0xED, 0xFE])
+        || starts(&[0xCA, 0xFE, 0xBA, 0xBE])
+    {
+        "application/x-mach-binary"
+    } else if starts(b"PK\x03\x04") || starts(b"PK\x05\x06") {
+        match ext.as_str() {
+            "docx" | "docm" => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
+            "xlsx" | "xlsm" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pptx" | "pptm" => {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
+            "apk" => "application/vnd.android.package-archive",
+            "jar" => "application/java-archive",
+            _ => "application/zip",
+        }
+    } else if starts(b"%PDF") {
+        "application/pdf"
+    } else if starts(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) {
+        match ext.as_str() {
+            "xls" => "application/vnd.ms-excel",
+            "ppt" => "application/vnd.ms-powerpoint",
+            "msi" => "application/x-msi",
+            _ => "application/msword",
+        }
+    } else if starts(b"7z\xBC\xAF\x27\x1C") {
+        "application/x-7z-compressed"
+    } else if starts(b"Rar!\x1A\x07") {
+        "application/vnd.rar"
+    } else if starts(&[0x1F, 0x8B]) {
+        "application/gzip"
+    } else if starts(b"{\\rtf") {
+        "application/rtf"
+    } else if starts(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if starts(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if starts(b"GIF8") {
+        "image/gif"
+    } else if starts(b"#!") {
+        "text/x-shellscript"
+    } else if !data.is_empty() && !data.contains(&0) && std::str::from_utf8(data).is_ok() {
+        match ext.as_str() {
+            "html" | "htm" | "hta" => "text/html",
+            "js" | "mjs" => "text/javascript",
+            "ps1" => "text/x-powershell",
+            "vbs" => "text/vbscript",
+            "py" => "text/x-python",
+            "bat" | "cmd" => "text/x-msdos-batch",
+            _ => "text/plain",
+        }
+    } else {
+        "application/octet-stream"
+    };
+    mime.to_string()
 }
 
 async fn process_single_submission(
@@ -984,7 +1041,7 @@ pub async fn create_file_submission(
             {
                 "message/rfc822".to_string()
             } else {
-                detect_file_type(&data)
+                detect_file_type(&data, &fname)
             };
             let stype = match submission_type_override.as_deref() {
                 Some("email") => "email".to_string(),
@@ -1801,6 +1858,47 @@ fn consensus_body(
 mod tests {
     use super::*;
     use crate::middleware::auth::Claims;
+
+    #[test]
+    fn file_types_are_standard_mime_types() {
+        let eicar = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
+        let cases: &[(&[u8], &str, &str)] = &[
+            (b"PK\x03\x04rest", "eicar.txt.zip", "application/zip"),
+            (
+                b"PK\x03\x04rest",
+                "invoice.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            (
+                b"PK\x03\x04rest",
+                "app.apk",
+                "application/vnd.android.package-archive",
+            ),
+            (
+                b"MZ\x90\x00",
+                "a.exe",
+                "application/vnd.microsoft.portable-executable",
+            ),
+            (b"\x7FELF\x02", "a", "application/x-executable"),
+            (b"%PDF-1.7", "a.pdf", "application/pdf"),
+            (
+                b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1",
+                "a.doc",
+                "application/msword",
+            ),
+            (b"7z\xBC\xAF\x27\x1C", "a.7z", "application/x-7z-compressed"),
+            (b"{\\rtf1", "a.rtf", "application/rtf"),
+            (b"#!/bin/sh\n", "run", "text/x-shellscript"),
+            (eicar, "eicar.txt", "text/plain"),
+            (eicar, "eicar.com", "text/plain"),
+            (b"<html></html>", "lure.hta", "text/html"),
+            (b"\x00\x01\x02\x03", "blob.bin", "application/octet-stream"),
+            (b"", "empty", "application/octet-stream"),
+        ];
+        for (data, name, want) in cases {
+            assert_eq!(detect_file_type(data, name), *want, "{name}");
+        }
+    }
 
     fn sub(owner: Uuid, bounty: Option<Uuid>) -> FileSubmissionListItem {
         FileSubmissionListItem {

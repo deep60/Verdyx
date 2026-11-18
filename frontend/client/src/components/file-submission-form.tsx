@@ -223,14 +223,13 @@ export function FileSubmissionForm() {
               <CloudUpload className="w-7 h-7 text-primary" />
             </div>
             <p className="font-semibold">Drop files here or click to browse</p>
-            <p className="text-xs text-muted-foreground mt-1">EXE, DLL, APK, PDF, DOC, ZIP · Max 100MB</p>
+            <p className="text-xs text-muted-foreground mt-1">Any file type: executables, documents, archives, scripts, emails · Max 100MB</p>
           </label>
           <input
             id="file-upload"
             type="file"
             className="hidden"
             onChange={handleFileChange}
-            accept=".exe,.dll,.apk,.zip,.pdf,.doc,.docx,.bin,.elf,.py,.js,.sh"
             data-testid="input-file"
           />
           {file && (

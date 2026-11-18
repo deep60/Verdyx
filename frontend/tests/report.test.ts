@@ -5,7 +5,9 @@ import {
   engineFacts,
   engineRole,
   flaggedSummary,
+  isMacMetadata,
   markdownReport,
+  mimeLabel,
   notVotingSummary,
   sortEngines,
   verdictLabel,
@@ -51,6 +53,63 @@ describe("scan report", () => {
     expect(facts[1].value).toBe("readme.txt: nothing found");
     expect(facts.find((f) => f.label === "Opened with password")?.value).toBe("infected");
     expect(facts.find((f) => f.label === "Not scanned")?.value).toContain("1 file");
+  });
+
+  it("shows the signature an engine found", () => {
+    const clam = engine("ClamAV", { verdict: "malicious", metadata: { signature: "Eicar-Test-Signature" } });
+    expect(engineFacts(clam)).toContainEqual({ label: "Signature", value: "Eicar-Test-Signature", tone: "danger" });
+  });
+
+  it("names the engine and signature that flagged a file inside an archive", () => {
+    const archive = engine("Archive contents", {
+      verdict: "malicious",
+      metadata: {
+        format: "zip",
+        files: [
+          {
+            path: "eicar.txt",
+            verdict: "Malicious",
+            engines: [{ name: "ClamAV", verdict: "Malicious", signature: "Eicar-Test-Signature" }],
+          },
+          { path: "__MACOSX/._eicar.txt", verdict: "Benign", engines: [] },
+        ],
+      },
+    });
+    const facts = engineFacts(archive);
+    expect(facts[0].value).toBe("eicar.txt: malicious by ClamAV (Eicar-Test-Signature)");
+    expect(facts.map((f) => f.value)).not.toContain("__MACOSX/._eicar.txt: nothing found");
+    expect(facts[1].value).toBe("1 macOS metadata file (added by Finder when zipping): not flagged");
+  });
+
+  it("reads the flagging engines from older scans' reasons", () => {
+    const archive = engine("Archive contents", {
+      verdict: "malicious",
+      metadata: {
+        format: "zip",
+        reasons: ["eicar.txt: Malicious (ClamAV)"],
+        files: [{ path: "eicar.txt", verdict: "Malicious" }],
+      },
+    });
+    expect(engineFacts(archive)[0].value).toBe("eicar.txt: malicious by ClamAV");
+  });
+
+  it("still lists macOS metadata that was flagged", () => {
+    const archive = engine("Archive contents", {
+      verdict: "malicious",
+      metadata: { format: "zip", files: [{ path: "__MACOSX/._x", verdict: "Malicious", engines: [{ name: "YARA" }] }] },
+    });
+    expect(engineFacts(archive)[0].value).toBe("__MACOSX/._x: malicious by YARA");
+  });
+
+  it("recognises Finder metadata and standard MIME types", () => {
+    expect(isMacMetadata("__MACOSX/._eicar.txt")).toBe(true);
+    expect(isMacMetadata("docs/.DS_Store")).toBe(true);
+    expect(isMacMetadata("docs/._notes")).toBe(true);
+    expect(isMacMetadata("eicar.txt")).toBe(false);
+    expect(mimeLabel("zip")).toBe("application/zip");
+    expect(mimeLabel("executable")).toBe("application/vnd.microsoft.portable-executable");
+    expect(mimeLabel("text/plain")).toBe("text/plain");
+    expect(mimeLabel(null)).toBeUndefined();
   });
 
   it("summarises flags from the vote counts", () => {
