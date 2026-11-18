@@ -49,8 +49,28 @@ export const bountyManagerAbi = parseAbi([
   "function pendingWithdrawals(address) view returns (uint256)",
   "function withdraw()",
   "function paused() view returns (bool)",
+  "struct Analysis { uint256 bountyId; address analyst; uint8 verdict; uint256 confidence; uint256 stakeAmount; string analysisHash; uint256 submittedAt; bool rewarded; }",
+  "function getAnalysis(uint256 bountyId, address analyst) view returns (Analysis)",
+  "function getBountyAnalysts(uint256 bountyId) view returns (address[])",
+  "function isAnalyst(address account) view returns (bool)",
+  "function registerAnalyst()",
+  "function submitAnalysis(uint256 bountyId, uint8 verdict, uint256 confidence, uint256 stakeAmount, string analysisHash)",
+  "function resolveBounty(uint256 bountyId)",
   "event BountyCreated(uint256 indexed bountyId, address indexed creator, string artifactHash, uint256 reward, uint256 deadline)",
 ]);
+
+/** Fixed in the BountyManager contract. */
+export const MIN_STAKE_THREAT = 10;
+export const MIN_ANALYSES_TO_RESOLVE = 5;
+export const CONSENSUS_THRESHOLD_PERCENT = 66;
+export const PLATFORM_FEE_PERCENT = 5;
+
+/** The verdicts an analyst can stake on, as the contract numbers them. */
+export const ANALYST_VERDICTS = [
+  { value: 2, label: "Malicious" },
+  { value: 1, label: "Benign" },
+  { value: 3, label: "Suspicious" },
+] as const;
 
 export const BOUNTY_STATUS = ["Open", "In review", "Completed", "Cancelled", "Disputed"] as const;
 export const BOUNTY_VERDICT = ["Pending", "Benign", "Malicious", "Suspicious"] as const;
@@ -75,6 +95,98 @@ export interface OnChainBounty {
   totalStaked: bigint;
   analysisCount: bigint;
   createdAt: bigint;
+}
+
+export interface OnChainAnalysis {
+  bountyId: bigint;
+  analyst: Address;
+  verdict: number;
+  confidence: bigint;
+  stakeAmount: bigint;
+  analysisHash: string;
+  submittedAt: bigint;
+  rewarded: boolean;
+}
+
+/** The status to show, including an open bounty whose deadline has passed. */
+export function bountyStatusLabel(b: Pick<OnChainBounty, "status" | "deadline" | "consensusVerdict">, nowSec: number): string {
+  if (b.status === 0 && nowSec > Number(b.deadline)) return "Awaiting resolution";
+  if (b.status === 2) {
+    return b.consensusVerdict === 0 ? "Completed: no consensus" : `Completed: ${BOUNTY_VERDICT[b.consensusVerdict]}`;
+  }
+  return BOUNTY_STATUS[b.status] ?? "Unknown";
+}
+
+/** Whether analysts can still submit (the contract allows it up to and including the deadline). */
+export function acceptsAnalyses(b: Pick<OnChainBounty, "status" | "deadline">, nowSec: number): boolean {
+  return b.status === 0 && nowSec <= Number(b.deadline);
+}
+
+/** Whether anyone can resolve the bounty now, mirroring resolveBounty's checks. */
+export function canResolve(b: Pick<OnChainBounty, "status" | "deadline" | "analysisCount">, nowSec: number): boolean {
+  if (b.status !== 0) return false;
+  return nowSec > Number(b.deadline) || b.analysisCount >= BigInt(MIN_ANALYSES_TO_RESOLVE);
+}
+
+export interface Outcome {
+  /** "refund" when nobody analyzed, "no-consensus" or the winning verdict. */
+  kind: "refund" | "no-consensus" | "consensus";
+  verdict?: "Malicious" | "Benign";
+  /** Each analysis's weight is stake × confidence; this is the winner's share, 0-100. */
+  agreementPercent: number;
+  winners: number;
+}
+
+/**
+ * What resolving would do, computed the way the contract does: each analysis
+ * weighs stake × confidence, and Malicious or Benign needs at least 66% of the
+ * total weight. Suspicious counts toward the total but can never win.
+ */
+export function previewOutcome(analyses: Pick<OnChainAnalysis, "verdict" | "confidence" | "stakeAmount">[]): Outcome {
+  if (analyses.length === 0) return { kind: "refund", agreementPercent: 0, winners: 0 };
+  let total = BigInt(0);
+  let malicious = BigInt(0);
+  let benign = BigInt(0);
+  for (const a of analyses) {
+    const w = (a.stakeAmount * a.confidence) / BigInt(100);
+    total += w;
+    if (a.verdict === 2) malicious += w;
+    else if (a.verdict === 1) benign += w;
+  }
+  if (total === BigInt(0)) return { kind: "no-consensus", agreementPercent: 0, winners: 0 };
+  const malPct = Number((malicious * BigInt(100)) / total);
+  const benPct = Number((benign * BigInt(100)) / total);
+  if (malPct >= CONSENSUS_THRESHOLD_PERCENT) {
+    return { kind: "consensus", verdict: "Malicious", agreementPercent: malPct, winners: analyses.filter((a) => a.verdict === 2).length };
+  }
+  if (benPct >= CONSENSUS_THRESHOLD_PERCENT) {
+    return { kind: "consensus", verdict: "Benign", agreementPercent: benPct, winners: analyses.filter((a) => a.verdict === 1).length };
+  }
+  return { kind: "no-consensus", agreementPercent: Math.max(malPct, benPct), winners: 0 };
+}
+
+/** One sentence on what resolving would do. */
+export function outcomeText(o: Outcome, rewardThreat: string): string {
+  if (o.kind === "refund") return `Nobody analyzed it, so resolving cancels it and returns all ${rewardThreat} THREAT to the poster.`;
+  if (o.kind === "no-consensus") {
+    return `No verdict has the ${CONSENSUS_THRESHOLD_PERCENT}% of the weight it needs (the closest has ${o.agreementPercent}%), so resolving returns every stake and gives the poster the reward back less the ${PLATFORM_FEE_PERCENT}% fee.`;
+  }
+  const who = o.winners === 1 ? "The analyst who said so gets" : `The ${o.winners} analysts who said so share`;
+  return `Resolving settles it as ${o.verdict} (${o.agreementPercent}% of the weight). ${who} the reward less the ${PLATFORM_FEE_PERCENT}% fee, plus the stakes of anyone who disagreed.`;
+}
+
+/** A stake the person typed, or an error to show. */
+export function parseStake(input: string): { ok: true; value: string } | { ok: false; error: string } {
+  const r = parseReward(input);
+  if (!r.ok) return { ok: false, error: r.error.replace("reward", "stake") };
+  if (Number(r.value) < MIN_STAKE_THREAT) return { ok: false, error: `The stake must be at least ${MIN_STAKE_THREAT} THREAT` };
+  return r;
+}
+
+/** A link if the analyst's evidence is one, so it isn't rendered as a clickable javascript: URL. */
+export function evidenceLink(text: string): string | null {
+  const t = text.trim();
+  return /^https?:\/\/\S+$/i.test(t) ? t : null;
 }
 
 export function viemChain(info: ChainInfo): Chain {
@@ -159,6 +271,49 @@ export async function latestBounties(info: ChainInfo, limit = 20): Promise<OnCha
     ids.map((id) => client.readContract({ address, abi: bountyManagerAbi, functionName: "getBounty", args: [id] })),
   );
   return results as OnChainBounty[];
+}
+
+/** One bounty and every analysis submitted on it, in submission order. */
+export async function bountyWithAnalyses(
+  info: ChainInfo,
+  id: bigint,
+): Promise<{ bounty: OnChainBounty; analyses: OnChainAnalysis[] }> {
+  const client = publicClientFor(info);
+  const address = info.contracts!.bountyManager;
+  const [bounty, analysts] = await Promise.all([
+    client.readContract({ address, abi: bountyManagerAbi, functionName: "getBounty", args: [id] }),
+    client.readContract({ address, abi: bountyManagerAbi, functionName: "getBountyAnalysts", args: [id] }),
+  ]);
+  const analyses = await Promise.all(
+    analysts.map((a) => client.readContract({ address, abi: bountyManagerAbi, functionName: "getAnalysis", args: [id, a] })),
+  );
+  return { bounty: bounty as OnChainBounty, analyses: analyses as OnChainAnalysis[] };
+}
+
+/**
+ * Make sure the BountyManager may take `amount` from `owner`. If the current
+ * allowance is short, `approve` is asked for exactly that amount (never an
+ * unlimited one) and the approval is awaited. Returns whether it was asked.
+ */
+export async function ensureAllowance(
+  info: ChainInfo,
+  owner: Address,
+  amount: bigint,
+  approve: (spender: Address, amount: bigint) => Promise<Hex>,
+): Promise<boolean> {
+  const reader = publicClientFor(info);
+  const { threatToken, bountyManager } = info.contracts!;
+  const allowance = await reader.readContract({
+    address: threatToken,
+    abi: tokenAbi,
+    functionName: "allowance",
+    args: [owner, bountyManager],
+  });
+  if (allowance >= amount) return false;
+  const hash = await approve(bountyManager, amount);
+  const receipt = await reader.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") throw new Error("The approval was reverted.");
+  return true;
 }
 
 /** A short reason for a failed wallet action, without the wallet's stack of details. */

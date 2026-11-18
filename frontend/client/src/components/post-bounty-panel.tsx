@@ -13,6 +13,7 @@ import {
   bountyArtifact,
   bountyManagerAbi,
   createdBountyId,
+  ensureAllowance,
   explorerTx,
   formatThreat,
   parseReward,
@@ -85,23 +86,11 @@ function PostBountyForm({ info, scan }: { info: ChainInfo; scan: Scan }) {
     if (!client || !wallet.account || !parsed.ok || !artifact.artifactHash) return;
     const reader = publicClientFor(info);
     try {
-      const allowance = await reader.readContract({
-        address: contracts.threatToken,
-        abi: tokenAbi,
-        functionName: "allowance",
-        args: [wallet.account, contracts.bountyManager],
-      });
-      if (allowance < amount) {
-        // Approve exactly this bounty's reward, never an unlimited amount.
-        setStep("approving");
-        const approval = await client.writeContract({
-          address: contracts.threatToken,
-          abi: tokenAbi,
-          functionName: "approve",
-          args: [contracts.bountyManager, amount],
-        });
-        await reader.waitForTransactionReceipt({ hash: approval });
-      }
+      setStep("approving");
+      // Approve exactly this bounty's reward, never an unlimited amount.
+      await ensureAllowance(info, wallet.account, amount, (spender, value) =>
+        client.writeContract({ address: contracts.threatToken, abi: tokenAbi, functionName: "approve", args: [spender, value] }),
+      );
       setStep("creating");
       const deadline = BigInt(Math.floor(Date.now() / 1000) + hours * 3600);
       const hash = await client.writeContract({

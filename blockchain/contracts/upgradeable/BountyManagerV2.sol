@@ -329,10 +329,10 @@ contract BountyManagerV2 is
             "Analyst cap reached"
         );
 
+        // Only registered, active analysts may stake (see BountyManager).
         require(
-            reputationSystem.getReputation(msg.sender) >=
-                reputationSystem.getMinimumReputation(),
-            "Insufficient reputation"
+            reputationSystem.isEligibleEngine(msg.sender),
+            "Not a registered analyst"
         );
 
         // Effects: record the analysis before any external interaction
@@ -369,6 +369,21 @@ contract BountyManagerV2 is
         // NOTE: Resolution is decoupled from submission and triggered explicitly via
         // resolveBounty(), so no single submitter pays to resolve for everyone and
         // submission gas stays bounded.
+    }
+
+    /**
+     * @dev Register the caller as an analyst (see BountyManager.registerAnalyst).
+     */
+    function registerAnalyst() external nonReentrant whenNotPaused {
+        // slither-disable-next-line unused-return
+        reputationSystem.registerEngine(msg.sender, 0);
+    }
+
+    /**
+     * @dev Whether `account` may submit analyses right now.
+     */
+    function isAnalyst(address account) external view returns (bool) {
+        return reputationSystem.isEligibleEngine(account);
     }
 
     /**

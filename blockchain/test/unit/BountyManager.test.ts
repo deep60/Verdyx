@@ -61,7 +61,7 @@ describe("BountyManager", function () {
 
             const analysis = await bountyManager.getAnalysis(bountyId, analyst1.address);
             expect(analysis.analyst).to.equal(analyst1.address);
-            expect(analysis.verdict).to.equal(1); // Malicious
+            expect(analysis.verdict).to.equal(1); // Benign
         });
 
         it("Should enforce minimum stake", async function () {
@@ -102,10 +102,10 @@ describe("BountyManager", function () {
 
             const { bountyId } = await createTestBounty(bountyManager, threatToken, submitter);
 
-            // All analysts agree: Malicious
-            await submitTestAnalysis(bountyManager, threatToken, analyst1, bountyId, 1); // Malicious
-            await submitTestAnalysis(bountyManager, threatToken, analyst2, bountyId, 1); // Malicious
-            await submitTestAnalysis(bountyManager, threatToken, analyst3, bountyId, 1); // Malicious
+            // All analysts agree: Benign
+            await submitTestAnalysis(bountyManager, threatToken, analyst1, bountyId, 1); // Benign
+            await submitTestAnalysis(bountyManager, threatToken, analyst2, bountyId, 1); // Benign
+            await submitTestAnalysis(bountyManager, threatToken, analyst3, bountyId, 1); // Benign
 
             // Advance time past deadline
             await advanceTime(86400 + 1);
@@ -114,7 +114,7 @@ describe("BountyManager", function () {
             await bountyManager.resolveBounty(bountyId);
 
             const bounty = await bountyManager.getBounty(bountyId);
-            expect(bounty.consensusVerdict).to.equal(1); // Malicious
+            expect(bounty.consensusVerdict).to.equal(1); // Benign
             expect(bounty.status).to.equal(2); // Completed
         });
 
@@ -127,7 +127,7 @@ describe("BountyManager", function () {
             const initialBalance1 = await threatToken.balanceOf(analyst1.address);
             const initialBalance2 = await threatToken.balanceOf(analyst2.address);
 
-            // Both agree: Malicious
+            // Both agree: Benign
             await submitTestAnalysis(bountyManager, threatToken, analyst1, bountyId, 1);
             await submitTestAnalysis(bountyManager, threatToken, analyst2, bountyId, 1);
 
@@ -168,10 +168,10 @@ describe("BountyManager", function () {
 
             const initialBalance = await threatToken.balanceOf(analyst3.address);
 
-            // Majority says Malicious, analyst3 says Benign
-            await submitTestAnalysis(bountyManager, threatToken, analyst1, bountyId, 1); // Malicious
-            await submitTestAnalysis(bountyManager, threatToken, analyst2, bountyId, 1); // Malicious
-            await submitTestAnalysis(bountyManager, threatToken, analyst3, bountyId, 2, 90); // Benign - wrong!
+            // Majority says Benign, analyst3 says Malicious
+            await submitTestAnalysis(bountyManager, threatToken, analyst1, bountyId, 1); // Benign
+            await submitTestAnalysis(bountyManager, threatToken, analyst2, bountyId, 1); // Benign
+            await submitTestAnalysis(bountyManager, threatToken, analyst3, bountyId, 2, 90); // Malicious - outvoted
 
             // Add more correct submissions — keep under auto-resolve threshold (10 total)
             // 3 already submitted above, add 4 more = 7 total (under 10)
@@ -183,7 +183,7 @@ describe("BountyManager", function () {
                 await (await ethers.getContractAt("ReputationSystem", await bountyManager.reputationSystem())).registerEngine(analyst.address, 0);
                 await threatToken.transfer(analyst.address, ethers.parseEther("1000"));
 
-                await submitTestAnalysis(bountyManager, threatToken, analyst, bountyId, 1); // Malicious
+                await submitTestAnalysis(bountyManager, threatToken, analyst, bountyId, 1); // Benign
             }
 
             // Advance time past deadline and resolve manually
@@ -389,6 +389,76 @@ describe("BountyManager", function () {
                     .connect(deployer)
                     .emergencyWithdraw(await threatToken.getAddress(), 1n)
             ).to.be.revertedWith("Contract must be paused");
+        });
+    });
+
+    describe("Analyst registration", function () {
+        it("Should reject an analysis from an unregistered wallet", async function () {
+            const { bountyManager, threatToken, submitter, users } = await loadFixture(deployFixture);
+            const { bountyId } = await createTestBounty(bountyManager, threatToken, submitter);
+            const stranger = users[0];
+            await threatToken.transfer(stranger.address, ethers.parseEther("100"));
+
+            await expect(
+                submitTestAnalysis(bountyManager, threatToken, stranger, bountyId)
+            ).to.be.revertedWith("Not a registered analyst");
+        });
+
+        it("Should let a wallet register itself and then be paid", async function () {
+            const { bountyManager, threatToken, reputationSystem, submitter, users } = await loadFixture(deployFixture);
+            const { bountyId } = await createTestBounty(bountyManager, threatToken, submitter);
+            const newcomer = users[1];
+            await threatToken.transfer(newcomer.address, ethers.parseEther("100"));
+
+            expect(await bountyManager.isAnalyst(newcomer.address)).to.equal(false);
+            await expect(bountyManager.connect(newcomer).registerAnalyst())
+                .to.emit(reputationSystem, "EngineRegistered")
+                .withArgs(newcomer.address, 0, 100);
+            expect(await bountyManager.isAnalyst(newcomer.address)).to.equal(true);
+
+            await submitTestAnalysis(bountyManager, threatToken, newcomer, bountyId, 1);
+            await advanceTime(86400 + 1);
+            await bountyManager.resolveBounty(bountyId);
+
+            // Sole analyst: stake back plus the reward minus the 5% fee.
+            expect(await bountyManager.pendingWithdrawals(newcomer.address)).to.equal(
+                ethers.parseEther("10") + ethers.parseEther("95")
+            );
+            expect(await reputationSystem.getReputation(newcomer.address)).to.be.greaterThan(100n);
+        });
+
+        it("Should refuse to register the same wallet twice", async function () {
+            const { bountyManager, users } = await loadFixture(deployFixture);
+            await bountyManager.connect(users[2]).registerAnalyst();
+            await expect(bountyManager.connect(users[2]).registerAnalyst()).to.be.revertedWith(
+                "Engine already registered"
+            );
+        });
+
+        it("Should not let a deactivated analyst register again for a fresh score", async function () {
+            const { bountyManager, reputationSystem, analyst1 } = await loadFixture(deployFixture);
+            await reputationSystem.deactivateEngine(analyst1.address);
+
+            await expect(bountyManager.connect(analyst1).registerAnalyst()).to.be.revertedWith(
+                "Engine already registered"
+            );
+            expect(await bountyManager.isAnalyst(analyst1.address)).to.equal(false);
+        });
+
+        it("Should still resolve when an analyst was deactivated after submitting", async function () {
+            const { bountyManager, threatToken, reputationSystem, submitter, analyst1, analyst2 } =
+                await loadFixture(deployFixture);
+            const { bountyId } = await createTestBounty(bountyManager, threatToken, submitter);
+
+            await submitTestAnalysis(bountyManager, threatToken, analyst1, bountyId, 1);
+            await submitTestAnalysis(bountyManager, threatToken, analyst2, bountyId, 1);
+            await reputationSystem.deactivateEngine(analyst2.address);
+
+            await advanceTime(86400 + 1);
+            await bountyManager.resolveBounty(bountyId);
+
+            expect((await bountyManager.getBounty(bountyId)).status).to.equal(2); // Completed
+            expect(await bountyManager.pendingWithdrawals(analyst2.address)).to.be.greaterThan(0n);
         });
     });
 });
