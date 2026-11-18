@@ -8,10 +8,14 @@
 //! so it is never sent to browsers: `PUBLIC_CHAIN_RPC_URL`, or the network's
 //! public endpoint, is published instead.
 
-use axum::{extract::State, Json};
-use serde::Serialize;
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    Json,
+};
+use serde::{Deserialize, Serialize};
 
-use crate::{config::BlockchainConfig, AppState};
+use crate::{config::BlockchainConfig, services::chain_indexer::artifact_key, AppState};
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -140,6 +144,105 @@ pub async fn get_chain(State(state): State<AppState>) -> Json<ChainInfo> {
     ))
 }
 
+/// The RPC the server itself reads the chain through: `BLOCKCHAIN_RPC_URL`,
+/// or the network's public endpoint when that is empty. Never published.
+pub(crate) fn server_rpc_url(cfg: &BlockchainConfig) -> Option<String> {
+    let own = cfg.rpc_url.trim();
+    if !own.is_empty() {
+        return Some(own.to_string());
+    }
+    known_network(cfg.chain_id).map(|n| n.rpc.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BountiesQuery {
+    /// A file's SHA-256 or a URL, as a bounty points at it.
+    pub artifact: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexedBountyView {
+    #[sqlx(rename = "bounty_id")]
+    pub id: i64,
+    pub creator: String,
+    pub artifact_hash: String,
+    pub artifact_type: String,
+    pub description: String,
+    /// In the smallest unit of THREAT, as a decimal string (uint256).
+    #[sqlx(rename = "reward_wei")]
+    pub reward: String,
+    #[sqlx(rename = "total_staked_wei")]
+    pub total_staked: String,
+    /// Unix seconds.
+    pub deadline: i64,
+    pub status: i16,
+    pub consensus_verdict: i16,
+    pub analysis_count: i32,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BountiesResponse {
+    /// False when the marketplace isn't configured, so nothing is indexed.
+    pub indexed: bool,
+    pub bounties: Vec<IndexedBountyView>,
+}
+
+/// `GET /api/v1/chain/bounties?artifact=<sha256 or URL>`: public.
+/// The bounties posted on one file or URL, newest first, from the indexer's
+/// copy of the chain (it lags the chain by up to one indexer cycle).
+pub async fn get_chain_bounties(
+    State(state): State<AppState>,
+    Query(q): Query<BountiesQuery>,
+) -> Result<Json<BountiesResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let key = artifact_key(&q.artifact);
+    if key.is_empty() || key.len() > 2048 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "artifact must be a SHA-256 or a URL" })),
+        ));
+    }
+    let cfg = &state.config.blockchain;
+    let info = chain_info(cfg, None, None);
+    let Some(contracts) = info.contracts.filter(|_| info.enabled) else {
+        return Ok(Json(BountiesResponse {
+            indexed: false,
+            bounties: vec![],
+        }));
+    };
+    let bounties = sqlx::query_as::<_, IndexedBountyView>(
+        r#"
+        SELECT bounty_id, creator, artifact_hash, artifact_type, description,
+               reward_wei, total_staked_wei,
+               EXTRACT(EPOCH FROM deadline)::BIGINT AS deadline,
+               status, consensus_verdict, analysis_count,
+               EXTRACT(EPOCH FROM created_on_chain)::BIGINT AS created_at
+        FROM chain_bounties
+        WHERE chain_id = $1 AND contract = $2 AND artifact_key = $3
+        ORDER BY bounty_id DESC
+        LIMIT 20
+        "#,
+    )
+    .bind(cfg.chain_id as i64)
+    .bind(contracts.bounty_manager.to_lowercase())
+    .bind(key)
+    .fetch_all(state.db.pool())
+    .await
+    .map_err(|e| {
+        tracing::error!("chain bounties lookup failed: {e}");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Couldn't look up bounties" })),
+        )
+    })?;
+    Ok(Json(BountiesResponse {
+        indexed: true,
+        bounties,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +302,28 @@ mod tests {
         assert!(info.enabled);
         assert_eq!(info.rpc_url.as_deref(), Some("https://rpc.example"));
         assert_eq!(info.explorer_url, None);
+    }
+
+    #[test]
+    fn the_server_reads_through_its_own_rpc_or_the_public_one() {
+        let c = cfg(84532, TOKEN, BOUNTY);
+        assert_eq!(
+            server_rpc_url(&c).as_deref(),
+            Some("https://base-sepolia.g.alchemy.com/v2/server-only")
+        );
+        let public = BlockchainConfig {
+            rpc_url: " ".into(),
+            ..cfg(84532, TOKEN, BOUNTY)
+        };
+        assert_eq!(
+            server_rpc_url(&public).as_deref(),
+            Some("https://sepolia.base.org")
+        );
+        let unknown = BlockchainConfig {
+            rpc_url: String::new(),
+            ..cfg(999, TOKEN, BOUNTY)
+        };
+        assert_eq!(server_rpc_url(&unknown), None);
     }
 
     #[test]

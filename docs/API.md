@@ -228,6 +228,36 @@ wallet; the server never holds their tokens.
 configured. `rpcUrl` is `PUBLIC_CHAIN_RPC_URL` or the network's public
 endpoint, never the server's own `BLOCKCHAIN_RPC_URL`.
 
+### Bounties on a file or URL
+
+`GET /api/v1/chain/bounties?artifact=<SHA-256 or URL>` (public) lists the
+bounties posted on one file or URL, newest first, at most 20. Matching ignores
+case and surrounding spaces.
+
+```json
+{
+  "indexed": true,
+  "bounties": [
+    {
+      "id": 1, "creator": "0x…", "artifactHash": "d5fb…", "artifactType": "file",
+      "description": "…", "reward": "40000000000000000000", "totalStaked": "0",
+      "deadline": 1795028842, "status": 0, "consensusVerdict": 0,
+      "analysisCount": 0, "createdAt": 1795021643
+    }
+  ]
+}
+```
+
+- `reward` and `totalStaked` are in THREAT's smallest unit (18 decimals), as strings.
+- `deadline` and `createdAt` are Unix seconds.
+- `status`: 0 open, 1 in review, 2 completed, 3 cancelled, 4 disputed.
+- `consensusVerdict`: 0 none, 1 benign, 2 malicious, 3 suspicious.
+
+This reads the gateway's copy of the chain, which an indexer refreshes every
+30 seconds (`CHAIN_INDEX_INTERVAL_SECS`), so a new bounty can take that long to
+appear. `indexed` is false when the marketplace isn't configured. The contract
+is the source of truth: the bounty page reads it directly.
+
 ## Threat feed (STIX 2.1 / TAXII 2.1)
 
 Scans that end malicious or suspicious are published as STIX 2.1 `indicator`s:

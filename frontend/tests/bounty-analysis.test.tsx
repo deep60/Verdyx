@@ -147,3 +147,28 @@ describe("the bounty page's actions", () => {
     expect(html).not.toContain("Resolve bounty");
   });
 });
+
+describe("bounties on a scan, from the server's index", () => {
+  it("turns the indexed JSON into the same shape the chain reads give", async () => {
+    const { fromIndexed } = await import("@/lib/chain");
+    const b = fromIndexed({
+      id: 3,
+      creator: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+      artifactHash: "ab12",
+      artifactType: "file",
+      description: "d",
+      reward: "100000000000000000000",
+      totalStaked: "not-a-number",
+      deadline: 2_000,
+      status: 2,
+      consensusVerdict: 1,
+      analysisCount: 4,
+      createdAt: 1_000,
+    });
+    expect(b.id).toBe(BigInt(3));
+    expect(b.rewardAmount).toBe(T(100));
+    expect(b.totalStaked).toBe(BigInt(0));
+    expect(b.analysisCount).toBe(BigInt(4));
+    expect(bountyStatusLabel(b, 0)).toBe("Completed: Benign");
+  });
+});

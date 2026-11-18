@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { parseUnits, type Hex } from "viem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ScanBounties } from "@/components/scan-bounties";
 import { WalletGate } from "@/components/wallet-gate";
 import { useChainInfo, useWallet } from "@/hooks/use-wallet";
 import { useToast } from "@/hooks/use-toast";
@@ -45,7 +47,12 @@ export function PostBountyPanel({ scan }: { scan: Scan }) {
       </p>
     );
   }
-  return <PostBountyForm info={info} scan={scan} />;
+  return (
+    <>
+      <ScanBounties artifact={bountyArtifact(scan).artifactHash} />
+      <PostBountyForm info={info} scan={scan} />
+    </>
+  );
 }
 
 function PostBountyForm({ info, scan }: { info: ChainInfo; scan: Scan }) {
@@ -105,6 +112,7 @@ function PostBountyForm({ info, scan }: { info: ChainInfo; scan: Scan }) {
       setStep("done");
       queryClient.invalidateQueries({ queryKey: ["threat-balance"] });
       queryClient.invalidateQueries({ queryKey: ["onchain-bounties"] });
+      queryClient.invalidateQueries({ queryKey: ["scan-bounties"] });
     } catch (err) {
       setStep("idle");
       toast({ title: "The bounty wasn't posted", description: walletErrorMessage(err), variant: "destructive" });
@@ -118,6 +126,11 @@ function PostBountyForm({ info, scan }: { info: ChainInfo; scan: Scan }) {
         <p className="font-medium text-foreground">
           Bounty {result.id !== null ? `#${result.id}` : ""} posted: {reward} THREAT on {info.chainName}.
         </p>
+        {result.id !== null && (
+          <Link href={`/marketplace/bounties/${result.id}`} className="mr-4 text-primary underline">
+            Open the bounty
+          </Link>
+        )}
         {link ? (
           <a className="text-primary underline" href={link} target="_blank" rel="noreferrer">
             View the transaction
