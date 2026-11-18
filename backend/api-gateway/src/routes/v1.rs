@@ -6,8 +6,8 @@ use axum::{
 
 use crate::{
     handlers::{
-        analysis, auth, bounty, consensus_proxy, engines, health, oauth, organization, reputation,
-        submission, user, wallet, web_intel, webhook,
+        analysis, auth, bounty, chain, consensus_proxy, engines, health, oauth, organization,
+        reputation, submission, user, wallet, web_intel, webhook,
     },
     middleware::{auth as auth_mw, rate_limiter},
     AppState,
@@ -18,7 +18,8 @@ pub fn create_routes(state: AppState) -> Router {
     // ── Public routes (no auth) ──────────────────────────
     let public_routes = Router::new()
         .nest("/health", health_routes())
-        .nest("/auth", auth_routes(state.clone()));
+        .nest("/auth", auth_routes(state.clone()))
+        .route("/chain", get(chain::get_chain));
 
     // ── Mixed routes (optional auth) ─────────────────────
     let mixed_routes = Router::new()

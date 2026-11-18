@@ -11,6 +11,7 @@ pub mod analysis;
 pub mod audit;
 pub mod auth;
 pub mod bounty;
+pub mod chain;
 pub mod consensus_proxy;
 pub mod data;
 pub mod engines;

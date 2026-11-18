@@ -64,6 +64,32 @@ The deploy script refuses to run again on a network that already has a
 recorded deployment. Tick **redeploy** to replace it (the old contracts stay
 on chain; they are just no longer used).
 
+## Turning the marketplace on in the website
+
+The marketplace is **non-custodial**: people post bounties, stake and
+withdraw from their own wallets (MetaMask, Coinbase Wallet, Rabby…), and
+every transaction is signed there. The server never holds anyone's tokens.
+
+The website learns which network and contracts to use from
+`GET /api/v1/chain`. Set these on the server (in `/opt/verdyx/.env`) from
+`deployed-addresses.json`, then restart the API gateway:
+
+| Setting | Value |
+|---|---|
+| `CHAIN_ID` | `84532` |
+| `THREAT_TOKEN_ADDRESS` | ThreatToken's address |
+| `BOUNTY_MANAGER_ADDRESS` | BountyManager's address |
+| `REPUTATION_SYSTEM_ADDRESS` | ReputationSystem's address |
+| `PUBLIC_CHAIN_RPC_URL` (optional) | what browsers use; defaults to `https://sepolia.base.org`. Never put a URL with a private provider key here: it is published |
+| `CHAIN_EXPLORER_URL` (optional) | defaults to `https://sepolia.basescan.org` |
+
+`BLOCKCHAIN_RPC_URL` stays the server's own RPC and is never sent to
+browsers. Until the addresses are set, the website says the marketplace
+isn't deployed yet.
+
+To try it, people need test ETH for gas (from the faucets above) and some
+THREAT: the deployer holds the supply and can send it from its wallet.
+
 ## Running it from your own machine instead
 
 ```bash

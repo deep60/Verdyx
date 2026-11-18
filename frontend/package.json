@@ -72,6 +72,7 @@
     "recharts": "^2.15.4",
     "tailwind-merge": "^3.3.1",
     "vaul": "^1.1.2",
+    "viem": "2.57.16",
     "wouter": "^3.7.1",
     "ws": "^8.18.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
