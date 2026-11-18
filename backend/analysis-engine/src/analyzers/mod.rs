@@ -1655,6 +1655,40 @@ fn verdict_rank(v: &ThreatVerdict) -> u8 {
     }
 }
 
+/// The voting engines that flagged a file (malicious or suspicious).
+fn flagging_engines(r: &AnalysisResult) -> impl Iterator<Item = &DetectionResult> {
+    r.detections
+        .iter()
+        .filter(|d| d.non_vote().is_none() && verdict_rank(&d.verdict) >= 2)
+}
+
+/// What an engine says it found, when it names it: ClamAV's signature, the
+/// first matched YARA or signature rule, or a known malware family.
+pub(crate) fn detection_signature(d: &DetectionResult) -> Option<String> {
+    let text = |v: &serde_json::Value| {
+        v.as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+    };
+    if let Some(sig) = d.metadata.get("signature").and_then(text) {
+        return Some(sig);
+    }
+    if let Some(first) = d
+        .metadata
+        .get("matches")
+        .and_then(|m| m.as_array())
+        .and_then(|m| m.first())
+    {
+        for key in ["rule_name", "rule", "name", "signature_name"] {
+            if let Some(name) = first.get(key).and_then(text) {
+                return Some(name);
+            }
+        }
+    }
+    d.metadata.get("malware_family").and_then(text)
+}
+
 /// One vote for an archive, from the consensus verdicts of the files inside:
 /// the worst of them. A file inside judged Malicious decides the archive's
 /// verdict ([`INNER_FILE_KEY`]): engines reading the compressed container
@@ -1677,11 +1711,11 @@ pub(crate) fn archive_contents_detection(
         .iter()
         .filter(|(_, r)| verdict_rank(&r.consensus_verdict) >= 2)
         .map(|(path, r)| {
-            let engines: Vec<&str> = r
-                .detections
-                .iter()
-                .filter(|d| d.non_vote().is_none() && verdict_rank(&d.verdict) >= 2)
-                .map(|d| d.engine_name.as_str())
+            let engines: Vec<String> = flagging_engines(r)
+                .map(|d| match detection_signature(d) {
+                    Some(sig) => format!("{}: {sig}", d.engine_name),
+                    None => d.engine_name.clone(),
+                })
                 .collect();
             format!("{path}: {:?} ({})", r.consensus_verdict, engines.join(", "))
         })
@@ -1727,6 +1761,13 @@ pub(crate) fn archive_contents_detection(
                 "sha256": r.file_metadata.sha256,
                 "verdict": format!("{:?}", r.consensus_verdict),
                 "explanation": r.consensus_explanation,
+                "engines": flagging_engines(r)
+                    .map(|d| serde_json::json!({
+                        "name": d.engine_name,
+                        "verdict": format!("{:?}", d.verdict),
+                        "signature": detection_signature(d),
+                    }))
+                    .collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -2147,5 +2188,97 @@ mod pdf_tests {
     async fn other_files_get_no_pdf_row() {
         let r = analyse("notes.txt", b"just some text".to_vec()).await;
         assert!(pdf_row(&r).is_none());
+    }
+
+    fn vote(
+        name: &str,
+        verdict: ThreatVerdict,
+        meta: &[(&str, serde_json::Value)],
+    ) -> DetectionResult {
+        DetectionResult {
+            detection_id: uuid::Uuid::new_v4(),
+            engine_name: name.to_string(),
+            engine_version: "1".to_string(),
+            engine_type: EngineType::Static,
+            verdict,
+            confidence: 0.9,
+            severity: SeverityLevel::Info,
+            categories: vec![],
+            metadata: meta
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect(),
+            detected_at: chrono::Utc::now(),
+            processing_time_ms: 1,
+            error_message: None,
+        }
+    }
+
+    #[test]
+    fn archive_files_name_the_engine_and_signature_that_flagged_them() {
+        use crate::scanners::unpack::{ArchiveFormat, Unpacked};
+        let unpacked = Unpacked {
+            format: ArchiveFormat::Zip,
+            members: vec![],
+            skipped: vec![],
+            password: None,
+            locked: false,
+        };
+        let eicar = AnalysisResult {
+            consensus_verdict: ThreatVerdict::Malicious,
+            detections: vec![
+                vote(
+                    "ClamAV",
+                    ThreatVerdict::Malicious,
+                    &[("signature", serde_json::json!("Eicar-Test-Signature"))],
+                ),
+                vote(
+                    "YARA Engine",
+                    ThreatVerdict::Suspicious,
+                    &[("matches", serde_json::json!([{ "rule_name": "Test_Rule" }]))],
+                ),
+                vote("Static Analyzer", ThreatVerdict::Benign, &[]),
+            ],
+            ..Default::default()
+        };
+        let clean = AnalysisResult {
+            consensus_verdict: ThreatVerdict::Benign,
+            detections: vec![vote("Static Analyzer", ThreatVerdict::Benign, &[])],
+            ..Default::default()
+        };
+
+        let scanned = vec![
+            ("eicar.txt".to_string(), eicar),
+            ("readme.txt".to_string(), clean),
+        ];
+        let d = archive_contents_detection(&unpacked, &scanned, &[]);
+
+        let files = d.metadata["files"].as_array().unwrap();
+        let engines = files[0]["engines"].as_array().unwrap();
+        assert_eq!(engines.len(), 2, "only the engines that flagged it");
+        assert_eq!(engines[0]["name"], "ClamAV");
+        assert_eq!(engines[0]["signature"], "Eicar-Test-Signature");
+        assert_eq!(engines[1]["signature"], "Test_Rule");
+        assert!(files[1]["engines"].as_array().unwrap().is_empty());
+        assert_eq!(
+            d.metadata["reasons"][0],
+            "eicar.txt: Malicious (ClamAV: Eicar-Test-Signature, YARA Engine: Test_Rule)"
+        );
+    }
+
+    #[test]
+    fn detection_signature_falls_back_to_the_malware_family() {
+        let d = vote(
+            "MalwareBazaar",
+            ThreatVerdict::Malicious,
+            &[("malware_family", serde_json::json!("AgentTesla"))],
+        );
+        assert_eq!(detection_signature(&d).as_deref(), Some("AgentTesla"));
+        let none = vote(
+            "Heuristic Engine",
+            ThreatVerdict::Suspicious,
+            &[("signature", serde_json::json!("  "))],
+        );
+        assert_eq!(detection_signature(&none), None);
     }
 }

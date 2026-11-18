@@ -113,6 +113,10 @@ export function engineFacts(a: ApiAnalysis): Fact[] {
   const family = str(m.malware_family);
   if (family && arr(m.listings).length === 0) facts.push({ label: "Malware family", value: family, tone: "danger" });
 
+  // The name of what the engine detected, e.g. ClamAV's "Win.Test.EICAR_HDB-1".
+  const signature = str(m.signature);
+  if (signature) facts.push({ label: "Signature", value: signature, tone: role === "flagged" ? "danger" : undefined });
+
   for (const f of arr(m.findings)) {
     const sev = str(f.severity);
     facts.push({
@@ -161,16 +165,28 @@ export function engineFacts(a: ApiAnalysis): Fact[] {
   const inside = arr(m.files);
   if (inside.length > 0) {
     const format = str(m.format) ?? "archive";
-    const ranked = [...inside].sort((x, y) => verdictWeight(str(y.verdict)) - verdictWeight(str(x.verdict)));
+    // Finder's hidden metadata is summarised in one line unless it was flagged.
+    const finder = inside.filter((f) => isMacMetadata(str(f.path)) && verdictWeight(str(f.verdict)) < 2);
+    const listed = inside.filter((f) => !finder.includes(f));
+    const ranked = [...listed].sort((x, y) => verdictWeight(str(y.verdict)) - verdictWeight(str(x.verdict)));
     for (const f of ranked.slice(0, 10)) {
       const verdict = str(f.verdict) ?? "Unknown";
+      const path = str(f.path) ?? "file";
+      const by = verdictWeight(verdict) >= 2 ? flaggedBy(f, path, m.reasons) : "";
       facts.push({
         label: `Inside the ${format}`,
-        value: `${str(f.path) ?? "file"}: ${verdictText(verdict)}`,
+        value: `${path}: ${verdictText(verdict)}${by ? ` by ${by}` : ""}`,
         tone: verdict === "Malicious" ? "danger" : verdict === "Suspicious" ? "warning" : "muted",
       });
     }
-    if (inside.length > 10) facts.push({ label: `Inside the ${format}`, value: `and ${inside.length - 10} more` });
+    if (listed.length > 10) facts.push({ label: `Inside the ${format}`, value: `and ${listed.length - 10} more` });
+    if (finder.length > 0) {
+      facts.push({
+        label: `Inside the ${format}`,
+        value: `${finder.length} macOS metadata ${finder.length === 1 ? "file" : "files"} (added by Finder when zipping): not flagged`,
+        tone: "muted",
+      });
+    }
   }
   const password = str(m.password_used);
   if (password) facts.push({ label: "Opened with password", value: password });
@@ -185,12 +201,52 @@ export function engineFacts(a: ApiAnalysis): Fact[] {
   return facts;
 }
 
+/** Hidden files macOS Finder adds to archives: __MACOSX/…, ._name, .DS_Store. */
+export function isMacMetadata(path?: string): boolean {
+  if (!path) return false;
+  const name = path.split("/").pop() ?? "";
+  return path.startsWith("__MACOSX/") || name.startsWith("._") || name === ".DS_Store";
+}
+
+/** "ClamAV (Eicar-Test-Signature)" for a flagged file inside an archive. */
+function flaggedBy(f: Meta, path: string, reasons: unknown): string {
+  const engines = arr(f.engines)
+    .map((e) => {
+      const name = str(e.name);
+      const sig = str(e.signature);
+      return name ? (sig ? `${name} (${sig})` : name) : undefined;
+    })
+    .filter(Boolean);
+  if (engines.length > 0) return engines.join(", ");
+  // Scans from before engines were recorded per file: "path: Malicious (ClamAV, YARA)".
+  const line = Array.isArray(reasons)
+    ? reasons.find((r): r is string => typeof r === "string" && r.startsWith(`${path}: `))
+    : undefined;
+  const m = line?.match(/\(([^()]+)\)$/);
+  return m ? m[1] : "";
+}
+
 function verdictWeight(v?: string): number {
   return v === "Malicious" ? 3 : v === "Suspicious" ? 2 : v === "Benign" ? 1 : 0;
 }
 
 function verdictText(v: string): string {
   return v === "Benign" ? "nothing found" : v === "Unknown" ? "no verdict" : v.toLowerCase();
+}
+
+// Scans stored before the gateway recorded real MIME types used short labels.
+const LEGACY_MIME: Record<string, string> = {
+  zip: "application/zip",
+  pdf: "application/pdf",
+  elf: "application/x-executable",
+  executable: "application/vnd.microsoft.portable-executable",
+  unknown: "application/octet-stream",
+};
+
+/** A MIME type in its standard form ("application/zip", not "zip"). */
+export function mimeLabel(v?: string | null): string | undefined {
+  if (!v) return undefined;
+  return LEGACY_MIME[v.toLowerCase()] ?? v;
 }
 
 export function formatBytes(n: number): string {
