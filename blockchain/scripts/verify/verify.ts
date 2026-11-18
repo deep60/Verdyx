@@ -1,87 +1,60 @@
-import { run } from "hardhat";
+// Publishes the source of a deployment on the block explorer (Etherscan v2,
+// which covers Base Sepolia). Reads the addresses deploy.ts saved:
+//
+//   ETHERSCAN_API_KEY=... npx hardhat run scripts/verify/verify.ts --network baseSepolia
 
-interface _ContractToVerify {
-    address: string;
-    constructorArguments: unknown[];
-    contract?: string;
-}
+import hre, { ethers, run } from "hardhat";
+import { readFileSync } from "fs";
+import { deploymentFile, type DeploymentAddresses } from "../deploy";
 
-/**
- * Verify a contract on Etherscan/Polygonscan
- */
-async function verifyContract(
-    address: string,
-    constructorArguments: unknown[],
-    contractPath?: string
-) {
-    console.log(`\n🔍 Verifying contract at ${address}...`);
-
+async function verifyContract(address: string, constructorArguments: unknown[], contract: string) {
+    console.log(`\n🔍 Verifying ${contract} at ${address}...`);
     try {
-        await run("verify:verify", {
-            address,
-            constructorArguments,
-            contract: contractPath
-        });
-        console.log(`   ✅ Verified successfully!`);
+        await run("verify:verify", { address, constructorArguments, contract });
+        console.log("   ✅ Verified");
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.toLowerCase().includes("already verified")) {
-            console.log(`   ℹ️  Contract already verified`);
+            console.log("   ℹ️  Already verified");
         } else {
-            console.error(`   ❌ Verification failed:`, message);
             throw error;
         }
     }
 }
 
-/**
- * Verify all Verdyx contracts
- */
-async function verifyAllContracts(
-    threatTokenAddress: string,
-    reputationSystemAddress: string,
-    bountyManagerAddress: string,
-    feeCollectorAddress: string
-) {
-    console.log("🔍 Verifying all Verdyx contracts...\n");
-
-    // Verify ThreatToken
+async function verifyAllContracts(d: DeploymentAddresses) {
+    // Older deployment files predate feeCollector; the deployer was the collector then.
+    const feeCollector = d.feeCollector || d.deployer;
+    await verifyContract(d.threatToken, [d.deployer], "contracts/core/ThreatToken.sol:ThreatToken");
+    await verifyContract(d.reputationSystem, [], "contracts/core/ReputationSystem.sol:ReputationSystem");
     await verifyContract(
-        threatTokenAddress,
-        [feeCollectorAddress], // admin address
-        "contracts/core/ThreatToken.sol:ThreatToken"
-    );
-
-    // Verify ReputationSystem
-    await verifyContract(
-        reputationSystemAddress,
-        [],
-        "contracts/core/ReputationSystem.sol:ReputationSystem"
-    );
-
-    // Verify BountyManager
-    await verifyContract(
-        bountyManagerAddress,
-        [threatTokenAddress, reputationSystemAddress, feeCollectorAddress],
+        d.bountyManager,
+        [d.threatToken, d.reputationSystem, feeCollector],
         "contracts/core/BountyManager.sol:BountyManager"
     );
-
-    console.log("\n✅ All contracts verified!");
+    await verifyContract(d.governance, [d.threatToken], "contracts/core/Governance.sol:Governance");
+    console.log("\n✅ All contracts verified");
 }
 
-// Allow script to be run directly
-if (require.main === module) {
-    const args = process.argv.slice(2);
-    if (args.length < 4) {
-        console.error("Usage: npx hardhat run scripts/verify/verify.ts --network <network> -- <threatToken> <reputationSystem> <bountyManager> <feeCollector>");
-        process.exit(1);
+async function main() {
+    if (["hardhat", "localhost"].includes(hre.network.name)) {
+        console.log("Verification is not needed on a local network.");
+        return;
     }
+    if (!process.env.ETHERSCAN_API_KEY) {
+        throw new Error("❌ Set ETHERSCAN_API_KEY to verify on the block explorer.");
+    }
+    const { chainId } = await ethers.provider.getNetwork();
+    const file = deploymentFile(hre.network.name, chainId);
+    const deployment: DeploymentAddresses = JSON.parse(readFileSync(file, "utf8"));
+    await verifyAllContracts(deployment);
+}
 
-    const [threatToken, reputationSystem, bountyManager, feeCollector] = args;
-
-    verifyAllContracts(threatToken, reputationSystem, bountyManager, feeCollector)
+if (require.main === module) {
+    main()
         .then(() => process.exit(0))
         .catch((error) => {
+            console.error("❌ Verification failed:");
             console.error(error);
             process.exit(1);
         });

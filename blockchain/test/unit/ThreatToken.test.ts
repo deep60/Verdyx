@@ -1,7 +1,7 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { ThreatToken } from "../../typechain-types";
-import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
+import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 
 describe("ThreatToken", function () {
     async function deployTokenFixture() {

@@ -1,0 +1,110 @@
+name: Deploy contracts
+
+# Manual only. Deploys the marketplace contracts to a test network, verifies
+# their source on the block explorer, and uploads the addresses.
+# Setup: docs/deployment/contracts-base-sepolia.md
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: Network
+        type: choice
+        options: [baseSepolia]
+        default: baseSepolia
+      redeploy:
+        description: Replace the deployment already recorded in the repository
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-contracts-${{ inputs.network }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.network }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The secrets live in this GitHub environment, so they can be limited to
+    # this workflow and given required reviewers.
+    environment: base-sepolia
+    defaults:
+      run:
+        working-directory: ./blockchain
+    env:
+      NETWORK: ${{ inputs.network }}
+      BASE_SEPOLIA_RPC: ${{ vars.BASE_SEPOLIA_RPC }}
+      FEE_COLLECTOR_ADDRESS: ${{ vars.FEE_COLLECTOR_ADDRESS }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: blockchain/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test before deploying
+        run: npx hardhat test
+
+      - name: Deploy
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          REDEPLOY: ${{ inputs.redeploy }}
+        run: npx hardhat run scripts/deploy.ts --network "$NETWORK"
+
+      - name: Configure roles
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+        run: npx hardhat run scripts/setup.ts --network "$NETWORK"
+
+      # The explorer needs a moment to index new contracts. A failure here
+      # leaves the deployment intact; rerun verify:base-sepolia later.
+      - name: Verify source on the block explorer
+        continue-on-error: true
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        run: |
+          sleep 30
+          for attempt in 1 2 3; do
+            npx hardhat run scripts/verify/verify.ts --network "$NETWORK" && exit 0
+            echo "Verification attempt $attempt failed; retrying in 30 seconds"
+            sleep 30
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          f=$(ls deployments/"$NETWORK"-*.json 2>/dev/null | head -1)
+          if [ -z "$f" ]; then echo "No deployment was written." >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          explorer=https://sepolia.basescan.org/address
+          {
+            echo "### Deployed to $NETWORK (chain $(jq -r .chainId "$f"))"
+            echo
+            echo "| Contract | Address |"
+            echo "|---|---|"
+            for k in threatToken reputationSystem bountyManager governance deployer feeCollector; do
+              a=$(jq -r ".$k" "$f")
+              echo "| $k | [\`$a\`]($explorer/$a) |"
+            done
+            echo
+            echo "Download the **contract-deployment** artifact and commit \`blockchain/deployments/\` and \`blockchain/deployed-addresses.json\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the addresses
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-deployment
+          path: |
+            blockchain/deployments/
+            blockchain/deployed-addresses.json
+          if-no-files-found: ignore

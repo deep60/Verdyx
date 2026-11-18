@@ -4,7 +4,7 @@
 // Validates system configuration against deployed constants
 // Prepares initial analysis engines for registration
 
-import { ethers } from "hardhat";
+import hre, { ethers } from "hardhat";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { DeploymentAddresses } from "./deploy";
@@ -194,11 +194,12 @@ async function main() {
     const network = await ethers.provider.getNetwork();
     const [deployer] = await ethers.getSigners();
 
-    console.log(`📡 Network: ${network.name} (Chain ID: ${network.chainId})`);
+    console.log(`📡 Network: ${hre.network.name} (Chain ID: ${network.chainId})`);
     console.log(`👤 Setup Account: ${deployer.address}\n`);
 
     // Load deployment addresses
-    const deploymentAddresses = await loadDeploymentAddresses(network.name, Number(network.chainId));
+    // The Hardhat network name (e.g. baseSepolia), as deploy.ts saves it.
+    const deploymentAddresses = await loadDeploymentAddresses(hre.network.name, Number(network.chainId));
     console.log("✅ Loaded deployment addresses");
 
     // Load configuration
