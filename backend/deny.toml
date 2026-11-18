@@ -20,6 +20,10 @@ ignore = [
     "RUSTSEC-2026-0381",
     "RUSTSEC-2026-0382",
     "RUSTSEC-2026-0387",
+    # chrono is unmaintained (September 2026) but has no known vulnerability.
+    # Every service, sqlx and the JSON models use its types; replacing it
+    # (e.g. with jiff) is a migration of its own.
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]

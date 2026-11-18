@@ -109,9 +109,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Mythril's dependencies (cffi among them) ship wheels for 3.12; on a newer
+      # runner Python pip builds cffi from source, which fails.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install Mythril
         run: |
-          pipx install mythril
+          pipx install --python "$(command -v python3.12)" mythril
           # Mythril still imports pkg_resources, which setuptools 81 removed.
           pipx inject mythril "setuptools<81"
 
