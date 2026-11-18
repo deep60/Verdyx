@@ -38,6 +38,12 @@ const config: HardhatUserConfig = {
     localhost: {
       url: "http://127.0.0.1:8545",
     },
+    // Base Sepolia, the test network the marketplace runs on first.
+    baseSepolia: {
+      url: process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org",
+      chainId: 84532,
+      accounts: getPrivateKey(),
+    },
     sepolia: {
       url: process.env.SEPOLIA_RPC || process.env.RPC_URL || "",
       accounts: getPrivateKey(),
@@ -55,16 +61,16 @@ const config: HardhatUserConfig = {
       accounts: getPrivateKey(),
     },
   },
+  // One Etherscan API key (v2) verifies on every chain it covers, Base Sepolia
+  // included.
   etherscan: {
-    apiKey: {
-      mainnet: process.env.ETHERSCAN_API || process.env.ETHERSCAN_API_KEY || "",
-      sepolia: process.env.ETHERSCAN_API || process.env.ETHERSCAN_API_KEY || "",
-      polygon: process.env.POLYGONSCAN_API || "",
-      polygonMumbai: process.env.POLYGONSCAN_API || "",
-    },
+    apiKey: process.env.ETHERSCAN_API_KEY || "",
+  },
+  sourcify: {
+    enabled: false,
   },
   gasReporter: {
-    enabled: true,
+    enabled: process.env.REPORT_GAS === "true",
     currency: "USD",
     coinmarketcap: process.env.CMC_API_KEY || "",
   },

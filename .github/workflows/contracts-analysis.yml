@@ -49,6 +49,43 @@ jobs:
         with:
           sarif_file: ${{ steps.slither.outputs.sarif }}
 
+  hardhat:
+    name: Hardhat Tests + Deploy Dry Run
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./blockchain
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: blockchain/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npx hardhat test
+
+      # The same scripts the Deploy contracts workflow runs, against a
+      # throwaway local node.
+      - name: Deploy and configure on a local node
+        run: |
+          npx hardhat node > node.log 2>&1 &
+          for i in $(seq 60); do
+            curl -sf -X POST -H 'content-type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              http://127.0.0.1:8545 >/dev/null && break
+            sleep 1
+          done
+          npx hardhat run scripts/deploy.ts --network localhost
+          npx hardhat run scripts/setup.ts --network localhost
+
   mythril:
     name: Mythril (Symbolic Execution)
     runs-on: ubuntu-latest

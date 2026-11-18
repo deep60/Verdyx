@@ -19,3 +19,4 @@ This folder contains the operational docs for local development, deployment, arc
 2. Test workflow: `docs/development/testing-guide.md`
 3. API usage: `docs/API.md`
 4. Production rollout: `docs/deployment/production.md`
+5. Contracts on Base Sepolia: `docs/deployment/contracts-base-sepolia.md`
