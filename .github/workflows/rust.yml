@@ -255,7 +255,14 @@ jobs:
           LLVM_PROFILE_FILE: "coverage/%p-%m.profraw"
         run: |
           cargo nextest run --workspace --lib --bins --profile ci
-          grcov . --binary-path ./target/debug/deps -s . -t lcov --branch --ignore-not-existing --ignore "/*" --ignore "*/.cargo/*" --ignore "*/tests/*" -o lcov.info
+          # Rust 1.100 no longer leaves test binaries in target/debug/deps, so
+          # ask nextest where they are and link them into one folder for grcov.
+          mkdir -p coverage-bins
+          cargo nextest list --workspace --lib --bins --message-format json \
+            | jq -r '."rust-binaries"[]."binary-path"' \
+            | while read -r bin; do ln -f "$bin" coverage-bins/; done
+          echo "$(ls coverage-bins | wc -l) test binaries"
+          grcov . --binary-path ./coverage-bins -s . -t lcov --branch --ignore-not-existing --ignore "/*" --ignore "*/.cargo/*" --ignore "*/tests/*" -o lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
