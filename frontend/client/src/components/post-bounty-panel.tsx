@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { FaucetButton } from "@/components/faucet";
 import { ScanBounties } from "@/components/scan-bounties";
 import { WalletGate } from "@/components/wallet-gate";
 import { useChainInfo, useWallet } from "@/hooks/use-wallet";
@@ -166,6 +167,7 @@ function PostBountyForm({ info, scan }: { info: ChainInfo; scan: Scan }) {
             {!parsed.ok && reward ? ` ${parsed.error}.` : ""}
             {tooMuch ? " That's more than you have." : ""}
           </p>
+          {(tooMuch || balance.data === BigInt(0)) && <FaucetButton info={info} wallet={wallet} />}
         </div>
         <div className="space-y-1.5">
           <Label>Analysts have</Label>

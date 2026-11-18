@@ -29,6 +29,8 @@ export interface ChainInfo {
     threatToken: Address;
     bountyManager: Address;
     reputationSystem?: Address | null;
+    /** Hands out test THREAT; only on test networks. */
+    threatFaucet?: Address | null;
   } | null;
 }
 
@@ -58,6 +60,31 @@ export const bountyManagerAbi = parseAbi([
   "function resolveBounty(uint256 bountyId)",
   "event BountyCreated(uint256 indexed bountyId, address indexed creator, string artifactHash, uint256 reward, uint256 deadline)",
 ]);
+
+export const faucetAbi = parseAbi([
+  "function claim()",
+  "function nextClaimAt(address account) view returns (uint256)",
+  "function dripAmount() view returns (uint256)",
+]);
+
+export type FaucetState =
+  | { kind: "ready"; drip: bigint }
+  | { kind: "wait"; drip: bigint; until: number }
+  | { kind: "empty"; drip: bigint };
+
+/** Whether `account` can claim now, must wait, or the faucet has run dry. */
+export function faucetState(drip: bigint, nextClaimAt: bigint, faucetBalance: bigint): FaucetState {
+  if (nextClaimAt > BigInt(0)) return { kind: "wait", drip, until: Number(nextClaimAt) };
+  if (faucetBalance < drip) return { kind: "empty", drip };
+  return { kind: "ready", drip };
+}
+
+/** Where to get test ETH for network fees, for networks that have a public faucet. */
+export function testEthFaucetUrl(chainId: number): string | null {
+  if (chainId === 84532) return "https://docs.base.org/base-chain/tools/network-faucets";
+  if (chainId === 11155111) return "https://sepoliafaucet.com";
+  return null;
+}
 
 /** Fixed in the BountyManager contract. */
 export const MIN_STAKE_THREAT = 10;

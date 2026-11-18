@@ -4,6 +4,7 @@ import { useNowSec } from "@/hooks/use-now";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FaucetButton } from "@/components/faucet";
 import { WalletGate } from "@/components/wallet-gate";
 import { useChainInfo, useWallet } from "@/hooks/use-wallet";
 import { useToast } from "@/hooks/use-toast";
@@ -56,6 +57,7 @@ function YourWallet({ info }: { info: ChainInfo }) {
     // The chain changes outside this app (rewards, refunds), so don't keep it forever.
     staleTime: 10_000,
     refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const client = publicClientFor(info);
       const [balance, owed] = await Promise.all([
@@ -114,6 +116,9 @@ function YourWallet({ info }: { info: ChainInfo }) {
               {withdrawing ? "Confirm in your wallet…" : "Withdraw"}
             </Button>
           )}
+        </div>
+        <div className="mt-3">
+          <FaucetButton info={info} wallet={wallet} />
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           Rewards and returned stakes wait in the contract until you withdraw them. Only your wallet can.

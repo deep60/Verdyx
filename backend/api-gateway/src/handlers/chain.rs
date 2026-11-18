@@ -36,6 +36,8 @@ pub struct Contracts {
     pub threat_token: String,
     pub bounty_manager: String,
     pub reputation_system: Option<String>,
+    /// Hands out test THREAT; test networks only.
+    pub threat_faucet: Option<String>,
 }
 
 struct Network {
@@ -117,6 +119,7 @@ pub(crate) fn chain_info(
             threat_token,
             bounty_manager,
             reputation_system: contract_address(&cfg.contracts.reputation_system),
+            threat_faucet: None,
         }),
         _ => None,
     };
@@ -133,15 +136,31 @@ pub(crate) fn chain_info(
     }
 }
 
+/// Chains where THREAT would have real value: no faucet is ever published there.
+const MAINNETS: [u64; 3] = [1, 8453, 137];
+
+/// The faucet address to publish (`THREAT_FAUCET_ADDRESS`), never on a mainnet.
+fn faucet_for(chain_id: u64, raw: Option<&str>) -> Option<String> {
+    if MAINNETS.contains(&chain_id) {
+        return None;
+    }
+    raw.and_then(contract_address)
+}
+
 /// `GET /api/v1/chain`: public.
 pub async fn get_chain(State(state): State<AppState>) -> Json<ChainInfo> {
     let public_rpc = std::env::var("PUBLIC_CHAIN_RPC_URL").ok();
     let explorer = std::env::var("CHAIN_EXPLORER_URL").ok();
-    Json(chain_info(
+    let faucet = std::env::var("THREAT_FAUCET_ADDRESS").ok();
+    let mut info = chain_info(
         &state.config.blockchain,
         public_rpc.as_deref(),
         explorer.as_deref(),
-    ))
+    );
+    if let Some(c) = info.contracts.as_mut() {
+        c.threat_faucet = faucet_for(info.chain_id, faucet.as_deref());
+    }
+    Json(info)
 }
 
 /// The RPC the server itself reads the chain through: `BLOCKCHAIN_RPC_URL`,
@@ -302,6 +321,19 @@ mod tests {
         assert!(info.enabled);
         assert_eq!(info.rpc_url.as_deref(), Some("https://rpc.example"));
         assert_eq!(info.explorer_url, None);
+    }
+
+    #[test]
+    fn the_faucet_is_published_on_test_networks_only() {
+        assert_eq!(faucet_for(84532, Some(TOKEN)).as_deref(), Some(TOKEN));
+        assert_eq!(faucet_for(31337, Some(TOKEN)).as_deref(), Some(TOKEN));
+        assert_eq!(faucet_for(8453, Some(TOKEN)), None, "Base mainnet");
+        assert_eq!(faucet_for(1, Some(TOKEN)), None, "Ethereum mainnet");
+        assert_eq!(
+            faucet_for(84532, Some("0x0000000000000000000000000000000000000000")),
+            None
+        );
+        assert_eq!(faucet_for(84532, None), None);
     }
 
     #[test]

@@ -13,6 +13,11 @@ interface DeploymentAddresses {
     reputationSystem: string;
     bountyManager: string;
     governance: string;
+    /** Test networks only: hands out test THREAT. */
+    threatFaucet?: string;
+    /** The faucet's constructor arguments, for verification. */
+    faucetDripWei?: string;
+    faucetCooldownSecs?: number;
     deployer: string;
     feeCollector: string;
     network: string;
@@ -101,6 +106,28 @@ async function main(): Promise<DeploymentAddresses> {
     await (await threatToken.transfer(bountyManagerAddress, rewardPoolAmount)).wait();
     console.log(`✅ Transferred ${ethers.formatEther(rewardPoolAmount)} THREAT to BountyManager`);
 
+    // A faucet so people can try the marketplace with test THREAT. Never on a
+    // mainnet: there, THREAT would have real value.
+    let threatFaucet: string | undefined;
+    const faucetDrip = ethers.parseEther(process.env.FAUCET_DRIP_THREAT || "100");
+    const faucetCooldown = Number(process.env.FAUCET_COOLDOWN_SECS || 24 * 3600);
+    if (!MAINNET_CHAIN_IDS.has(chainId)) {
+        console.log("\n🚰 Deploying ThreatFaucet...");
+        const faucet = await (await ethers.getContractFactory("ThreatFaucet")).deploy(
+            threatTokenAddress,
+            faucetDrip,
+            faucetCooldown
+        );
+        await faucet.waitForDeployment();
+        threatFaucet = await faucet.getAddress();
+        const faucetFund = ethers.parseEther(process.env.FAUCET_FUND_THREAT || "1000000");
+        await (await threatToken.transfer(threatFaucet, faucetFund)).wait();
+        console.log(
+            `✅ ThreatFaucet deployed at: ${threatFaucet} with ${ethers.formatEther(faucetFund)} THREAT, ` +
+                `${ethers.formatEther(faucetDrip)} per wallet every ${faucetCooldown / 3600} h`
+        );
+    }
+
     const currentBlock = await ethers.provider.getBlockNumber();
     const timestamp = Math.floor(Date.now() / 1000);
 
@@ -109,6 +136,9 @@ async function main(): Promise<DeploymentAddresses> {
         reputationSystem: reputationSystemAddress,
         bountyManager: bountyManagerAddress,
         governance: governanceAddress,
+        ...(threatFaucet
+            ? { threatFaucet, faucetDripWei: faucetDrip.toString(), faucetCooldownSecs: faucetCooldown }
+            : {}),
         deployer: deployer.address,
         feeCollector,
         network: networkName,
@@ -141,6 +171,7 @@ async function main(): Promise<DeploymentAddresses> {
             ReputationSystem: entry(reputationSystemAddress),
             BountyManager: entry(bountyManagerAddress),
             Governance: entry(governanceAddress),
+            ...(threatFaucet ? { ThreatFaucet: entry(threatFaucet) } : {}),
         },
         notes: `Deployed to ${networkName} (chainId ${chainId}).`,
     };
@@ -155,6 +186,7 @@ async function main(): Promise<DeploymentAddresses> {
     console.log(`ReputationSystem: ${reputationSystemAddress}`);
     console.log(`BountyManager: ${bountyManagerAddress}`);
     console.log(`Governance: ${governanceAddress}`);
+    if (threatFaucet) console.log(`ThreatFaucet: ${threatFaucet}`);
     console.log("═".repeat(50));
     console.log(`📁 Deployment data saved to: ${file}`);
     console.log(`\n🔍 Verify the source with: npx hardhat run scripts/verify/verify.ts --network ${networkName}`);
