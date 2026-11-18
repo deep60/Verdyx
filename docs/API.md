@@ -206,6 +206,28 @@ A rule that doesn't compile ends as `failed`, with the compiler's message.
 
 Each file gets 10 seconds. A hunt covers at most 5,000 files and runs for at most 15 minutes. Only stored files are searched, and those are kept for 30 days. API keys need the `scan` scope; team keys can't hunt.
 
+## Marketplace network
+
+`GET /api/v1/chain` (public) tells the website which network and contracts the
+marketplace uses. People sign every marketplace transaction in their own
+wallet; the server never holds their tokens.
+
+```json
+{
+  "enabled": true,
+  "chainId": 84532,
+  "chainName": "Base Sepolia",
+  "nativeCurrency": "ETH",
+  "rpcUrl": "https://sepolia.base.org",
+  "explorerUrl": "https://sepolia.basescan.org",
+  "contracts": { "threatToken": "0x…", "bountyManager": "0x…", "reputationSystem": "0x…" }
+}
+```
+
+`enabled` is false (and `contracts` null) until the contract addresses are
+configured. `rpcUrl` is `PUBLIC_CHAIN_RPC_URL` or the network's public
+endpoint, never the server's own `BLOCKCHAIN_RPC_URL`.
+
 ## Threat feed (STIX 2.1 / TAXII 2.1)
 
 Scans that end malicious or suspicious are published as STIX 2.1 `indicator`s:

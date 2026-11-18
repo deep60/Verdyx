@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Navigation } from "@/components/navigation";
 import { EngineCard } from "@/components/engine-card";
 import { BountyCard } from "@/components/bounty-card";
+import { OnChainBounties } from "@/components/onchain-bounties";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -316,6 +317,19 @@ export default function Marketplace() {
                 </CardContent>
               </Card>
             </div>
+          </section>
+
+          {/* Bounties on chain, signed in each person's own wallet */}
+          <section className="mb-16" aria-labelledby="onchain-heading">
+            <div className="mb-6">
+              <h2 id="onchain-heading" className="text-3xl sm:text-4xl font-bold font-display tracking-[-0.03em] mb-2">
+                On-chain bounties
+              </h2>
+              <p className="text-sm sm:text-base text-muted-foreground">
+                Posted and paid in THREAT from people's own wallets, read straight from the contract.
+              </p>
+            </div>
+            <OnChainBounties />
           </section>
 
           {/* Active Bounties Section */}

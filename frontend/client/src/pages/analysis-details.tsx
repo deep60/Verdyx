@@ -8,6 +8,7 @@ import { SEO } from "@/components/seo";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExportReport } from "@/components/export-report";
+import { PostBountyPanel } from "@/components/post-bounty-panel";
 import { CommitRevealPanel } from "@/components/commit-reveal-panel";
 import { WebsiteIntelligencePanel } from "@/components/website-intelligence-panel";
 import { EmailForensicsPanel } from "@/components/email-forensics-panel";
@@ -539,6 +540,25 @@ export default function AnalysisDetails() {
             </dl>
           </TabsContent>
         </Tabs>
+
+        <section className="mt-10 border border-border bg-card/50 p-6" aria-labelledby="bounty-heading">
+          <h2 id="bounty-heading" className="mb-1 text-lg font-medium text-foreground">
+            Bounty
+          </h2>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Want more analysts on this? Post a THREAT bounty from your own wallet; analysts stake on a verdict and the
+            ones who agree with the consensus share it.
+          </p>
+          <PostBountyPanel
+            scan={{
+              id: submission.id,
+              targetType,
+              sha256: submission.fileHash,
+              url: isUrlTarget ? target : null,
+              verdictLabel: verdict.label,
+            }}
+          />
+        </section>
 
         {/* Analyst review exists only for scans posted with a bounty. */}
         {submission.bountyId && consensus && (
