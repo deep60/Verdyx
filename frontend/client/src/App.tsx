@@ -20,6 +20,7 @@ import { CommandPalette } from "@/components/command-palette";
 
 const Dashboard = lazy(() => import("@/pages/dashboard"));
 const Marketplace = lazy(() => import("@/pages/marketplace"));
+const OnChainBounty = lazy(() => import("@/pages/onchain-bounty"));
 const ApiDocs = lazy(() => import("@/pages/api-docs"));
 const Login = lazy(() => import("@/pages/login"));
 const Register = lazy(() => import("@/pages/register"));
@@ -65,6 +66,8 @@ function Router() {
             <Dashboard />
           </ProtectedRoute>
         </Route>
+        {/* Read from the chain; nothing private, so it's shareable without signing in. */}
+        <Route path="/marketplace/bounties/:id" component={OnChainBounty} />
         <Route path="/marketplace">
           <ProtectedRoute>
             <Marketplace />

@@ -90,6 +90,30 @@ isn't deployed yet.
 To try it, people need test ETH for gas (from the faucets above) and some
 THREAT: the deployer holds the supply and can send it from its wallet.
 
+## How a bounty runs
+
+Everything below happens in people's own wallets; Verdyx's server signs nothing.
+
+1. **Posting.** Anyone with THREAT posts a bounty from a scan report's **Bounty** section. The reward goes into the
+   BountyManager contract.
+2. **Registering.** An analyst registers their wallet once (**Register as analyst** on any bounty page,
+   `/marketplace/bounties/<id>`). This calls `BountyManager.registerAnalyst()`, which registers them in the
+   ReputationSystem at a reputation of 100. Only registered, active analysts can submit; a wallet can't register twice,
+   so a deactivated analyst can't start over with a fresh score.
+3. **Analyzing.** Until the deadline, each registered analyst can submit once: a verdict (Malicious, Benign or
+   Suspicious), a confidence from 1 to 100, a stake of at least 10 THREAT, and evidence (a short reason or a link),
+   which is stored on the chain.
+4. **Resolving.** Anyone can resolve a bounty after its deadline, or as soon as 5 analyses are in. Each analysis
+   weighs stake × confidence:
+   - Malicious or Benign with at least 66% of the weight wins. Those who said so get their stake back and share the
+     reward less the 5% platform fee, plus the stakes of everyone who disagreed. Suspicious never wins.
+   - With no consensus, every stake is returned and the poster gets the reward back less the fee.
+   - With no analyses, the poster gets the whole reward back.
+
+   Reputation rises for analysts who matched the consensus and falls for those who didn't.
+5. **Withdrawing.** Payouts wait in the contract until each person presses **Withdraw** in **Your wallet** on the
+   marketplace page.
+
 ## Running it from your own machine instead
 
 ```bash

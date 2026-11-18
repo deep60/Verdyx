@@ -283,11 +283,12 @@ contract BountyManager is ReentrancyGuard {
             "Analyst cap reached"
         );
 
-        // Check reputation requirements
+        // Only registered, active analysts may stake. Resolution updates every
+        // analyst's reputation, so an unregistered one would make it revert and
+        // lock the bounty's funds.
         require(
-            reputationSystem.getReputation(msg.sender) >=
-                reputationSystem.getMinimumReputation(),
-            "Insufficient reputation"
+            reputationSystem.isEligibleEngine(msg.sender),
+            "Not a registered analyst"
         );
 
         // Effects: record the analysis before any external interaction
@@ -329,6 +330,25 @@ contract BountyManager is ReentrancyGuard {
         // explicitly via resolveBounty() so that no single submitter is forced to pay
         // the gas to resolve on behalf of everyone, and so submission cost stays
         // bounded and predictable.
+    }
+
+    /**
+     * @dev Register the caller as an analyst (a Human engine) in the reputation
+     *      system, starting at its initial reputation. Anyone may join: the stake
+     *      each analysis puts at risk is what discourages throwaway wallets.
+     *      This contract holds BOUNTY_MANAGER_ROLE in ReputationSystem.
+     */
+    function registerAnalyst() external nonReentrant notPaused {
+        // Reverts with "Engine already registered" for an active analyst.
+        // slither-disable-next-line unused-return
+        reputationSystem.registerEngine(msg.sender, 0);
+    }
+
+    /**
+     * @dev Whether `account` may submit analyses right now.
+     */
+    function isAnalyst(address account) external view returns (bool) {
+        return reputationSystem.isEligibleEngine(account);
     }
 
     /**

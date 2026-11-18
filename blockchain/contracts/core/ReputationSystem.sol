@@ -174,7 +174,12 @@ contract ReputationSystem is IReputationSystem, AccessControl {
         uint8 engineType
     ) external override onlyRole(BOUNTY_MANAGER_ROLE) returns (bool success) {
         require(engineAddress != address(0), "Invalid engine address");
-        require(!engines[engineAddress].isActive, "Engine already registered");
+        // Once registered, always registered: a deactivated engine comes back
+        // only through reactivateEngine, keeping its history and score.
+        require(
+            !engines[engineAddress].isRegistered,
+            "Engine already registered"
+        );
         require(engineType <= 2, "Invalid engine type");
 
         engines[engineAddress] = EngineProfile({
@@ -367,7 +372,12 @@ contract ReputationSystem is IReputationSystem, AccessControl {
         returns (uint256 newReputation)
     {
         EngineProfile storage profile = engines[engineAddress];
-        require(profile.isActive, "Engine not active");
+        // An analyst deactivated after submitting keeps their score frozen.
+        // Reverting here would stop the bounty from resolving and lock every
+        // other analyst's stake and reward with it.
+        if (!profile.isActive) {
+            return profile.reputation;
+        }
 
         uint256 oldReputation = profile.reputation;
 

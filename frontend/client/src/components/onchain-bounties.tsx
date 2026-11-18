@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Link } from "wouter";
+import { useNowSec } from "@/hooks/use-now";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,9 +8,8 @@ import { WalletGate } from "@/components/wallet-gate";
 import { useChainInfo, useWallet } from "@/hooks/use-wallet";
 import { useToast } from "@/hooks/use-toast";
 import {
-  BOUNTY_STATUS,
-  BOUNTY_VERDICT,
   bountyManagerAbi,
+  bountyStatusLabel,
   explorerAddress,
   explorerTx,
   formatThreat,
@@ -167,13 +168,16 @@ function BountyList({ info }: { info: ChainInfo }) {
 }
 
 function BountyRow({ b, info }: { b: OnChainBounty; info: ChainInfo }) {
-  const status = BOUNTY_STATUS[b.status] ?? "Unknown";
-  const verdict = BOUNTY_VERDICT[b.consensusVerdict] ?? "Pending";
+  const now = useNowSec(30_000);
   const deadline = new Date(Number(b.deadline) * 1000);
   const creatorLink = explorerAddress(info, b.creator);
   return (
     <tr className="border-t border-border align-top">
-      <td className="px-4 py-2 font-mono">{b.id.toString()}</td>
+      <td className="px-4 py-2 font-mono">
+        <Link href={`/marketplace/bounties/${b.id}`} className="text-primary underline" data-testid={`link-bounty-${b.id}`}>
+          {b.id.toString()}
+        </Link>
+      </td>
       <td className="max-w-[16rem] px-4 py-2">
         <div className="truncate font-mono text-xs" title={b.artifactHash}>
           {b.artifactHash}
@@ -184,7 +188,7 @@ function BountyRow({ b, info }: { b: OnChainBounty; info: ChainInfo }) {
       </td>
       <td className="px-4 py-2 font-mono">{formatThreat(b.rewardAmount)}</td>
       <td className="px-4 py-2">
-        <Badge variant="outline">{status === "Completed" ? `${status}: ${verdict}` : status}</Badge>
+        <Badge variant="outline">{bountyStatusLabel(b, now)}</Badge>
       </td>
       <td className="px-4 py-2 font-mono">{b.analysisCount.toString()}</td>
       <td className="px-4 py-2 whitespace-nowrap">{deadline.toLocaleString()}</td>

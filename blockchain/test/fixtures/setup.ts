@@ -130,7 +130,7 @@ export async function submitTestAnalysis(
     threatToken: ThreatToken,
     analyst: HardhatEthersSigner,
     bountyId: bigint,
-    verdict: number = 1, // 1 = Malicious
+    verdict: number = 1, // ThreatVerdict: 1 = Benign, 2 = Malicious, 3 = Suspicious
     confidence: number = 90,
     stakeAmount: bigint = ethers.parseEther("10")
 ) {
