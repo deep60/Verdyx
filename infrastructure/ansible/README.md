@@ -45,7 +45,6 @@ Store these in `group_vars/all/vault.yml` encrypted with `ansible-vault`:
 - `vault_redis_password`
 - `vault_jwt_secret`
 - `vault_minio_root_password`
-- `vault_treasury_private_key`
 - `vault_smtp_password`
 
 The roles render `.env` from these into `/opt/verdyx/.env` with mode 0600.

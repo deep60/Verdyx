@@ -111,11 +111,6 @@ spec:
             configMapKeyRef:
               name: verdyx-blockchain-config
               key: token_contract_address
-        - name: PRIVATE_KEY
-          valueFrom:
-            secretKeyRef:
-              name: verdyx-blockchain-secret
-              key: private_key
         
         # Application configuration
         - name: RUST_LOG

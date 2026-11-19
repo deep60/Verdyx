@@ -36,6 +36,10 @@ pub enum PaymentError {
 
     #[error("Lock error: {0}")]
     LockError(String),
+
+    /// An operation that needed the server to send tokens, which it no longer does.
+    #[error("Not supported: {0}")]
+    NotSupported(String),
 }
 
 /// Payment transaction record

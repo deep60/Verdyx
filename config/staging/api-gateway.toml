@@ -30,7 +30,6 @@ default_ttl_seconds = 3600
 [blockchain]
 rpc_url = "${BLOCKCHAIN_RPC_URL}"
 chain_id = 11155111
-private_key = "${BLOCKCHAIN_PRIVATE_KEY}"
 gas_limit = 500000
 gas_price_gwei = 20
 gas_price_multiplier = 1.2

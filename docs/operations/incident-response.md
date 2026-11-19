@@ -137,12 +137,12 @@ Root-cause the cron/permissions/storage issue before closing.
 
 Treat as **SEV1** by default.
 
-- **Suspected key compromise (`TREASURY_PRIVATE_KEY`, JWT signing key,
-  DB creds):**
+- **Suspected key compromise (JWT signing key, DB creds, the contract
+  deployer key):**
   1. Rotate the affected secret immediately in the secrets manager and
      restart consumers.
-  2. For the treasury key, move funds to a fresh KMS/hardware-wallet key
-     and update `*_ADDRESS`/signer config.
+  2. For the deployer key, transfer contract ownership and roles to a fresh
+     key and replace the GitHub environment value.
   3. For `JWT_SECRET`, rotating it invalidates all issued tokens — expect
      mass logout. This is acceptable during a breach.
   4. Follow the DB credential rotation runbook:

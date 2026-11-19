@@ -1,20 +1,22 @@
+//! Payment records, with no treasury key.
+//!
+//! This service used to send tokens from a server-held treasury: bounty
+//! rewards, withdrawals and stake slashing. On-chain bounties now pay out from
+//! the BountyManager contract itself, and people withdraw in their own wallets,
+//! so those operations are refused with [`PaymentError::NotSupported`]. Reads
+//! and off-chain records remain.
+
 use anyhow::{Context, Result};
-use ethers::middleware::SignerMiddleware;
 use ethers::prelude::*;
-use ethers::signers::{LocalWallet, Signer};
 use redis::aio::ConnectionManager;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
-use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::blockchain::{BlockchainProvider, TokenContract};
 use crate::config::Config;
 use crate::models::*;
-
-/// Signer-bound client used for treasury-authored transactions.
-pub type SignerClient = SignerMiddleware<BlockchainProvider, LocalWallet>;
 
 pub struct PaymentService {
     config: Config,
@@ -58,20 +60,6 @@ impl PaymentService {
         })
     }
 
-    /// Build a treasury-signing client (provider + treasury wallet).
-    fn signer_client(&self) -> Result<Arc<SignerClient>> {
-        let wallet = self
-            .config
-            .blockchain
-            .treasury_private_key
-            .parse::<LocalWallet>()
-            .context("Invalid treasury private key")?
-            .with_chain_id(self.config.blockchain.chain_id);
-
-        let client = SignerMiddleware::new(self.provider()?.clone(), wallet);
-        Ok(Arc::new(client))
-    }
-
     fn token_contract(&self) -> Result<TokenContract<Provider<Ws>>> {
         let addr: Address = self
             .config
@@ -80,16 +68,6 @@ impl PaymentService {
             .parse()
             .context("Invalid token contract address")?;
         Ok(TokenContract::new(addr, self.provider()?.clone()))
-    }
-
-    fn token_contract_signed(&self) -> Result<TokenContract<SignerClient>> {
-        let addr: Address = self
-            .config
-            .blockchain
-            .token_contract_address
-            .parse()
-            .context("Invalid token contract address")?;
-        Ok(TokenContract::new(addr, self.signer_client()?))
     }
 
     // -- Reads ------------------------------------------------------------
@@ -136,49 +114,6 @@ impl PaymentService {
             .await,
             Ok(Ok(_))
         )
-    }
-
-    // -- Treasury-signed transfers ---------------------------------------
-
-    /// Transfer tokens FROM the treasury to `to`, waiting for confirmations.
-    /// Returns the transaction receipt on success.
-    async fn treasury_transfer(
-        &self,
-        to: &str,
-        amount: U256,
-    ) -> Result<ethers::types::TransactionReceipt> {
-        let to_addr: Address = to.parse().context("Invalid recipient address")?;
-        let token = self.token_contract_signed()?;
-
-        // Ensure the treasury can cover it.
-        let treasury: Address = self
-            .config
-            .blockchain
-            .treasury_address
-            .parse()
-            .context("Invalid treasury address")?;
-        let balance = token.balance_of(treasury).call().await?;
-        if balance < amount {
-            anyhow::bail!("Treasury balance {balance} below required {amount}");
-        }
-
-        let call = token.transfer(to_addr, amount);
-        let pending = call.send().await.context("Failed to broadcast transfer")?;
-
-        info!("Treasury transfer broadcast: {:?}", pending.tx_hash());
-
-        let confirmations = self.config.blockchain.confirmation_blocks as usize;
-        let receipt = pending
-            .confirmations(confirmations.max(1))
-            .await
-            .context("Failed waiting for confirmations")?
-            .ok_or_else(|| anyhow::anyhow!("Transfer dropped from mempool"))?;
-
-        if receipt.status != Some(1u64.into()) {
-            anyhow::bail!("Transfer reverted on-chain: {:?}", receipt.transaction_hash);
-        }
-
-        Ok(receipt)
     }
 
     // -- Persistence helpers ---------------------------------------------
@@ -276,128 +211,26 @@ impl PaymentService {
 
     // -- High-level operations -------------------------------------------
 
-    /// Distribute a bounty reward: treasury → winner, real transfer.
+    /// Refused: rewards for on-chain bounties are paid by the BountyManager
+    /// contract when anyone resolves the bounty.
     pub async fn distribute_reward(
         &self,
-        req: &DistributeBountyRequest,
+        _req: &DistributeBountyRequest,
     ) -> PaymentResult<PaymentResponse> {
-        let amount_wei = Self::to_wei(&req.amount)?;
-        let payment_id = self
-            .insert_payment(
-                Some(req.bounty_id),
-                &self.config.blockchain.treasury_address,
-                &req.winner_address,
-                req.amount,
-                PaymentType::BountyReward,
-                PaymentStatus::Processing,
-            )
-            .await?;
-
-        match self
-            .treasury_transfer(&req.winner_address, amount_wei)
-            .await
-        {
-            Ok(receipt) => {
-                let tx_hash = format!("{:?}", receipt.transaction_hash);
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
-                self.mark_payment(
-                    payment_id,
-                    PaymentStatus::Completed,
-                    Some(&tx_hash),
-                    block,
-                    None,
-                )
-                .await?;
-                Ok(PaymentResponse {
-                    success: true,
-                    payment_id: Some(payment_id),
-                    tx_hash: Some(tx_hash),
-                    message: "Bounty reward distributed".to_string(),
-                    estimated_completion_time: None,
-                })
-            }
-            Err(e) => {
-                self.mark_payment(
-                    payment_id,
-                    PaymentStatus::Failed,
-                    None,
-                    None,
-                    Some(&e.to_string()),
-                )
-                .await?;
-                Err(PaymentError::TransactionFailed(e.to_string()))
-            }
-        }
+        Err(PaymentError::NotSupported(
+            "this service holds no treasury key; the BountyManager contract pays rewards when a bounty is resolved".into(),
+        ))
     }
 
-    /// Process a withdrawal: treasury → user, minus fee.
+    /// Refused: winners withdraw from the BountyManager contract in their own
+    /// wallets.
     pub async fn process_withdrawal(
         &self,
-        req: &WithdrawRequest,
+        _req: &WithdrawRequest,
     ) -> PaymentResult<PaymentResponse> {
-        let min = U256::from_dec_str(&self.config.payment.min_withdraw_amount).unwrap_or_default();
-        let max = U256::from_dec_str(&self.config.payment.max_withdraw_amount).unwrap_or(U256::MAX);
-        let amount_wei = Self::to_wei(&req.amount)?;
-
-        if amount_wei < min {
-            return Err(PaymentError::ValidationError(format!(
-                "amount below minimum withdrawal ({min})"
-            )));
-        }
-        if amount_wei > max {
-            return Err(PaymentError::ValidationError(format!(
-                "amount above maximum withdrawal ({max})"
-            )));
-        }
-
-        // Apply withdrawal fee.
-        let fee_bps = (self.config.payment.withdraw_fee_percentage * 100.0) as u64;
-        let fee = amount_wei * U256::from(fee_bps) / U256::from(10_000u64);
-        let net = amount_wei.saturating_sub(fee);
-
-        let payment_id = self
-            .insert_payment(
-                None,
-                &self.config.blockchain.treasury_address,
-                &req.to_address,
-                req.amount,
-                PaymentType::Withdrawal,
-                PaymentStatus::Processing,
-            )
-            .await?;
-
-        match self.treasury_transfer(&req.to_address, net).await {
-            Ok(receipt) => {
-                let tx_hash = format!("{:?}", receipt.transaction_hash);
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
-                self.mark_payment(
-                    payment_id,
-                    PaymentStatus::Completed,
-                    Some(&tx_hash),
-                    block,
-                    None,
-                )
-                .await?;
-                Ok(PaymentResponse {
-                    success: true,
-                    payment_id: Some(payment_id),
-                    tx_hash: Some(tx_hash),
-                    message: format!("Withdrawal sent (fee {fee} wei)"),
-                    estimated_completion_time: None,
-                })
-            }
-            Err(e) => {
-                self.mark_payment(
-                    payment_id,
-                    PaymentStatus::Failed,
-                    None,
-                    None,
-                    Some(&e.to_string()),
-                )
-                .await?;
-                Err(PaymentError::TransactionFailed(e.to_string()))
-            }
-        }
+        Err(PaymentError::NotSupported(
+            "this service holds no treasury key; withdraw from the BountyManager contract in your own wallet".into(),
+        ))
     }
 
     /// Record a bounty deposit intent. The actual transfer must be signed by
@@ -475,56 +308,12 @@ impl PaymentService {
         })
     }
 
-    /// Slash a stake: treasury transfers the slashed portion out of the
-    /// slashed user. In this model slashing is enforced by transferring the
-    /// slashed amount from treasury custody to the bounty pool address.
-    pub async fn slash_stake(&self, req: &SlashStakeRequest) -> PaymentResult<PaymentResponse> {
-        let amount_wei = Self::to_wei(&req.slash_amount)?;
-        let payment_id = self
-            .insert_payment(
-                None,
-                &self.config.blockchain.treasury_address,
-                &self.config.blockchain.treasury_address,
-                req.slash_amount,
-                PaymentType::StakeSlash,
-                PaymentStatus::Processing,
-            )
-            .await?;
-
-        // Slashed funds are moved to the payment/escrow contract address.
-        let dest = self.config.blockchain.payment_contract_address.clone();
-        match self.treasury_transfer(&dest, amount_wei).await {
-            Ok(receipt) => {
-                let tx_hash = format!("{:?}", receipt.transaction_hash);
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
-                self.mark_payment(
-                    payment_id,
-                    PaymentStatus::Completed,
-                    Some(&tx_hash),
-                    block,
-                    None,
-                )
-                .await?;
-                Ok(PaymentResponse {
-                    success: true,
-                    payment_id: Some(payment_id),
-                    tx_hash: Some(tx_hash),
-                    message: format!("Stake {} slashed", req.stake_id),
-                    estimated_completion_time: None,
-                })
-            }
-            Err(e) => {
-                self.mark_payment(
-                    payment_id,
-                    PaymentStatus::Failed,
-                    None,
-                    None,
-                    Some(&e.to_string()),
-                )
-                .await?;
-                Err(PaymentError::TransactionFailed(e.to_string()))
-            }
-        }
+    /// Refused: the BountyManager contract keeps losing stakes when it
+    /// resolves a bounty; nothing is moved by the server.
+    pub async fn slash_stake(&self, _req: &SlashStakeRequest) -> PaymentResult<PaymentResponse> {
+        Err(PaymentError::NotSupported(
+            "this service holds no treasury key; the BountyManager contract settles stakes when a bounty is resolved".into(),
+        ))
     }
 
     /// Mark a stake as unlocked (no transfer needed; funds were never moved).

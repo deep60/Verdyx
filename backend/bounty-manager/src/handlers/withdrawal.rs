@@ -18,8 +18,9 @@ use shared::types::ApiResponse;
 #[derive(Debug, Serialize)]
 pub struct ClaimableBalance {
     pub address: String,
-    /// Amount claimable via `BountyManager.withdraw()`, in token base units.
-    pub claimable: u64,
+    /// Amount claimable via `BountyManager.withdraw()`, in wei, as a decimal
+    /// string (18-decimal amounts don't fit in a JSON number).
+    pub claimable: String,
     pub has_claimable: bool,
 }
 
@@ -58,7 +59,7 @@ pub async fn get_claimable(
 
     Ok(Json(ApiResponse::success(ClaimableBalance {
         address,
-        claimable,
-        has_claimable: claimable > 0,
+        has_claimable: !claimable.is_zero(),
+        claimable: claimable.to_string(),
     })))
 }

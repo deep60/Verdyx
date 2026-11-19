@@ -35,7 +35,6 @@ pub struct BlockchainConfig {
     pub rpc_url: String,
     pub chain_id: u64,
     pub contract_address: String,
-    pub private_key: Option<String>,
     pub gas_price_gwei: u64,
     pub confirmation_blocks: u64,
 }
@@ -107,7 +106,6 @@ impl Config {
                     .unwrap_or(1337),
                 contract_address: env::var("BOUNTY_CONTRACT_ADDRESS")
                     .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string()),
-                private_key: env::var("BLOCKCHAIN_PRIVATE_KEY").ok(),
                 gas_price_gwei: env::var("GAS_PRICE_GWEI")
                     .unwrap_or_else(|_| "20".to_string())
                     .parse()
@@ -217,7 +215,6 @@ impl Default for Config {
                 rpc_url: "http://localhost:8545".to_string(),
                 chain_id: 1337,
                 contract_address: "0x0000000000000000000000000000000000000000".to_string(),
-                private_key: None,
                 gas_price_gwei: 20,
                 confirmation_blocks: 3,
             },

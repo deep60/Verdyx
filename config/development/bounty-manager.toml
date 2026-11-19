@@ -14,7 +14,6 @@ idle_timeout = 600
 rpc_url = "http://localhost:8545"
 chain_id = 31337
 contract_address = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
-private_key = ""
 gas_price_gwei = 20
 confirmation_blocks = 3
 

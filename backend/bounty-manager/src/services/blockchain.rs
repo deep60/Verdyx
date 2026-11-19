@@ -1,44 +1,28 @@
-// backend/bounty-manager/src/services/blockchain.rs
+//! Read-only access to the chain.
+//!
+//! This service holds no signing key. Bounties are posted, staked on,
+//! resolved and withdrawn from in each person's own wallet; the contract pays
+//! rewards itself. What's left here are reads: claimable balances, token
+//! balances and transaction receipts.
 
 use anyhow::Result;
 use ethers::{
     abi::Abi,
     contract::Contract,
-    middleware::SignerMiddleware,
     providers::{Http, Middleware, Provider},
-    signers::{LocalWallet, Signer},
     types::{Address, H256, U256},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use uuid::Uuid;
 
-type BlockchainClient = SignerMiddleware<Provider<Http>, LocalWallet>;
+type BlockchainClient = Provider<Http>;
 
 #[derive(Debug, Clone)]
 pub struct BlockchainService {
     client: Arc<BlockchainClient>,
     bounty_manager: Contract<BlockchainClient>,
     threat_token: Contract<BlockchainClient>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct StakeTransaction {
-    pub transaction_hash: String,
-    pub from_address: String,
-    pub amount: u64,
-    pub bounty_id: Uuid,
-    pub block_number: Option<u64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PayoutTransaction {
-    pub transaction_hash: String,
-    pub to_address: String,
-    pub amount: u64,
-    pub bounty_id: Uuid,
-    pub block_number: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,10 +57,8 @@ impl From<anyhow::Error> for BlockchainError {
 }
 
 impl BlockchainService {
-    pub async fn new(
+    pub fn new(
         rpc_url: &str,
-        private_key: &str,
-        chain_id: u64,
         bounty_manager_address: &str,
         threat_token_address: &str,
         bounty_manager_abi: Abi,
@@ -86,12 +68,7 @@ impl BlockchainService {
             .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?
             .interval(Duration::from_millis(1000));
 
-        let wallet: LocalWallet = private_key
-            .parse::<LocalWallet>()
-            .map_err(|e| BlockchainError::ConnectionError(format!("Invalid private key: {e}")))?
-            .with_chain_id(chain_id);
-
-        let client = Arc::new(SignerMiddleware::new(provider, wallet));
+        let client = Arc::new(provider);
 
         let bm_addr: Address = bounty_manager_address
             .parse()
@@ -111,122 +88,11 @@ impl BlockchainService {
         })
     }
 
-    /// Approve and stake tokens for a bounty analysis submission
-    /// Calls ThreatToken.approve(bountyManagerAddress, amount)
-    pub async fn create_stake_transaction(
-        &self,
-        _from_address: &str,
-        bounty_id: Uuid,
-        amount: u64,
-    ) -> Result<StakeTransaction, BlockchainError> {
-        let amount_u256 = U256::from(amount);
-
-        // Approve BountyManager to spend tokens
-        let bm_address = self.bounty_manager.address();
-        let tx = self
-            .threat_token
-            .method::<_, bool>("approve", (bm_address, amount_u256))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?;
-
-        let pending_tx = tx
-            .send()
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let tx_hash = pending_tx.tx_hash();
-
-        // Wait for receipt
-        let receipt = pending_tx
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let block_number = receipt.and_then(|r| r.block_number.map(|n| n.as_u64()));
-
-        Ok(StakeTransaction {
-            transaction_hash: format!("{tx_hash:?}"),
-            from_address: format!("{:?}", self.client.address()),
-            amount,
-            bounty_id,
-            block_number,
-        })
-    }
-
-    /// Distribute payout: Transfer tokens to an analyst
-    /// Calls ThreatToken.transfer(to, amount)
-    pub async fn create_payout_transaction(
-        &self,
-        to_address: &str,
-        bounty_id: Uuid,
-        amount: u64,
-    ) -> Result<PayoutTransaction, BlockchainError> {
-        let to: Address = to_address
-            .parse()
-            .map_err(|_| BlockchainError::InvalidAddress(to_address.to_string()))?;
-
-        let amount_u256 = U256::from(amount);
-
-        let tx = self
-            .threat_token
-            .method::<_, bool>("transfer", (to, amount_u256))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?;
-
-        let pending_tx = tx
-            .send()
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let tx_hash = pending_tx.tx_hash();
-
-        let receipt = pending_tx
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let block_number = receipt.and_then(|r| r.block_number.map(|n| n.as_u64()));
-
-        Ok(PayoutTransaction {
-            transaction_hash: format!("{tx_hash:?}"),
-            to_address: to_address.to_string(),
-            amount,
-            bounty_id,
-            block_number,
-        })
-    }
-
-    /// Trigger on-chain resolution of a bounty.
-    ///
-    /// Calls `BountyManager.resolveBounty(uint256)`. Resolution is decoupled from
-    /// submission in the contract, so a keeper (this service) must call it once the
-    /// bounty is eligible (deadline passed or enough analyses). The contract enforces
-    /// eligibility with its own `require`s, so a premature/duplicate call reverts and
-    /// surfaces here as `TransactionFailed`.
-    pub async fn resolve_bounty(&self, on_chain_bounty_id: u64) -> Result<String, BlockchainError> {
-        let bounty_id = U256::from(on_chain_bounty_id);
-
-        let tx = self
-            .bounty_manager
-            .method::<_, ()>("resolveBounty", bounty_id)
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?;
-
-        let pending_tx = tx
-            .send()
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        let tx_hash = format!("{:?}", pending_tx.tx_hash());
-
-        // Wait for the receipt so callers know the resolution actually mined.
-        pending_tx
-            .await
-            .map_err(|e| BlockchainError::TransactionFailed(e.to_string()))?;
-
-        Ok(tx_hash)
-    }
-
     /// Read the amount an address can claim via `BountyManager.withdraw()`.
     ///
     /// Reflects the contract's pull-payment ledger (`pendingWithdrawals(address)`),
     /// letting the API surface claimable balances so users know to withdraw.
-    pub async fn get_pending_withdrawal(&self, address: &str) -> Result<u64, BlockchainError> {
+    pub async fn get_pending_withdrawal(&self, address: &str) -> Result<U256, BlockchainError> {
         let addr: Address = address
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(address.to_string()))?;
@@ -239,7 +105,7 @@ impl BlockchainService {
             .await
             .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
 
-        Ok(amount.as_u64())
+        Ok(amount)
     }
 
     /// Verify a transaction by checking its receipt
@@ -288,7 +154,7 @@ impl BlockchainService {
     }
 
     /// Get token balance for an address
-    pub async fn get_balance(&self, address: &str) -> Result<u64, BlockchainError> {
+    pub async fn get_balance(&self, address: &str) -> Result<U256, BlockchainError> {
         let addr: Address = address
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(address.to_string()))?;
@@ -301,12 +167,7 @@ impl BlockchainService {
             .await
             .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
 
-        Ok(balance.as_u64())
-    }
-
-    /// Expose the client for use by sync services
-    pub fn get_client(&self) -> &BlockchainClient {
-        &self.client
+        Ok(balance)
     }
 
     /// Health check — verifies RPC connectivity
