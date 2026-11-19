@@ -19,6 +19,8 @@ const INCLUDED = [
 
 /** Limits the gateway enforces today. Fair-use: heavy automated use may be throttled. */
 const LIMITS = [
+  ["File and URL scans", "10/min, 100/day"],
+  ["Website inspections", "30/min, 300/day"],
   ["Upload size", "100 MB"],
   ["Sign-in attempts", "30 per 15 minutes"],
 ];
@@ -93,7 +95,8 @@ export default function Pricing() {
                   ))}
                 </dl>
                 <p className="mt-3 text-xs leading-relaxed">
-                  Fair use applies: heavy automated scanning may be slowed down during the beta.
+                  Scan limits count per account, or per IP address when signed out. Going over returns
+                  HTTP 429 with a <code className="font-mono">Retry-After</code> header.
                 </p>
               </section>
 
