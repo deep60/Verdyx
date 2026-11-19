@@ -261,7 +261,6 @@ mod tests {
                 reputation_system: String::new(),
                 governance: None,
             },
-            ..BlockchainConfig::default()
         }
     }
 

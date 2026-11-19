@@ -204,11 +204,11 @@ export function CommandPalette() {
             <CommandShortcut>BOUNTY</CommandShortcut>
           </CommandItem>
           <CommandItem
-            value="wallet-ledger-staking-withdrawals-profile"
-            onSelect={() => runCommand(() => setLocation("/profile"))}
+            value="wallet-balance-stakes-withdrawals-marketplace"
+            onSelect={() => runCommand(() => setLocation("/marketplace"))}
           >
             <Wallet className="h-4 w-4" />
-            <span>Wallet Ledger, Staked Escrow &amp; Withdrawals</span>
+            <span>Your Wallet, Stakes &amp; Withdrawals</span>
             <CommandShortcut>WALLET</CommandShortcut>
           </CommandItem>
           <CommandItem

@@ -106,8 +106,8 @@ const ENDPOINT_GROUPS = [
       },
       {
         method: "GET",
-        path: "/api/v1/wallet/balance",
-        description: "Fetch available ETH, active staked escrow, pending rewards, and total earned",
+        path: "/api/v1/chain/bounties?artifact=",
+        description: "On-chain bounties posted on a file hash or URL, from the server's index",
         methodColor: "bg-primary text-primary-foreground",
       },
       {

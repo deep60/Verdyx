@@ -214,11 +214,6 @@ paths:
         - { name: status, in: query, schema: { type: string, enum: [open, claimed, completed, expired, disputed] } }
       responses:
         '200': { description: OK }
-    post:
-      tags: [Bounties]
-      summary: Create a new bounty
-      responses:
-        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Bounty' } } } }
 
   /bounties/{id}:
     get:
@@ -227,14 +222,6 @@ paths:
       parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Bounty' } } } }
-
-  /bounties/{id}/submit:
-    post:
-      tags: [Bounties]
-      summary: Submit an analysis to claim a bounty
-      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
-      responses:
-        '202': { description: Accepted }
 
   /reputation/me:
     get:

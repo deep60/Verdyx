@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
 import { Navigation } from "@/components/navigation";
 import { Button } from "@/components/ui/button";
@@ -26,7 +27,6 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { UserAnalyticsDashboard } from "@/components/user-analytics-dashboard";
-import { WalletLedgerPanel } from "@/components/wallet-ledger-panel";
 import { WebhooksManager } from "@/components/webhooks-manager";
 import { ApiKeysManager } from "@/components/api-keys-manager";
 import { AuditLog } from "@/components/audit-log";
@@ -251,7 +251,26 @@ export default function Profile() {
 
               {/* Wallet & Rewards Tab */}
               <TabsContent value="wallet" className="space-y-6">
-                <WalletLedgerPanel defaultAddress={user.walletAddress} />
+                <Card data-testid="card-profile-wallet">
+                  <CardHeader>
+                    <CardTitle>Wallet and rewards</CardTitle>
+                    <CardDescription>
+                      Your THREAT, stakes and rewards are held by the contracts on the chain, not by
+                      Verdyx. You sign every transfer in your own wallet.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <p>
+                      On the marketplace page you can see your balance, claim test THREAT, post
+                      bounties, stake on a verdict and withdraw what you have won.
+                    </p>
+                    <Button asChild>
+                      <Link href="/marketplace" data-testid="link-profile-marketplace">
+                        Open the marketplace
+                      </Link>
+                    </Button>
+                  </CardContent>
+                </Card>
               </TabsContent>
 
               {/* Webhooks Tab */}

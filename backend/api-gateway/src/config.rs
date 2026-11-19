@@ -70,21 +70,13 @@ pub struct RedisConfig {
     pub default_ttl_seconds: u64,
 }
 
-/// Blockchain configuration
+/// Blockchain configuration. Read-only: the gateway holds no signing key, and
+/// every marketplace transaction is signed in the person's own wallet.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockchainConfig {
     pub rpc_url: String,
     pub chain_id: u64,
-    pub private_key: String,
     pub contracts: ContractsConfig,
-    pub gas_limit: u64,
-    pub gas_price_gwei: u64,
-    pub gas_price_multiplier: f64,
-    pub max_gas_price_gwei: u64,
-    pub confirmation_blocks: u64,
-    pub transaction_timeout_seconds: u64,
-    pub retry_attempts: u32,
-    pub retry_delay_ms: u64,
 }
 
 /// Smart contract addresses
@@ -261,17 +253,7 @@ impl Default for BlockchainConfig {
         Self {
             rpc_url: "http://localhost:8545".to_string(),
             chain_id: 1337, // Local development chain
-            private_key: "0x0000000000000000000000000000000000000000000000000000000000000000"
-                .to_string(),
             contracts: ContractsConfig::default(),
-            gas_limit: 500000,
-            gas_price_gwei: 20,
-            gas_price_multiplier: 1.2,
-            max_gas_price_gwei: 500,
-            confirmation_blocks: 2,
-            transaction_timeout_seconds: 300,
-            retry_attempts: 3,
-            retry_delay_ms: 1000,
         }
     }
 }
@@ -476,14 +458,6 @@ impl AppConfig {
             config.blockchain.contracts.reputation_system = addr;
         }
 
-        // Blockchain private key
-        if let Ok(key) = std::env::var("BLOCKCHAIN_PRIVATE_KEY")
-            .or_else(|_| std::env::var("TREASURY_PRIVATE_KEY"))
-            .or_else(|_| std::env::var("PRIVATE_KEY"))
-        {
-            config.blockchain.private_key = key;
-        }
-
         // Security configuration
         if let Ok(jwt_secret) = std::env::var("JWT_SECRET") {
             config.security.jwt_secret = jwt_secret;
@@ -627,12 +601,6 @@ impl AppConfig {
             std::env::var("BLOCKCHAIN_RPC_URL").or_else(|_| std::env::var("ETHEREUM_RPC_URL"))
         {
             self.blockchain.rpc_url = rpc_url;
-        }
-        if let Ok(key) = std::env::var("BLOCKCHAIN_PRIVATE_KEY")
-            .or_else(|_| std::env::var("TREASURY_PRIVATE_KEY"))
-            .or_else(|_| std::env::var("PRIVATE_KEY"))
-        {
-            self.blockchain.private_key = key;
         }
         if let Ok(env) = std::env::var("ENVIRONMENT") {
             self.server.environment = match env.to_lowercase().as_str() {
