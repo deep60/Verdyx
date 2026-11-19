@@ -33,7 +33,6 @@ pub struct BlockchainConfig {
     pub ws_url: Option<String>,
     pub chain_id: u64,
     pub treasury_address: String,
-    pub treasury_private_key: String,
     pub token_contract_address: String,
     pub payment_contract_address: String,
     pub gas_price_multiplier: f64,
@@ -77,7 +76,6 @@ impl Config {
                     .unwrap_or_else(|_| "1".to_string())
                     .parse()?,
                 treasury_address: std::env::var("TREASURY_ADDRESS")?,
-                treasury_private_key: std::env::var("TREASURY_PRIVATE_KEY")?,
                 token_contract_address: std::env::var("TOKEN_CONTRACT_ADDRESS")?,
                 payment_contract_address: std::env::var("PAYMENT_CONTRACT_ADDRESS")?,
                 gas_price_multiplier: std::env::var("GAS_PRICE_MULTIPLIER")

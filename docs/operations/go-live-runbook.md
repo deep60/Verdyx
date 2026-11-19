@@ -22,8 +22,9 @@ Push every value into your secrets manager (AWS Secrets Manager, GCP
 Secret Manager, Vault, or a sealed-secrets store). Do **not** commit the
 file. Delete it from disk once the manager confirms storage.
 
-`TREASURY_PRIVATE_KEY` is special — generate it with a hardware wallet or
-KMS, never on a workstation.
+No service needs a blockchain signing key: people sign marketplace
+transactions in their own wallets. The contract deployer key lives only in
+the GitHub environment used by the Deploy contracts workflow.
 
 ## 2. Deploy smart contracts
 

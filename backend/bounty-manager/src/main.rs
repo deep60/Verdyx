@@ -16,7 +16,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 mod config;
@@ -211,8 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize reputation service with database pool
     let reputation_service = Arc::new(reputation::ReputationService::new(db.clone()));
 
-    // Initialize the on-chain client up front so it can be shared by the router
-    // (claimable-balance queries), the sync service, and the resolution keeper.
+    // Read-only chain client for claimable-balance queries.
     let blockchain = init_blockchain_service().await;
 
     // Create application state using BountyManagerState
@@ -225,30 +224,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build router
     let app = create_router(state);
 
-    if let Some(blockchain) = blockchain.clone() {
-        // Blockchain sync: mirror on-chain events (ConsensusReached, RewardsDistributed,
-        // ...) into the database. `start()` spawns its own loop and returns quickly.
-        let sync_service =
-            services::blockchain_sync::BlockchainSyncService::new(db.clone(), blockchain.clone());
-        info!("Blockchain sync service starting...");
-        if let Err(e) = sync_service.start().await {
-            error!("Blockchain sync service failed to start: {}", e);
-        }
-
-        // Resolution keeper: the contract decouples resolution from submission, so
-        // this worker calls resolveBounty() on-chain once a bounty is eligible.
-        let resolution_worker =
-            workers::resolution_worker::ResolutionWorker::new(db.clone(), blockchain);
-        info!("Bounty resolution keeper starting...");
-        tokio::spawn(async move {
-            resolution_worker.run().await;
-        });
-    } else {
-        warn!(
-            "Blockchain features disabled: set BLOCKCHAIN_PRIVATE_KEY and BOUNTY_MANAGER_ADDRESS \
-             (and optionally BOUNTY_MANAGER_ABI_PATH / THREAT_TOKEN_ABI_PATH) to enable the \
-             resolution keeper, chain sync, and withdrawal queries"
-        );
+    // Chain reads only (claimable balances). The service holds no signing
+    // key: resolving bounties and paying rewards happen on the contract, from
+    // people's own wallets, and the gateway indexes bounties for the website.
+    if blockchain.is_none() {
+        info!("Chain reads disabled: set BOUNTY_MANAGER_ADDRESS to serve claimable balances");
     }
 
     // Start server
@@ -317,13 +297,6 @@ async fn init_blockchain_service() -> Option<Arc<services::blockchain::Blockchai
     let rpc_url = std::env::var("BLOCKCHAIN_RPC_URL")
         .or_else(|_| std::env::var("ETHEREUM_RPC_URL"))
         .unwrap_or_else(|_| "http://localhost:8545".to_string());
-    let private_key = std::env::var("BLOCKCHAIN_PRIVATE_KEY")
-        .or_else(|_| std::env::var("PRIVATE_KEY"))
-        .unwrap_or_default();
-    let chain_id: u64 = std::env::var("CHAIN_ID")
-        .unwrap_or_else(|_| "31337".to_string())
-        .parse()
-        .unwrap_or(31337);
     let bounty_manager_addr = std::env::var("BOUNTY_MANAGER_ADDRESS")
         .or_else(|_| std::env::var("CONTRACT_ADDRESS_BOUNTY"))
         .unwrap_or_default();
@@ -331,12 +304,12 @@ async fn init_blockchain_service() -> Option<Arc<services::blockchain::Blockchai
         .or_else(|_| std::env::var("CONTRACT_ADDRESS_TOKEN"))
         .unwrap_or_default();
 
-    if private_key.is_empty() || bounty_manager_addr.is_empty() {
+    if bounty_manager_addr.is_empty() {
         return None;
     }
 
-    // Load real ABIs so methods can be called by name (resolveBounty,
-    // pendingWithdrawals, approve, transfer). Without a configured path we fall
+    // Load real ABIs so methods can be called by name (pendingWithdrawals,
+    // balanceOf). Without a configured path we fall
     // back to empty ABIs and chain calls will fail loudly at call time.
     let bounty_abi = std::env::var("BOUNTY_MANAGER_ABI_PATH")
         .ok()
@@ -349,15 +322,11 @@ async fn init_blockchain_service() -> Option<Arc<services::blockchain::Blockchai
 
     match services::blockchain::BlockchainService::new(
         &rpc_url,
-        &private_key,
-        chain_id,
         &bounty_manager_addr,
         &threat_token_addr,
         bounty_abi,
         token_abi,
-    )
-    .await
-    {
+    ) {
         Ok(svc) => Some(Arc::new(svc)),
         Err(e) => {
             warn!("Could not initialize blockchain service: {}", e);

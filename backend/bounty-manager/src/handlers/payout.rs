@@ -389,11 +389,6 @@ pub async fn distribute_rewards(
     let mut blockchain_transactions = Vec::new();
     let mut had_failure = false;
 
-    // On-chain client, when configured. `None` in dev/CI or when the chain env
-    // is unset — in that case we record the reward off-chain and leave it to
-    // settle once the chain is wired (graceful degradation, never a crash).
-    let chain = state.blockchain.as_ref();
-
     for payout in &session_payouts {
         if payout.payout_type == "StakeSlashing" {
             continue; // Handle slashing separately
@@ -402,32 +397,14 @@ pub async fn distribute_rewards(
         let amount = payout.amount as u64;
         let is_correct = payout.amount > 0;
 
-        // Settle the reward on-chain: ThreatToken.transfer(recipient, amount).
-        // Zero-amount rewards and the blockchain-disabled path skip the transfer
-        // and are recorded off-chain as pending settlement.
-        //
-        // NOTE: this awaits the transaction receipt inline, so a slow chain slows
-        // the request. Acceptable for the operator-triggered distribute endpoint;
-        // move to a background settlement queue if this becomes hot.
-        let settlement: Result<(String, TransactionStatus, Option<u64>), String> =
-            match (chain, amount) {
-                (Some(bc), amt) if amt > 0 => bc
-                    .create_payout_transaction(&payout.recipient, bounty_id, amt)
-                    .await
-                    .map(|tx| {
-                        (
-                            tx.transaction_hash,
-                            TransactionStatus::Confirmed,
-                            tx.block_number,
-                        )
-                    })
-                    .map_err(|e| e.to_string()),
-                _ => Ok((
-                    format!("offchain_{}", payout.id),
-                    TransactionStatus::Pending,
-                    None,
-                )),
-            };
+        // The service holds no key and sends no tokens: on-chain bounties are
+        // paid by the BountyManager contract when anyone resolves them, and
+        // winners withdraw in their own wallets. This record stays off-chain.
+        let settlement: Result<(String, TransactionStatus, Option<u64>), String> = Ok((
+            format!("offchain_{}", payout.id),
+            TransactionStatus::Pending,
+            None,
+        ));
 
         let (tx_hash, tx_status, block_number) = match settlement {
             Ok(v) => v,
@@ -482,7 +459,7 @@ pub async fn distribute_rewards(
         } else {
             tracing::warn!(
                 payout_id = %payout.id, recipient = %payout.recipient, amount,
-                "blockchain disabled or zero reward — recorded off-chain, on-chain settlement pending"
+                "recorded off-chain; the service sends no tokens"
             );
         }
 

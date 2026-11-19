@@ -60,11 +60,6 @@ spec:
             secretKeyRef:
               name: verdyx-blockchain-secret
               key: rpc_url
-        - name: TREASURY_PRIVATE_KEY
-          valueFrom:
-            secretKeyRef:
-              name: verdyx-blockchain-secret
-              key: private_key
         - name: TREASURY_ADDRESS
           valueFrom:
             secretKeyRef:

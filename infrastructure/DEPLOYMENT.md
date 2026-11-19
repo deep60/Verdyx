@@ -74,8 +74,8 @@ Staging is the same flow on the `develop` branch → `staging.verdyx.io`.
 
 Production secrets are **not** committed. They are provisioned onto the VM's `/opt/verdyx/.env`
 out of band (see `scripts/maintenance/generate-prod-secrets.sh` and the Ansible `verdyx` role).
-The on-chain `TREASURY_PRIVATE_KEY` must come from a KMS/HSM or hardware wallet — never generated
-by a script or stored in plaintext.
+No service holds an on-chain signing key: marketplace transactions are signed in each
+person's own wallet.
 
 ## Phase 2 (post-launch, not live)
 

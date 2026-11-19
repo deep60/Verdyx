@@ -15,6 +15,7 @@ fn map_err(e: PaymentError) -> (StatusCode, Json<Value>) {
         PaymentError::InsufficientBalance(_) => StatusCode::BAD_REQUEST,
         PaymentError::NotFound(_) => StatusCode::NOT_FOUND,
         PaymentError::AlreadyProcessed(_) => StatusCode::CONFLICT,
+        PaymentError::NotSupported(_) => StatusCode::GONE,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     };
     (status, Json(json!({ "error": e.to_string() })))
@@ -172,5 +173,22 @@ pub async fn estimate_gas(
                 "error": format!("Failed to estimate gas: {}", e)
             })),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sending funds was the treasury's job; without the key the routes say
+    /// so plainly instead of failing as a server error.
+    #[test]
+    fn refused_transfers_are_gone_not_server_errors() {
+        let (status, body) = map_err(PaymentError::NotSupported("no treasury key".into()));
+        assert_eq!(status, StatusCode::GONE);
+        assert!(body.0["error"]
+            .as_str()
+            .unwrap()
+            .contains("no treasury key"));
     }
 }

@@ -75,11 +75,6 @@ spec:
             secretKeyRef:
               name: verdyx-blockchain-secret
               key: rpc_url
-        - name: PRIVATE_KEY
-          valueFrom:
-            secretKeyRef:
-              name: verdyx-blockchain-secret
-              key: private_key
         - name: CONTRACT_ADDRESS_BOUNTY
           valueFrom:
             configMapKeyRef:

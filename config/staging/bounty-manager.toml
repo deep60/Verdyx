@@ -14,7 +14,6 @@ idle_timeout = 600
 rpc_url = "${BLOCKCHAIN_RPC_URL}"
 chain_id = 11155111
 contract_address = "${BOUNTY_MANAGER_ADDRESS}"
-private_key = "${BLOCKCHAIN_PRIVATE_KEY}"
 gas_price_gwei = 20
 confirmation_blocks = 5
 

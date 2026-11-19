@@ -59,10 +59,13 @@ database is unreachable.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `BLOCKCHAIN_RPC_URL` / `ETHEREUM_RPC_URL` | for sync | RPC endpoint |
-| `BLOCKCHAIN_PRIVATE_KEY` / `PRIVATE_KEY` | for sync | Blockchain sync skipped if empty |
-| `BOUNTY_MANAGER_ADDRESS`, `THREAT_TOKEN_ADDRESS` | for sync | Contract addresses |
-| `CHAIN_ID` | no | Defaults to 31337 |
+| `BLOCKCHAIN_RPC_URL` / `ETHEREUM_RPC_URL` | for chain reads | RPC endpoint |
+| `BOUNTY_MANAGER_ADDRESS`, `THREAT_TOKEN_ADDRESS` | for chain reads | Contract addresses; `GET /withdrawals/{address}` returns 503 without them |
+| `BOUNTY_MANAGER_ABI_PATH`, `THREAT_TOKEN_ABI_PATH` | for chain reads | Compiled ABI JSON |
+
+bounty-manager holds no signing key. It no longer runs a chain sync or a
+resolution keeper: anyone resolves a bounty from the website, and the gateway
+indexes bounties for scan reports.
 
 ## payment-service
 
@@ -70,8 +73,13 @@ database is unreachable.
 |---|---|---|
 | `BLOCKCHAIN_RPC_URL` | **yes** | RPC endpoint |
 | `BLOCKCHAIN_CHAIN_ID` / `CHAIN_ID` | yes | Network id |
-| `TREASURY_ADDRESS`, `TREASURY_PRIVATE_KEY` | **yes** | Controls funds — inject from a secrets manager, never plaintext at rest |
+| `TREASURY_ADDRESS` | **yes** | Recorded as the payer on off-chain payment rows |
 | `TOKEN_CONTRACT_ADDRESS`, `PAYMENT_CONTRACT_ADDRESS` | yes | Contract addresses |
+
+payment-service holds no treasury key. Its routes that sent tokens (bounty
+reward distribution, withdrawals, stake slashing) answer **410 Gone**: the
+BountyManager contract pays rewards and settles stakes when a bounty is
+resolved, and people withdraw in their own wallets.
 
 ## consensus-service
 
@@ -99,5 +107,5 @@ database is unreachable.
 - `.env.example` contains **only placeholders** — never real values. CI and the
   smoke test generate throwaway values; production injects from a secrets
   manager (see `docs/operations/go-live-runbook.md`).
-- `TREASURY_PRIVATE_KEY` and `JWT_SECRET` must never be committed. They are
+- `JWT_SECRET` must never be committed. They are
   gitignored in `.env` and templated as `CHANGE_ME` in `.env.production`.

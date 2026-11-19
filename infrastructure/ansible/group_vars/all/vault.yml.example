@@ -10,7 +10,6 @@ vault_elasticache_endpoint:     verdyx-redis.xxxx.cache.amazonaws.com
 vault_minio_root_user:           verdyx_admin
 vault_minio_root_password:       CHANGE_ME
 vault_blockchain_rpc_url:        https://mainnet.infura.io/v3/CHANGE_ME
-vault_treasury_private_key:      CHANGE_ME
 vault_smtp_user:                 CHANGE_ME
 vault_smtp_password:             CHANGE_ME
 vault_webhook_signing_secret:    CHANGE_ME

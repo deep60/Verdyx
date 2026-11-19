@@ -32,7 +32,6 @@ PGADMIN_PASSWORD=$(genb64 24)
 SESSION_SECRET=$(gen 32)
 COOKIE_SECRET=$(gen 32)
 
-# IMPORTANT: TREASURY_PRIVATE_KEY is the on-chain key that controls real
-# funds. Do NOT generate it with this script. Use a hardware wallet or a
-# cloud KMS / HSM to derive and store it.
+# No on-chain signing key is needed: services hold none, and people sign
+# marketplace transactions in their own wallets.
 EOF

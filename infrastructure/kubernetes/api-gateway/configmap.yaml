@@ -45,7 +45,6 @@ data:
     [blockchain]
     rpc_url = "http://localhost:8545"
     chain_id = 1
-    private_key = "0x0000000000000000000000000000000000000000000000000000000000000000"
     gas_limit = 500000
     gas_price_gwei = 20
     gas_price_multiplier = 1.2
