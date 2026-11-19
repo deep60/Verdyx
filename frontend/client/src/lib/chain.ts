@@ -328,3 +328,45 @@ export function walletErrorMessage(err: unknown): string {
   const reason = msg.match(/reverted with the following reason:\s*(.+)/)?.[1];
   return (reason ?? msg).split("\n")[0];
 }
+
+/** A bounty as `GET /api/v1/chain/bounties` returns it (the server's indexed copy). */
+export interface IndexedBounty {
+  id: number;
+  creator: Address;
+  artifactHash: string;
+  artifactType: string;
+  description: string;
+  reward: string;
+  totalStaked: string;
+  deadline: number;
+  status: number;
+  consensusVerdict: number;
+  analysisCount: number;
+  createdAt: number;
+}
+
+export function fromIndexed(b: IndexedBounty): OnChainBounty {
+  const big = (s: string) => (/^\d+$/.test(s) ? BigInt(s) : BigInt(0));
+  return {
+    id: BigInt(b.id),
+    creator: b.creator,
+    artifactHash: b.artifactHash,
+    artifactType: b.artifactType,
+    rewardAmount: big(b.reward),
+    deadline: BigInt(b.deadline),
+    description: b.description,
+    status: b.status,
+    consensusVerdict: b.consensusVerdict,
+    totalStaked: big(b.totalStaked),
+    analysisCount: BigInt(b.analysisCount),
+    createdAt: BigInt(b.createdAt),
+  };
+}
+
+/** The bounties posted on one file or URL, newest first. */
+export async function bountiesOnArtifact(artifact: string): Promise<{ indexed: boolean; bounties: OnChainBounty[] }> {
+  const res = await fetch(`/api/v1/chain/bounties?artifact=${encodeURIComponent(artifact)}`);
+  if (!res.ok) throw new Error(`Bounties: HTTP ${res.status}`);
+  const body = (await res.json()) as { indexed: boolean; bounties: IndexedBounty[] };
+  return { indexed: body.indexed, bounties: body.bounties.map(fromIndexed) };
+}

@@ -3,6 +3,7 @@ pub mod audit;
 pub mod auth_service;
 pub mod blockchain;
 pub mod cache_service;
+pub mod chain_indexer;
 pub mod consensus_client;
 pub mod database;
 pub mod event_bus;

@@ -19,7 +19,8 @@ pub fn create_routes(state: AppState) -> Router {
     let public_routes = Router::new()
         .nest("/health", health_routes())
         .nest("/auth", auth_routes(state.clone()))
-        .route("/chain", get(chain::get_chain));
+        .route("/chain", get(chain::get_chain))
+        .route("/chain/bounties", get(chain::get_chain_bounties));
 
     // ── Mixed routes (optional auth) ─────────────────────
     let mixed_routes = Router::new()

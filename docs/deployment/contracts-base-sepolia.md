@@ -82,6 +82,7 @@ The website learns which network and contracts to use from
 | `REPUTATION_SYSTEM_ADDRESS` | ReputationSystem's address |
 | `PUBLIC_CHAIN_RPC_URL` (optional) | what browsers use; defaults to `https://sepolia.base.org`. Never put a URL with a private provider key here: it is published |
 | `CHAIN_EXPLORER_URL` (optional) | defaults to `https://sepolia.basescan.org` |
+| `CHAIN_INDEX_INTERVAL_SECS` (optional) | how often the gateway copies bounties from the chain so scan reports can list them; default 30 |
 
 `BLOCKCHAIN_RPC_URL` stays the server's own RPC and is never sent to
 browsers. Until the addresses are set, the website says the marketplace
