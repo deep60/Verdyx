@@ -1,9 +1,9 @@
+use alloy::primitives::{Address, Signature};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
 use chrono::{Duration, Utc};
-use ethers::core::types::Signature;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -138,16 +138,16 @@ impl AuthService {
         let sig = Signature::from_str(signature)
             .map_err(|e| UserError::ValidationError(format!("Invalid signature format: {e}")))?;
 
-        // Recover the address from the signature
+        // Recover the signer (EIP-191 personal_sign)
         let recovered_address = sig
-            .recover(message)
+            .recover_address_from_msg(message)
             .map_err(|e| UserError::ValidationError(format!("Failed to recover address: {e}")))?;
 
-        // Compare with expected address (case-insensitive)
-        let recovered_str = format!("{recovered_address:?}").to_lowercase();
-        let expected_str = expected_address.to_lowercase();
-
-        Ok(recovered_str == expected_str)
+        // Compare as addresses, so checksum casing doesn't matter
+        Ok(expected_address
+            .trim()
+            .parse::<Address>()
+            .is_ok_and(|expected| expected == recovered_address))
     }
 
     /// Generate a verification token for email/password reset
@@ -211,6 +211,35 @@ mod tests {
             access_token_expiry_hours: 24,
             refresh_token_expiry_days: 30,
         }
+    }
+
+    /// personal_sign by Hardhat's public test account #0, made with ethers.js.
+    #[test]
+    fn wallet_signature_recovers_the_signer() {
+        let auth_service = AuthService::new(get_test_jwt_config());
+        let message = "Sign in to Verdyx\nNonce: 7f3c2a";
+        let signature = "0x9753acf3f78921f0e8c38a80e9bf10e27f739d6cf759ed32b2d52e4e6c62ee5b43826cbbc15b125e5e476887801e927a016cad3ab42d6d6aaf609385e33896d81b";
+        let signer = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+
+        assert!(auth_service
+            .verify_wallet_signature(message, signature, signer)
+            .unwrap());
+        assert!(auth_service
+            .verify_wallet_signature(message, signature, &signer.to_lowercase())
+            .unwrap());
+        assert!(!auth_service
+            .verify_wallet_signature("another message", signature, signer)
+            .unwrap());
+        assert!(!auth_service
+            .verify_wallet_signature(
+                message,
+                signature,
+                "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+            )
+            .unwrap());
+        assert!(auth_service
+            .verify_wallet_signature(message, "0x1234", signer)
+            .is_err());
     }
 
     #[test]

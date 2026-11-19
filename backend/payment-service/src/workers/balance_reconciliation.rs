@@ -38,7 +38,8 @@ pub async fn start(service: Arc<PaymentService>) -> Result<()> {
                             .unwrap_or_else(|| "0".to_string());
 
                             let db_amount =
-                                ethers::types::U256::from_dec_str(&db_balance).unwrap_or_default();
+                                alloy::primitives::U256::from_str_radix(&db_balance, 10)
+                                    .unwrap_or_default();
 
                             if on_chain != db_amount {
                                 warn!(

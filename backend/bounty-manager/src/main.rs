@@ -308,62 +308,14 @@ async fn init_blockchain_service() -> Option<Arc<services::blockchain::Blockchai
         return None;
     }
 
-    // Load real ABIs so methods can be called by name (pendingWithdrawals,
-    // balanceOf). Without a configured path we fall
-    // back to empty ABIs and chain calls will fail loudly at call time.
-    let bounty_abi = std::env::var("BOUNTY_MANAGER_ABI_PATH")
-        .ok()
-        .and_then(|p| load_abi(&p))
-        .unwrap_or_default();
-    let token_abi = std::env::var("THREAT_TOKEN_ABI_PATH")
-        .ok()
-        .and_then(|p| load_abi(&p))
-        .unwrap_or_default();
-
     match services::blockchain::BlockchainService::new(
         &rpc_url,
         &bounty_manager_addr,
         &threat_token_addr,
-        bounty_abi,
-        token_abi,
     ) {
         Ok(svc) => Some(Arc::new(svc)),
         Err(e) => {
             warn!("Could not initialize blockchain service: {}", e);
-            None
-        }
-    }
-}
-
-/// Load a contract ABI from a JSON file. Accepts either a bare ABI array or a
-/// Hardhat/Truffle artifact object containing an `"abi"` field.
-fn load_abi(path: &str) -> Option<ethers::abi::Abi> {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("Failed to read ABI file {}: {}", path, e);
-            return None;
-        }
-    };
-
-    // Try a bare ABI array first.
-    if let Ok(abi) = serde_json::from_str::<ethers::abi::Abi>(&contents) {
-        return Some(abi);
-    }
-
-    // Fall back to an artifact object with an `abi` field.
-    match serde_json::from_str::<serde_json::Value>(&contents) {
-        Ok(v) => match v.get("abi") {
-            Some(abi_val) => serde_json::from_value::<ethers::abi::Abi>(abi_val.clone())
-                .map_err(|e| warn!("ABI field in {} is invalid: {}", path, e))
-                .ok(),
-            None => {
-                warn!("ABI file {} has no top-level `abi` field", path);
-                None
-            }
-        },
-        Err(e) => {
-            warn!("ABI file {} is not valid JSON: {}", path, e);
             None
         }
     }

@@ -6,15 +6,17 @@
 //! so those operations are refused with [`PaymentError::NotSupported`]. Reads
 //! and off-chain records remain.
 
+use alloy::primitives::{Address, TxHash, U256};
+use alloy::providers::Provider;
+use alloy::rpc::types::TransactionReceipt;
 use anyhow::{Context, Result};
-use ethers::prelude::*;
 use redis::aio::ConnectionManager;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::blockchain::{BlockchainProvider, TokenContract};
+use crate::blockchain::{BlockchainProvider, IThreatToken};
 use crate::config::Config;
 use crate::models::*;
 
@@ -60,14 +62,14 @@ impl PaymentService {
         })
     }
 
-    fn token_contract(&self) -> Result<TokenContract<Provider<Ws>>> {
+    fn token_contract(&self) -> Result<IThreatToken::IThreatTokenInstance<&BlockchainProvider>> {
         let addr: Address = self
             .config
             .blockchain
             .token_contract_address
             .parse()
             .context("Invalid token contract address")?;
-        Ok(TokenContract::new(addr, self.provider()?.clone()))
+        Ok(IThreatToken::new(addr, self.provider()?))
     }
 
     // -- Reads ------------------------------------------------------------
@@ -76,17 +78,14 @@ impl PaymentService {
         let addr: Address = address.parse().context("Invalid Ethereum address")?;
         let token = self.token_contract()?;
         token
-            .balance_of(addr)
+            .balanceOf(addr)
             .call()
             .await
             .context("Failed to call balanceOf")
     }
 
-    pub async fn get_tx_receipt(
-        &self,
-        tx_hash: &str,
-    ) -> Result<Option<ethers::types::TransactionReceipt>> {
-        let hash: H256 = tx_hash.parse().context("Invalid transaction hash")?;
+    pub async fn get_tx_receipt(&self, tx_hash: &str) -> Result<Option<TransactionReceipt>> {
+        let hash: TxHash = tx_hash.parse().context("Invalid transaction hash")?;
         self.provider()?
             .get_transaction_receipt(hash)
             .await
@@ -99,7 +98,7 @@ impl PaymentService {
             .get_gas_price()
             .await
             .context("Failed to get gas price")?;
-        Ok(U256::from(65_000) * gas_price)
+        Ok(U256::from(65_000u64) * U256::from(gas_price))
     }
 
     pub async fn health_check(&self) -> bool {
@@ -205,7 +204,7 @@ impl PaymentService {
         })?;
 
         // trunc() discards anything below one wei.
-        U256::from_dec_str(&scaled.trunc().to_string())
+        U256::from_str_radix(&scaled.trunc().to_string(), 10)
             .map_err(|e| PaymentError::ValidationError(format!("invalid amount: {e}")))
     }
 
@@ -346,12 +345,12 @@ impl PaymentService {
         };
         match self.get_tx_receipt(tx_hash).await {
             Ok(Some(receipt)) => {
-                let status = if receipt.status == Some(1u64.into()) {
+                let status = if receipt.status() {
                     PaymentStatus::Completed
                 } else {
                     PaymentStatus::Failed
                 };
-                let block = receipt.block_number.map(|b| b.as_u64() as i64);
+                let block = receipt.block_number.map(|b| b as i64);
                 self.mark_payment(payment.id, status, Some(tx_hash), block, None)
                     .await?;
             }
@@ -385,7 +384,10 @@ mod money_tests {
     /// used that as wei, so every payout was 10^18 times too small.
     #[test]
     fn one_token_is_ten_to_the_eighteen_wei() {
-        assert_eq!(wei("1"), U256::from_dec_str("1000000000000000000").unwrap());
+        assert_eq!(
+            wei("1"),
+            U256::from_str_radix("1000000000000000000", 10).unwrap()
+        );
     }
 
     /// Regression: the README's own example bounty is 0.05 tokens. Under the
@@ -395,11 +397,11 @@ mod money_tests {
     fn fractional_amounts_do_not_collapse_to_zero() {
         assert_eq!(
             wei("0.05"),
-            U256::from_dec_str("50000000000000000").unwrap()
+            U256::from_str_radix("50000000000000000", 10).unwrap()
         );
         assert_eq!(
             wei("0.5"),
-            U256::from_dec_str("500000000000000000").unwrap()
+            U256::from_str_radix("500000000000000000", 10).unwrap()
         );
         assert!(
             !wei("0.000001").is_zero(),
@@ -412,7 +414,7 @@ mod money_tests {
     /// 5-token withdrawal produced 5 wei and was rejected as below minimum.
     #[test]
     fn amounts_are_comparable_with_wei_denominated_config_bounds() {
-        let min_withdraw = U256::from_dec_str("1000000000000000000").unwrap(); // 1 token
+        let min_withdraw = U256::from_str_radix("1000000000000000000", 10).unwrap(); // 1 token
         assert!(
             wei("5") > min_withdraw,
             "5 tokens must exceed a 1-token minimum"
@@ -454,7 +456,7 @@ mod money_tests {
     /// Zero is a legitimate amount to convert; it must not error.
     #[test]
     fn zero_converts_to_zero() {
-        assert_eq!(wei("0"), U256::zero());
+        assert_eq!(wei("0"), U256::ZERO);
     }
 
     /// Negative amounts are rejected explicitly rather than failing deep in

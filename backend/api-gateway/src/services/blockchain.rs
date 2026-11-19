@@ -6,18 +6,16 @@
 //! server only reads: here for `/health`, and in `chain_indexer` for the
 //! bounty list.
 
+use alloy::primitives::Address;
+use alloy::providers::{Provider, RootProvider};
 use anyhow::{Context, Result};
-use ethers::{
-    providers::{Http, Middleware, Provider},
-    types::Address,
-};
 use std::time::Duration;
 
 use crate::config;
 
 /// Reads the chain through the server's RPC (`BLOCKCHAIN_RPC_URL`).
 pub struct BlockchainService {
-    provider: Provider<Http>,
+    provider: RootProvider,
     bounty_manager: Address,
 }
 
@@ -25,8 +23,11 @@ impl BlockchainService {
     /// Never fails on missing or malformed chain settings: the chain is
     /// optional, and the gateway must still serve everything else.
     pub fn new(config: &config::BlockchainConfig) -> Result<Self> {
-        let provider = Provider::<Http>::try_from(config.rpc_url.as_str())
-            .context("Failed to create HTTP provider")?;
+        let url = config
+            .rpc_url
+            .parse()
+            .context("BLOCKCHAIN_RPC_URL is not a valid URL")?;
+        let provider = RootProvider::new_http(url);
         let bounty_manager =
             parse_contract_address("BOUNTY_MANAGER_ADDRESS", &config.contracts.bounty_manager);
         Ok(Self {
@@ -41,7 +42,7 @@ impl BlockchainService {
     pub async fn health_check(&self) -> ChainHealth {
         let probe = async {
             self.provider.get_block_number().await?;
-            self.provider.get_code(self.bounty_manager, None).await
+            self.provider.get_code_at(self.bounty_manager).await
         };
         match tokio::time::timeout(Duration::from_secs(5), probe).await {
             Ok(Ok(code)) if code.as_ref().is_empty() => ChainHealth::NotDeployed,
@@ -60,7 +61,7 @@ impl BlockchainService {
 
 /// Parse a configured contract address, falling back to the zero address.
 ///
-/// Returns `Address::zero()` for anything unusable (empty, whitespace or
+/// Returns `Address::ZERO` for anything unusable (empty, whitespace or
 /// malformed) after logging which variable was at fault. The zero address
 /// has no code, so the health check reports the chain as not deployed.
 ///
@@ -71,7 +72,7 @@ fn parse_contract_address(var_name: &str, raw: &str) -> Address {
 
     if trimmed.is_empty() {
         tracing::warn!("{var_name} is not set; the chain is reported as not deployed");
-        return Address::zero();
+        return Address::ZERO;
     }
 
     match trimmed.parse::<Address>() {
@@ -85,7 +86,7 @@ fn parse_contract_address(var_name: &str, raw: &str) -> Address {
         }
         Err(e) => {
             tracing::warn!("{var_name} is not a valid address ({e}); treating it as unset");
-            Address::zero()
+            Address::ZERO
         }
     }
 }

@@ -1,6 +1,5 @@
 pub mod contracts;
 pub mod provider;
-pub mod transaction;
 
-pub use contracts::TokenContract;
+pub use contracts::IThreatToken;
 pub use provider::BlockchainProvider;

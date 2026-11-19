@@ -1,3 +1,4 @@
+use alloy::primitives::{Address, Signature};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -6,7 +7,6 @@ use axum::{
     Router,
 };
 use chrono::{DateTime, Duration, Utc};
-use ethers::core::types::Signature;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -354,14 +354,16 @@ fn verify_wallet_signature(address: &str, signature: &str, message: &str) -> boo
 
     // Recover the signer address from the signature
     // This uses EIP-191 personal_sign recovery (prefix "\x19Ethereum Signed Message:\n")
-    let recovered = match sig.recover(message) {
+    let recovered = match sig.recover_address_from_msg(message) {
         Ok(addr) => addr,
         Err(_) => return false,
     };
 
-    // Compare recovered address to claimed address (case-insensitive hex comparison)
-    let recovered_hex = format!("{recovered:?}"); // "0x..." lowercase
-    recovered_hex.eq_ignore_ascii_case(address)
+    // Compare as addresses, so checksum casing doesn't matter
+    address
+        .trim()
+        .parse::<Address>()
+        .is_ok_and(|claimed| claimed == recovered)
 }
 
 /// Verify email address — proxy to user-service
@@ -810,6 +812,54 @@ mod tests {
             "iat": Utc::now().timestamp(),
             "role": "user",
         })
+    }
+
+    // personal_sign over WALLET_MESSAGE by Hardhat's public test account #0,
+    // made with ethers.js (what the website uses), not with this crate.
+    const WALLET: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+    const WALLET_MESSAGE: &str = "Sign in to Verdyx\nNonce: 7f3c2a";
+    const WALLET_SIGNATURE: &str = "0x9753acf3f78921f0e8c38a80e9bf10e27f739d6cf759ed32b2d52e4e6c62ee5b43826cbbc15b125e5e476887801e927a016cad3ab42d6d6aaf609385e33896d81b";
+
+    #[test]
+    fn wallet_signature_recovers_the_signer() {
+        assert!(verify_wallet_signature(
+            WALLET,
+            WALLET_SIGNATURE,
+            WALLET_MESSAGE
+        ));
+        // Checksum casing doesn't matter.
+        assert!(verify_wallet_signature(
+            &WALLET.to_lowercase(),
+            WALLET_SIGNATURE,
+            WALLET_MESSAGE
+        ));
+        // Without the 0x prefix, as some wallets send it.
+        assert!(verify_wallet_signature(
+            WALLET,
+            WALLET_SIGNATURE.trim_start_matches("0x"),
+            WALLET_MESSAGE
+        ));
+    }
+
+    #[test]
+    fn wallet_signature_rejects_anything_else() {
+        let other = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+        assert!(!verify_wallet_signature(
+            other,
+            WALLET_SIGNATURE,
+            WALLET_MESSAGE
+        ));
+        assert!(!verify_wallet_signature(
+            WALLET,
+            WALLET_SIGNATURE,
+            "Sign in to Verdyx"
+        ));
+        assert!(!verify_wallet_signature(WALLET, "0x1234", WALLET_MESSAGE));
+        assert!(!verify_wallet_signature(
+            "not-an-address",
+            WALLET_SIGNATURE,
+            WALLET_MESSAGE
+        ));
     }
 
     #[test]

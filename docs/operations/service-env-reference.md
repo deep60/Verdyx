@@ -61,9 +61,9 @@ database is unreachable.
 |---|---|---|
 | `BLOCKCHAIN_RPC_URL` / `ETHEREUM_RPC_URL` | for chain reads | RPC endpoint |
 | `BOUNTY_MANAGER_ADDRESS`, `THREAT_TOKEN_ADDRESS` | for chain reads | Contract addresses; `GET /withdrawals/{address}` returns 503 without them |
-| `BOUNTY_MANAGER_ABI_PATH`, `THREAT_TOKEN_ABI_PATH` | for chain reads | Compiled ABI JSON |
 
-bounty-manager holds no signing key. It no longer runs a chain sync or a
+bounty-manager holds no signing key, and its two contract reads are compiled
+in, so it needs no ABI files. It no longer runs a chain sync or a
 resolution keeper: anyone resolves a bounty from the website, and the gateway
 indexes bounties for scan reports.
 
@@ -71,7 +71,7 @@ indexes bounties for scan reports.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `BLOCKCHAIN_RPC_URL` | **yes** | RPC endpoint |
+| `BLOCKCHAIN_RPC_URL` | **yes** | HTTP(S) RPC endpoint. `BLOCKCHAIN_WS_URL` is no longer read |
 | `BLOCKCHAIN_CHAIN_ID` / `CHAIN_ID` | yes | Network id |
 | `TREASURY_ADDRESS` | **yes** | Recorded as the payer on off-chain payment rows |
 | `TOKEN_CONTRACT_ADDRESS`, `PAYMENT_CONTRACT_ADDRESS` | yes | Contract addresses |
