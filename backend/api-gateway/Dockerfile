@@ -33,7 +33,6 @@ RUN useradd -m -u 1000 app
 WORKDIR /app
 COPY --from=builder /app/app-bin /usr/local/bin/app
 # Contract ABIs are read at runtime relative to the working directory.
-COPY --from=builder /app/api-gateway/abis ./abis
 RUN mkdir -p ./uploads ./temp/verdyx-uploads && chown -R app:app /usr/local/bin/app /app
 USER app
 EXPOSE 8080

@@ -181,9 +181,8 @@ async fn initialize_services(
         .await
         .context("Failed to initialize Redis service")?;
 
-    // Initialize blockchain service
-    let blockchain = BlockchainService::new(config.blockchain.clone())
-        .await
+    // Read-only chain access for the health check; no signing key.
+    let blockchain = BlockchainService::new(&config.blockchain)
         .context("Failed to initialize blockchain service")?;
 
     info!("All services initialized successfully");

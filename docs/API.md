@@ -59,18 +59,19 @@ List keys with `GET /users/me/api-keys` (name, prefix, scopes, created, last use
 
 ## Bounty Routes
 
+Bounties live on the BountyManager contract. People post, stake on, resolve
+and withdraw from them in their own wallets on the website; the server holds
+no signing key and sends no transactions. `GET /chain/bounties` lists the
+indexed bounties for a file or URL (see [Bounties on a file or URL](#bounties-on-a-file-or-url)).
+
+These older routes read the off-chain bounty records from before the
+marketplace moved on-chain. They are read-only:
+
 - `GET /bounties`
 - `GET /bounties/:bounty_id`
 - `GET /bounties/:bounty_id/stats`
 - `GET /bounties/active`
 - `GET /bounties/completed`
-- `POST /bounties`
-- `PUT /bounties/:bounty_id`
-- `POST /bounties/:bounty_id/cancel`
-- `POST /bounties/:bounty_id/extend`
-- `POST /bounties/:bounty_id/claim`
-- `POST /bounties/:bounty_id/submit`
-- `PUT /bounties/:bounty_id/finalize`
 
 ## Analysis Routes
 
@@ -292,7 +293,7 @@ The API root URL in discovery is absolute: `PUBLIC_API_URL` if set, otherwise th
 ## Protected User/Wallet/Submission/Webhook Routes
 
 - User profile: `GET /users/me`, `PUT /users/me`, `GET /users/me/stats`
-- Wallet: `POST /wallet/connect`, `GET /wallet/balance`, `POST /wallet/stake`, etc.
+- Wallet: `POST /auth/wallet/connect` links a wallet by a signed message; balances and transfers are read and signed in the wallet itself
 - Submissions: `GET /submissions`, `POST /submissions`, `POST /submissions/:id/vote`
 - Webhooks: CRUD and delivery routes under ` /webhooks`
 - Teams: `/orgs` and `/invitations` (see [Teams](#teams))
@@ -312,19 +313,12 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
   }'
 ```
 
-## Minimal Example: Create Bounty
+## Posting a bounty
 
-```bash
-curl -X POST http://localhost:8080/api/v1/bounties \
-  -H "Authorization: Bearer <jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Analyze suspicious payload",
-    "description": "Observed in phishing chain",
-    "reward_amount": 100,
-    "expires_at": "2026-04-30T23:59:59Z"
-  }'
-```
+Bounties are posted from the website's marketplace page, signed in your own
+wallet: it approves THREAT for the BountyManager and calls `createBounty`. The
+server sends no transactions. A script can do the same against the contract
+directly with the addresses from `GET /api/v1/chain`.
 
 ## Related Files
 

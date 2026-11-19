@@ -7,7 +7,7 @@ use axum::{
 use crate::{
     handlers::{
         analysis, auth, bounty, chain, consensus_proxy, engines, health, oauth, organization,
-        reputation, submission, user, wallet, web_intel, webhook,
+        reputation, submission, user, web_intel, webhook,
     },
     middleware::{auth as auth_mw, rate_limiter},
     AppState,
@@ -55,7 +55,6 @@ pub fn create_routes(state: AppState) -> Router {
     // ── Protected routes (strict auth) ───────────────────
     let protected_routes = Router::new()
         .nest("/users", user_routes())
-        .nest("/wallet", wallet_routes())
         .nest("/webhooks", webhook_routes())
         .nest("/orgs", team_routes())
         .nest("/invitations", invitation_routes())
@@ -119,13 +118,6 @@ fn bounty_routes() -> Router<AppState> {
         .route("/{bounty_id}/stats", get(bounty::get_bounty_stats))
         .route("/active", get(bounty::list_active_bounties))
         .route("/completed", get(bounty::list_completed_bounties))
-        .route("/", post(bounty::create_bounty))
-        .route("/{bounty_id}", put(bounty::update_bounty))
-        .route("/{bounty_id}/cancel", post(bounty::cancel_bounty))
-        .route("/{bounty_id}/extend", post(bounty::extend_bounty))
-        .route("/{bounty_id}/claim", post(bounty::claim_reward))
-        .route("/{bounty_id}/submit", post(bounty::submit_analysis))
-        .route("/{bounty_id}/finalize", put(bounty::finalize_bounty))
 }
 
 fn analysis_routes(state: AppState) -> Router<AppState> {
@@ -193,19 +185,6 @@ fn user_routes() -> Router<AppState> {
         .route("/me/export", get(crate::handlers::data::export_my_data))
         .route("/me/api-keys", get(user::list_api_keys))
         .route("/me/api-keys/{key_id}", delete(user::revoke_api_key))
-}
-
-fn wallet_routes() -> Router<AppState> {
-    Router::new()
-        .route("/connect", post(wallet::connect_wallet))
-        .route("/disconnect", post(wallet::disconnect_wallet))
-        .route("/balance", get(wallet::get_balance))
-        .route("/balance/{address}", get(wallet::get_balance_by_address))
-        .route("/withdraw", post(wallet::withdraw))
-        .route("/stake", post(wallet::stake_tokens))
-        .route("/unstake/{bounty_id}", post(wallet::unstake_tokens))
-        .route("/transactions", get(wallet::get_transactions))
-        .route("/claim-rewards", post(wallet::claim_rewards))
 }
 
 fn submission_routes(state: AppState) -> Router<AppState> {
