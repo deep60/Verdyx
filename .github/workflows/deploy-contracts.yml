@@ -91,8 +91,9 @@ jobs:
             echo
             echo "| Contract | Address |"
             echo "|---|---|"
-            for k in threatToken reputationSystem bountyManager governance deployer feeCollector; do
-              a=$(jq -r ".$k" "$f")
+            for k in threatToken reputationSystem bountyManager governance threatFaucet deployer feeCollector; do
+              a=$(jq -r ".$k // empty" "$f")
+              [ -n "$a" ] || continue
               echo "| $k | [\`$a\`]($explorer/$a) |"
             done
             echo

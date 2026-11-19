@@ -54,7 +54,11 @@ every deployment waits for your approval.
 
 It runs the tests, deploys the four contracts, grants the roles between
 them, funds the BountyManager reward pool with 100,000 THREAT, and verifies
-the source. The run summary lists every address with a Basescan link.
+the source. On a test network it also deploys **ThreatFaucet** with
+1,000,000 THREAT, which gives each wallet 100 THREAT once a day (change
+these with `FAUCET_FUND_THREAT`, `FAUCET_DRIP_THREAT` and
+`FAUCET_COOLDOWN_SECS`). It is never deployed on a mainnet. The run summary
+lists every address with a Basescan link.
 
 Then commit the addresses: download the run's **contract-deployment**
 artifact and copy `deployments/` and `deployed-addresses.json` into
@@ -80,6 +84,7 @@ The website learns which network and contracts to use from
 | `THREAT_TOKEN_ADDRESS` | ThreatToken's address |
 | `BOUNTY_MANAGER_ADDRESS` | BountyManager's address |
 | `REPUTATION_SYSTEM_ADDRESS` | ReputationSystem's address |
+| `THREAT_FAUCET_ADDRESS` (test networks) | ThreatFaucet's address. The website's **Your wallet** card then offers test THREAT. Ignored on a mainnet |
 | `PUBLIC_CHAIN_RPC_URL` (optional) | what browsers use; defaults to `https://sepolia.base.org`. Never put a URL with a private provider key here: it is published |
 | `CHAIN_EXPLORER_URL` (optional) | defaults to `https://sepolia.basescan.org` |
 | `CHAIN_INDEX_INTERVAL_SECS` (optional) | how often the gateway copies bounties from the chain so scan reports can list them; default 30 |
@@ -88,8 +93,11 @@ The website learns which network and contracts to use from
 browsers. Until the addresses are set, the website says the marketplace
 isn't deployed yet.
 
-To try it, people need test ETH for gas (from the faucets above) and some
-THREAT: the deployer holds the supply and can send it from its wallet.
+To try it, people need test ETH for network fees (from the faucets above)
+and some THREAT, which they claim from **Get 100 test THREAT** in **Your
+wallet** on the marketplace page. The claim is signed in their own wallet;
+the server sends nothing. The faucet's owner (the deployer) can change the
+amount and cooldown with `setDrip` or take the tokens back with `reclaim`.
 
 ## How a bounty runs
 

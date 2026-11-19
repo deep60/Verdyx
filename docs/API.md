@@ -220,13 +220,18 @@ wallet; the server never holds their tokens.
   "nativeCurrency": "ETH",
   "rpcUrl": "https://sepolia.base.org",
   "explorerUrl": "https://sepolia.basescan.org",
-  "contracts": { "threatToken": "0x…", "bountyManager": "0x…", "reputationSystem": "0x…" }
+  "contracts": {
+    "threatToken": "0x…", "bountyManager": "0x…", "reputationSystem": "0x…",
+    "threatFaucet": "0x…"
+  }
 }
 ```
 
 `enabled` is false (and `contracts` null) until the contract addresses are
 configured. `rpcUrl` is `PUBLIC_CHAIN_RPC_URL` or the network's public
 endpoint, never the server's own `BLOCKCHAIN_RPC_URL`.
+`threatFaucet` (`THREAT_FAUCET_ADDRESS`) hands out test THREAT; it is null
+when unset and always null on a mainnet.
 
 ### Bounties on a file or URL
 

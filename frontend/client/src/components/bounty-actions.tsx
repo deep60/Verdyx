@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { FaucetButton } from "@/components/faucet";
 import { WalletGate } from "@/components/wallet-gate";
 import { useWallet, type WalletState } from "@/hooks/use-wallet";
 import { useToast } from "@/hooks/use-toast";
@@ -309,6 +310,7 @@ function AnalystForm({ info, bounty, analyses, wallet }: Omit<Props, "now"> & { 
           {!parsedStake.ok && stake ? ` ${parsedStake.error}.` : ""}
           {tooMuch ? " That's more than you have." : ""}
         </p>
+        {status.data.balance < parseUnits(String(MIN_STAKE_THREAT), 18) && <FaucetButton info={info} wallet={wallet} />}
       </div>
       <div className="space-y-1.5 sm:col-span-2">
         <Label htmlFor="analysis-evidence">Evidence</Label>

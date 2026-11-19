@@ -33,6 +33,13 @@ async function verifyAllContracts(d: DeploymentAddresses) {
         "contracts/core/BountyManager.sol:BountyManager"
     );
     await verifyContract(d.governance, [d.threatToken], "contracts/core/Governance.sol:Governance");
+    if (d.threatFaucet && d.faucetDripWei && d.faucetCooldownSecs) {
+        await verifyContract(
+            d.threatFaucet,
+            [d.threatToken, d.faucetDripWei, d.faucetCooldownSecs],
+            "contracts/core/ThreatFaucet.sol:ThreatFaucet"
+        );
+    }
     console.log("\n✅ All contracts verified");
 }
 
