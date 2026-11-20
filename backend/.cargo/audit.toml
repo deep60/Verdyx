@@ -19,10 +19,6 @@ ignore = [
     # 0.7 pinned across all services (query macros / API changes). Needs migration.
     "RUSTSEC-2024-0363",
 
-    # idna <1.0 punycode issue — pulled transitively via an old `url`; requires
-    # parent major bumps to reach idna 1.0.
-    "RUSTSEC-2024-0421",
-
     # Old rustls 0.21 stack (ring 0.16, rustls-webpki 0.101, h2 0.3, webpki-roots
     # 0.25). Our own code is on reqwest 0.12; only ethers 2.0.14, the final release
     # of a deprecated crate, still pulls this in, through reqwest 0.11 and
