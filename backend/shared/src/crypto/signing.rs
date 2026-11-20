@@ -39,28 +39,6 @@ pub fn verify_signature(
     }
 }
 
-/// Ethereum signature verification (for wallet authentication)
-pub fn verify_ethereum_signature(
-    message: &str,
-    signature: &str,
-    expected_address: &str,
-) -> CryptoResult<bool> {
-    use ethers::core::types::Signature as EthSignature;
-    use std::str::FromStr;
-
-    let sig = EthSignature::from_str(signature)
-        .map_err(|e| CryptoError::Verification(format!("Invalid Ethereum signature: {}", e)))?;
-
-    let recovered_address = sig
-        .recover(message)
-        .map_err(|e| CryptoError::Verification(format!("Failed to recover address: {}", e)))?;
-
-    let recovered_str = format!("{:?}", recovered_address).to_lowercase();
-    let expected_str = expected_address.to_lowercase();
-
-    Ok(recovered_str == expected_str)
-}
-
 /// Sign data with a private key (hex-encoded)
 pub fn sign_with_hex_key(private_key_hex: &str, message: &[u8]) -> CryptoResult<String> {
     let key_bytes = hex::decode(private_key_hex)

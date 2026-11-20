@@ -17,13 +17,12 @@
 
 use std::time::Duration;
 
+use alloy::primitives::{Address, Bytes, U256};
+use alloy::providers::{Provider, RootProvider};
+use alloy::rpc::types::TransactionRequest;
+use alloy::sol;
+use alloy::sol_types::SolCall;
 use chrono::{DateTime, TimeZone, Utc};
-use ethers::abi::{self, ParamType, Token};
-use ethers::providers::{Http, Middleware, Provider};
-use ethers::types::{
-    transaction::eip2718::TypedTransaction, Address, Bytes, TransactionRequest, U256,
-};
-use ethers::utils::keccak256;
 use sqlx::PgPool;
 
 use crate::handlers::chain::{chain_info, server_rpc_url};
@@ -33,6 +32,27 @@ use crate::AppState;
 const NEW_PER_CYCLE: u64 = 100;
 /// Open bounties re-read per cycle, stalest first.
 const REFRESH_PER_CYCLE: i64 = 50;
+
+sol! {
+    /// `IBountyManager.Bounty`. The two enums travel as `uint8`.
+    struct Bounty {
+        uint256 id;
+        address creator;
+        string artifactHash;
+        string artifactType;
+        uint256 rewardAmount;
+        uint256 deadline;
+        string description;
+        uint8 status;
+        uint8 consensusVerdict;
+        uint256 totalStaked;
+        uint256 analysisCount;
+        uint256 createdAt;
+    }
+
+    function getTotalBounties() external view returns (uint256);
+    function getBounty(uint256 bountyId) external view returns (Bounty memory);
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexedBounty {
@@ -50,81 +70,47 @@ pub struct IndexedBounty {
     pub created_at: u64,
 }
 
-fn selector(signature: &str) -> [u8; 4] {
-    let h = keccak256(signature.as_bytes());
-    [h[0], h[1], h[2], h[3]]
-}
-
 pub fn get_total_bounties_call() -> Bytes {
-    selector("getTotalBounties()").to_vec().into()
+    getTotalBountiesCall {}.abi_encode().into()
 }
 
 pub fn get_bounty_call(id: u64) -> Bytes {
-    let mut data = selector("getBounty(uint256)").to_vec();
-    data.extend(abi::encode(&[Token::Uint(U256::from(id))]));
-    data.into()
+    getBountyCall {
+        bountyId: U256::from(id),
+    }
+    .abi_encode()
+    .into()
+}
+
+/// A counter or timestamp that must fit in an `i64` column.
+fn small(n: U256, what: &str) -> Result<u64, String> {
+    if n > U256::from(i64::MAX as u64) {
+        return Err(format!("{what} is out of range"));
+    }
+    Ok(n.to::<u64>())
 }
 
 pub fn decode_total(raw: &[u8]) -> Result<u64, String> {
-    let tokens = abi::decode(&[ParamType::Uint(256)], raw).map_err(|e| e.to_string())?;
-    match tokens.as_slice() {
-        [Token::Uint(n)] if *n <= U256::from(i64::MAX as u64) => Ok(n.as_u64()),
-        _ => Err("getTotalBounties returned something unexpected".into()),
-    }
+    let n = getTotalBountiesCall::abi_decode_returns(raw).map_err(|e| e.to_string())?;
+    small(n, "getTotalBounties")
 }
 
 /// Decodes `getBounty`'s `Bounty` struct.
 pub fn decode_bounty(raw: &[u8]) -> Result<IndexedBounty, String> {
-    let bounty = ParamType::Tuple(vec![
-        ParamType::Uint(256), // id
-        ParamType::Address,   // creator
-        ParamType::String,    // artifactHash
-        ParamType::String,    // artifactType
-        ParamType::Uint(256), // rewardAmount
-        ParamType::Uint(256), // deadline
-        ParamType::String,    // description
-        ParamType::Uint(8),   // status
-        ParamType::Uint(8),   // consensusVerdict
-        ParamType::Uint(256), // totalStaked
-        ParamType::Uint(256), // analysisCount
-        ParamType::Uint(256), // createdAt
-    ]);
-    let mut tokens = abi::decode(&[bounty], raw).map_err(|e| e.to_string())?;
-    let Some(Token::Tuple(f)) = tokens.pop() else {
-        return Err("getBounty returned something unexpected".into());
-    };
-    let uint = |i: usize| match &f[i] {
-        Token::Uint(n) => Ok(*n),
-        _ => Err(format!("getBounty field {i} isn't a number")),
-    };
-    let small = |i: usize| -> Result<u64, String> {
-        let n = uint(i)?;
-        if n > U256::from(i64::MAX as u64) {
-            return Err(format!("getBounty field {i} is out of range"));
-        }
-        Ok(n.as_u64())
-    };
-    let text = |i: usize| match &f[i] {
-        Token::String(s) => Ok(s.clone()),
-        _ => Err(format!("getBounty field {i} isn't text")),
-    };
-    let creator = match &f[1] {
-        Token::Address(a) => format!("{a:#x}"),
-        _ => return Err("getBounty creator isn't an address".into()),
-    };
+    let b = getBountyCall::abi_decode_returns(raw).map_err(|e| e.to_string())?;
     Ok(IndexedBounty {
-        id: small(0)?,
-        creator,
-        artifact_hash: text(2)?,
-        artifact_type: text(3)?,
-        reward: uint(4)?,
-        deadline: small(5)?,
-        description: text(6)?,
-        status: small(7)? as u8,
-        consensus_verdict: small(8)? as u8,
-        total_staked: uint(9)?,
-        analysis_count: small(10)?,
-        created_at: small(11)?,
+        id: small(b.id, "getBounty id")?,
+        creator: format!("{:#x}", b.creator),
+        artifact_hash: b.artifactHash,
+        artifact_type: b.artifactType,
+        reward: b.rewardAmount,
+        deadline: small(b.deadline, "getBounty deadline")?,
+        description: b.description,
+        status: b.status,
+        consensus_verdict: b.consensusVerdict,
+        total_staked: b.totalStaked,
+        analysis_count: small(b.analysisCount, "getBounty analysisCount")?,
+        created_at: small(b.createdAt, "getBounty createdAt")?,
     })
 }
 
@@ -140,7 +126,7 @@ fn timestamp(secs: u64) -> DateTime<Utc> {
 }
 
 struct Indexer {
-    provider: Provider<Http>,
+    provider: RootProvider,
     db: PgPool,
     chain_id: i64,
     contract: Address,
@@ -149,14 +135,10 @@ struct Indexer {
 
 impl Indexer {
     async fn call(&self, data: Bytes) -> Result<Bytes, String> {
-        let tx: TypedTransaction = TransactionRequest::new()
+        let tx = TransactionRequest::default()
             .to(self.contract)
-            .data(data)
-            .into();
-        self.provider
-            .call(&tx, None)
-            .await
-            .map_err(|e| e.to_string())
+            .input(data.into());
+        self.provider.call(tx).await.map_err(|e| e.to_string())
     }
 
     async fn fetch(&self, id: u64) -> Result<IndexedBounty, String> {
@@ -252,8 +234,8 @@ pub fn spawn(state: AppState) {
         tracing::warn!("chain indexer: off (no RPC URL for chain {})", cfg.chain_id);
         return;
     };
-    let provider = match Provider::<Http>::try_from(rpc.as_str()) {
-        Ok(p) => p,
+    let provider = match rpc.parse() {
+        Ok(url) => RootProvider::new_http(url),
         Err(e) => {
             tracing::warn!("chain indexer: off (bad RPC URL: {e})");
             return;
@@ -311,24 +293,28 @@ pub fn spawn(state: AppState) {
 mod tests {
     use super::*;
 
+    use alloy::primitives::keccak256;
+    use alloy::sol_types::SolValue;
+
     fn encoded_bounty() -> Vec<u8> {
         let creator: Address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
             .parse()
             .unwrap();
-        abi::encode(&[Token::Tuple(vec![
-            Token::Uint(U256::from(7)),
-            Token::Address(creator),
-            Token::String("AB12cd".into()),
-            Token::String("file".into()),
-            Token::Uint(U256::exp10(20)), // 100 THREAT
-            Token::Uint(U256::from(2_000_000_000u64)),
-            Token::String("Is it malicious?".into()),
-            Token::Uint(U256::from(2)),
-            Token::Uint(U256::from(2)),
-            Token::Uint(U256::exp10(19) * 4),
-            Token::Uint(U256::from(3)),
-            Token::Uint(U256::from(1_999_000_000u64)),
-        ])])
+        Bounty {
+            id: U256::from(7),
+            creator,
+            artifactHash: "AB12cd".into(),
+            artifactType: "file".into(),
+            rewardAmount: U256::from(10).pow(U256::from(20)), // 100 THREAT
+            deadline: U256::from(2_000_000_000u64),
+            description: "Is it malicious?".into(),
+            status: 2,
+            consensusVerdict: 2,
+            totalStaked: U256::from(10).pow(U256::from(19)) * U256::from(4),
+            analysisCount: U256::from(3),
+            createdAt: U256::from(1_999_000_000u64),
+        }
+        .abi_encode()
     }
 
     #[test]
@@ -361,11 +347,8 @@ mod tests {
     fn refuses_garbage() {
         assert!(decode_bounty(&[1, 2, 3]).is_err());
         assert!(decode_total(&[]).is_err());
-        assert_eq!(
-            decode_total(&abi::encode(&[Token::Uint(U256::from(12))])),
-            Ok(12)
-        );
-        assert!(decode_total(&abi::encode(&[Token::Uint(U256::MAX)])).is_err());
+        assert_eq!(decode_total(&U256::from(12).abi_encode()), Ok(12));
+        assert!(decode_total(&U256::MAX.abi_encode()).is_err());
     }
 
     #[test]

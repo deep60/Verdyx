@@ -261,8 +261,6 @@ services:
       - THREAT_TOKEN_ADDRESS=${THREAT_TOKEN_ADDRESS}
       - REPUTATION_SYSTEM_ADDRESS=${REPUTATION_SYSTEM_ADDRESS}
       - BOUNTY_MANAGER_ADDRESS=${BOUNTY_MANAGER_ADDRESS}
-      - BOUNTY_MANAGER_ABI_PATH=${BOUNTY_MANAGER_ABI_PATH:-/app/abis/BountyManager.abi.json}
-      - THREAT_TOKEN_ABI_PATH=${THREAT_TOKEN_ABI_PATH:-/app/abis/ThreatToken.abi.json}
       - CHAIN_ID=${CHAIN_ID:-31337}
     depends_on:
       postgres:

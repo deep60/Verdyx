@@ -30,7 +30,6 @@ pub struct RedisConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockchainConfig {
     pub rpc_url: String,
-    pub ws_url: Option<String>,
     pub chain_id: u64,
     pub treasury_address: String,
     pub token_contract_address: String,
@@ -71,7 +70,6 @@ impl Config {
             },
             blockchain: BlockchainConfig {
                 rpc_url: std::env::var("BLOCKCHAIN_RPC_URL")?,
-                ws_url: std::env::var("BLOCKCHAIN_WS_URL").ok(),
                 chain_id: std::env::var("BLOCKCHAIN_CHAIN_ID")
                     .unwrap_or_else(|_| "1".to_string())
                     .parse()?,

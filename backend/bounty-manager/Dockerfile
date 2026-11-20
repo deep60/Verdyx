@@ -32,7 +32,6 @@ RUN apt-get update && apt-get install -y ca-certificates libssl3 libpq5 curl && 
 RUN useradd -m -u 1000 app
 WORKDIR /app
 COPY --from=builder /app/app-bin /usr/local/bin/app
-COPY --from=builder /app/api-gateway/abis ./abis
 RUN chown -R app:app /usr/local/bin/app /app
 USER app
 EXPOSE 8080

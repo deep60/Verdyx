@@ -4,25 +4,34 @@
 //! resolved and withdrawn from in each person's own wallet; the contract pays
 //! rewards itself. What's left here are reads: claimable balances, token
 //! balances and transaction receipts.
+//!
+//! The two contract reads are declared below with `sol!`, so the service needs
+//! no ABI files at runtime.
 
+use alloy::primitives::{Address, TxHash, U256};
+use alloy::providers::{Provider, RootProvider};
+use alloy::sol;
 use anyhow::Result;
-use ethers::{
-    abi::Abi,
-    contract::Contract,
-    providers::{Http, Middleware, Provider},
-    types::{Address, H256, U256},
-};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 
-type BlockchainClient = Provider<Http>;
+sol! {
+    #[sol(rpc)]
+    interface IBountyManager {
+        function pendingWithdrawals(address account) external view returns (uint256);
+    }
+
+    #[sol(rpc)]
+    interface IThreatToken {
+        function balanceOf(address account) external view returns (uint256);
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct BlockchainService {
-    client: Arc<BlockchainClient>,
-    bounty_manager: Contract<BlockchainClient>,
-    threat_token: Contract<BlockchainClient>,
+    client: RootProvider,
+    bounty_manager: Address,
+    threat_token: Address,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,14 +70,11 @@ impl BlockchainService {
         rpc_url: &str,
         bounty_manager_address: &str,
         threat_token_address: &str,
-        bounty_manager_abi: Abi,
-        threat_token_abi: Abi,
     ) -> Result<Self, BlockchainError> {
-        let provider = Provider::<Http>::try_from(rpc_url)
-            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?
-            .interval(Duration::from_millis(1000));
-
-        let client = Arc::new(provider);
+        let url = rpc_url
+            .parse()
+            .map_err(|e| BlockchainError::ConnectionError(format!("bad RPC URL: {e}")))?;
+        let client = RootProvider::new_http(url);
 
         let bm_addr: Address = bounty_manager_address
             .parse()
@@ -78,13 +84,10 @@ impl BlockchainService {
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(threat_token_address.to_string()))?;
 
-        let bounty_manager = Contract::new(bm_addr, bounty_manager_abi, Arc::clone(&client));
-        let threat_token = Contract::new(tt_addr, threat_token_abi, Arc::clone(&client));
-
         Ok(Self {
             client,
-            bounty_manager,
-            threat_token,
+            bounty_manager: bm_addr,
+            threat_token: tt_addr,
         })
     }
 
@@ -97,20 +100,16 @@ impl BlockchainService {
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(address.to_string()))?;
 
-        let amount: U256 = self
-            .bounty_manager
-            .method("pendingWithdrawals", (addr,))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?
+        IBountyManager::new(self.bounty_manager, &self.client)
+            .pendingWithdrawals(addr)
             .call()
             .await
-            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
-
-        Ok(amount)
+            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))
     }
 
     /// Verify a transaction by checking its receipt
     pub async fn verify_transaction(&self, tx_hash: &str) -> Result<bool, BlockchainError> {
-        let hash: H256 = tx_hash
+        let hash: TxHash = tx_hash
             .parse()
             .map_err(|_| BlockchainError::ContractError("Invalid transaction hash".to_string()))?;
 
@@ -121,7 +120,7 @@ impl BlockchainService {
             .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
 
         match receipt {
-            Some(r) => Ok(r.status == Some(1.into())),
+            Some(r) => Ok(r.status()),
             None => Ok(false), // Transaction not yet mined
         }
     }
@@ -131,7 +130,7 @@ impl BlockchainService {
         &self,
         tx_hash: &str,
     ) -> Result<TransactionStatus, BlockchainError> {
-        let hash: H256 = tx_hash
+        let hash: TxHash = tx_hash
             .parse()
             .map_err(|_| BlockchainError::ContractError("Invalid transaction hash".to_string()))?;
 
@@ -143,7 +142,7 @@ impl BlockchainService {
 
         match receipt {
             Some(r) => {
-                if r.status == Some(1.into()) {
+                if r.status() {
                     Ok(TransactionStatus::Confirmed)
                 } else {
                     Ok(TransactionStatus::Failed)
@@ -159,15 +158,11 @@ impl BlockchainService {
             .parse()
             .map_err(|_| BlockchainError::InvalidAddress(address.to_string()))?;
 
-        let balance: U256 = self
-            .threat_token
-            .method("balanceOf", (addr,))
-            .map_err(|e| BlockchainError::ContractError(e.to_string()))?
+        IThreatToken::new(self.threat_token, &self.client)
+            .balanceOf(addr)
             .call()
             .await
-            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))?;
-
-        Ok(balance)
+            .map_err(|e| BlockchainError::ConnectionError(e.to_string()))
     }
 
     /// Health check — verifies RPC connectivity

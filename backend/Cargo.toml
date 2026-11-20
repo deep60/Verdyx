@@ -62,8 +62,10 @@ dotenvy = "0.15"
 # HTTP client
 reqwest = { version = "0.12", features = ["json"] }
 
-# Blockchain integration
-ethers = "2.0"
+# Blockchain integration. Read-only: no service holds a signing key.
+# Crates add "provider-http", "reqwest-rustls-tls", "rpc-types" and "contract"
+# when they talk to a node; k256 is for wallet sign-in (EIP-191 recovery).
+alloy = { version = "2.6", default-features = false, features = ["std", "sol-types", "k256"] }
 
 # UUID generation
 uuid = { version = "1.6", features = ["v4", "serde"] }
