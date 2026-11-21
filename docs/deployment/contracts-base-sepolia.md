@@ -8,6 +8,21 @@ an external audit.
 The deployment runs from GitHub Actions (**Actions → Deploy contracts**), so
 the deployer key lives only in a GitHub secret.
 
+## Current deployment
+
+Deployed on 2026-11-21 at block 61773389 by
+[run 44907424782](https://github.com/deep60/Verdyx/actions/runs/44907424782).
+The source of every contract is verified on Basescan.
+
+| Contract | Address |
+|---|---|
+| ThreatToken (THREAT) | [`0xbae3077E4cD2026e96D0E26e24D50CF33E83B148`](https://sepolia.basescan.org/address/0xbae3077E4cD2026e96D0E26e24D50CF33E83B148#code) |
+| ReputationSystem | [`0x0ad68D635017976A5f7E039E26A52d0273f9c199`](https://sepolia.basescan.org/address/0x0ad68D635017976A5f7E039E26A52d0273f9c199#code) |
+| BountyManager | [`0xfABEAA592ef85E7B461a48F7Ea4B214CF01c26A5`](https://sepolia.basescan.org/address/0xfABEAA592ef85E7B461a48F7Ea4B214CF01c26A5#code) |
+| Governance | [`0x8F3E747FB53De48EB113c246aCa8EdfF324FbEa7`](https://sepolia.basescan.org/address/0x8F3E747FB53De48EB113c246aCa8EdfF324FbEa7#code) |
+| ThreatFaucet | [`0x98136ac664ccEECBb26421D17df780AbdA3360C0`](https://sepolia.basescan.org/address/0x98136ac664ccEECBb26421D17df780AbdA3360C0#code) |
+| Deployer and fee collector | [`0xBe9db846a09aA2b849abFdC567c4Dfc634D5a728`](https://sepolia.basescan.org/address/0xBe9db846a09aA2b849abFdC567c4Dfc634D5a728) |
+
 ## One-time setup
 
 ### 1. Create a deployer wallet used only for this

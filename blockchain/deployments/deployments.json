@@ -8,5 +8,20 @@
     "network": "localhost",
     "blockNumber": 6,
     "timestamp": 1782290371
+  },
+  "baseSepolia-84532": {
+    "threatToken": "0xbae3077E4cD2026e96D0E26e24D50CF33E83B148",
+    "reputationSystem": "0x0ad68D635017976A5f7E039E26A52d0273f9c199",
+    "bountyManager": "0xfABEAA592ef85E7B461a48F7Ea4B214CF01c26A5",
+    "governance": "0x8F3E747FB53De48EB113c246aCa8EdfF324FbEa7",
+    "threatFaucet": "0x98136ac664ccEECBb26421D17df780AbdA3360C0",
+    "faucetDripWei": "100000000000000000000",
+    "faucetCooldownSecs": 86400,
+    "deployer": "0xBe9db846a09aA2b849abFdC567c4Dfc634D5a728",
+    "feeCollector": "0xBe9db846a09aA2b849abFdC567c4Dfc634D5a728",
+    "network": "baseSepolia",
+    "chainId": 84532,
+    "blockNumber": 61773389,
+    "timestamp": 1795276546
   }
 }
