@@ -19,24 +19,12 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+use crate::utils::outbound::{outbound_client_builder, resolve_public, validate_outbound_url};
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct WebIntelQuery {
     pub url: String,
-}
-
-fn is_private_or_local_host(host: &str) -> bool {
-    let lower = host.trim().to_lowercase();
-    lower == "localhost"
-        || lower == "0.0.0.0"
-        || lower == "::1"
-        || lower.starts_with("127.")
-        || lower.starts_with("10.")
-        || lower.starts_with("192.168.")
-        || lower.starts_with("169.254.")
-        || lower.ends_with(".internal")
-        || lower.ends_with(".local")
 }
 
 fn normalize_target_url(raw: &str) -> Result<(reqwest::Url, String, String), StatusCode> {
@@ -54,7 +42,7 @@ fn normalize_target_url(raw: &str) -> Result<(reqwest::Url, String, String), Sta
         .host_str()
         .ok_or(StatusCode::BAD_REQUEST)?
         .to_lowercase();
-    if is_private_or_local_host(&host) {
+    if validate_outbound_url(&parsed).is_err() {
         return Err(StatusCode::BAD_REQUEST);
     }
     let origin = format!(
@@ -160,13 +148,15 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     let root_domain = extract_root_domain(&host);
     let full_url_str = parsed_url.to_string();
 
-    let client = reqwest::Client::builder()
+    // Every client below uses public-only DNS, so neither the target nor any
+    // redirect it issues can reach Docker, Tailscale or cloud-metadata hosts.
+    let client = outbound_client_builder(5)
         .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Verdyx-Recon/2.1")
         .timeout(Duration::from_secs(7))
         .build()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let no_redirect_client = reqwest::Client::builder()
+    let no_redirect_client = outbound_client_builder(0)
         .redirect(reqwest::redirect::Policy::none())
         .user_agent("Verdyx-Recon/2.1")
         .timeout(Duration::from_secs(4))
@@ -175,10 +165,14 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
     // 1. Resolve IP addresses (IPv4 & IPv6)
     let port = parsed_url.port_or_known_default().unwrap_or(443);
-    let resolved_addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
-        .await
-        .map(|iter| iter.collect())
-        .unwrap_or_default();
+    // Refuse up front when the name points at any non-public address.
+    let resolved_addrs: Vec<std::net::SocketAddr> = match resolve_public(&host, port).await {
+        Ok(addrs) => addrs,
+        Err(reason) if reason.contains("non-public") || reason.contains("not a public") => {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        Err(_) => Vec::new(),
+    };
 
     let mut ipv4_list = Vec::new();
     let mut ipv6_list = Vec::new();
@@ -999,6 +993,19 @@ async fn trace_redirects(client: &reqwest::Client, start_url: &str) -> Vec<Value
 
     for step in 1..=6 {
         let hop_start = Instant::now();
+        let allowed = reqwest::Url::parse(&current)
+            .map_err(|e| e.to_string())
+            .and_then(|u| validate_outbound_url(&u));
+        if let Err(reason) = allowed {
+            hops.push(json!({
+                "step": step,
+                "url": current,
+                "statusCode": 0,
+                "error": format!("not followed: {reason}"),
+                "latencyMs": 0,
+            }));
+            break;
+        }
         match client.get(&current).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
@@ -1698,7 +1705,7 @@ fn resolve_same_host(href: &str, origin: &str, host: &str) -> Option<String> {
         return None;
     }
     let resolved_host = absolute.host_str()?.to_lowercase();
-    if resolved_host != host.to_lowercase() || is_private_or_local_host(&resolved_host) {
+    if resolved_host != host.to_lowercase() || validate_outbound_url(&absolute).is_err() {
         return None;
     }
     Some(absolute.to_string())
@@ -1821,7 +1828,7 @@ async fn favicon_record(href: Option<&str>, origin: &str, host: &str) -> Value {
         });
     };
 
-    let client = match reqwest::Client::builder()
+    let client = match outbound_client_builder(0)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(4))
         .user_agent("Verdyx-Recon/2.1")

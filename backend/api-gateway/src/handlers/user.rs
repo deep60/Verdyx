@@ -16,6 +16,8 @@ use crate::AppState;
 pub struct UserProfile {
     pub id: Uuid,
     pub username: String,
+    /// Empty (and omitted) when another user's profile is viewed.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub email: String,
     pub ethereum_address: Option<String>,
     pub reputation_score: f64,
@@ -144,8 +146,13 @@ async fn identity_to_profile_with_stats(
 /// Get user profile by ID
 ///
 /// GET /api/v1/users/:id
+///
+/// Any signed-in user may view a public profile, but email and wallet address
+/// are only returned to the profile's owner or an admin. User IDs are public
+/// (leaderboard), so returning them to everyone would let anyone harvest them.
 pub async fn get_user_by_id(
     State(state): State<AppState>,
+    claims: crate::middleware::auth::Claims,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<UserProfile>, StatusCode> {
     let user = state
@@ -158,7 +165,7 @@ pub async fn get_user_by_id(
         })?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    Ok(Json(UserProfile {
+    let mut profile = UserProfile {
         id: user.id,
         username: user.username,
         email: user.email,
@@ -171,7 +178,20 @@ pub async fn get_user_by_id(
         rank: None,
         joined_at: user.created_at,
         last_active_at: Some(user.updated_at),
-    }))
+    };
+    if !can_view_private_fields(&claims, user_id) {
+        hide_private_fields(&mut profile);
+    }
+    Ok(Json(profile))
+}
+
+fn can_view_private_fields(claims: &crate::middleware::auth::Claims, user_id: Uuid) -> bool {
+    claims.sub == user_id || claims.is_admin || claims.role == "admin"
+}
+
+fn hide_private_fields(profile: &mut UserProfile) {
+    profile.email.clear();
+    profile.ethereum_address = None;
 }
 
 fn api_err(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
@@ -632,4 +652,52 @@ pub async fn revoke_api_key(
         .await;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::auth::Claims;
+
+    fn profile(id: Uuid) -> UserProfile {
+        UserProfile {
+            id,
+            username: "alice".into(),
+            email: "alice@example.com".into(),
+            ethereum_address: Some("0xabc".into()),
+            reputation_score: 0.0,
+            total_submissions: 0,
+            successful_submissions: 0,
+            accuracy_rate: 0.0,
+            total_earnings: "0".into(),
+            rank: None,
+            joined_at: Utc::now(),
+            last_active_at: None,
+        }
+    }
+
+    #[test]
+    fn other_users_cannot_see_email_or_wallet() {
+        let owner = Uuid::new_v4();
+        let viewer = Claims::new(Uuid::new_v4(), "bob@example.com".into(), "user".into(), 1);
+        assert!(!can_view_private_fields(&viewer, owner));
+
+        let mut p = profile(owner);
+        hide_private_fields(&mut p);
+        let json = serde_json::to_value(&p).unwrap();
+        assert!(json.get("email").is_none(), "email must be omitted: {json}");
+        assert!(json["ethereum_address"].is_null());
+        assert_eq!(json["username"], "alice");
+    }
+
+    #[test]
+    fn owner_and_admin_can_see_private_fields() {
+        let owner = Uuid::new_v4();
+        let me = Claims::new(owner, "alice@example.com".into(), "user".into(), 1);
+        let admin = Claims::new(Uuid::new_v4(), "root@example.com".into(), "admin".into(), 1);
+        assert!(can_view_private_fields(&me, owner));
+        assert!(can_view_private_fields(&admin, owner));
+        let json = serde_json::to_value(profile(owner)).unwrap();
+        assert_eq!(json["email"], "alice@example.com");
+    }
 }
