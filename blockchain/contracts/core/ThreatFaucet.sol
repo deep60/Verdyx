@@ -52,8 +52,14 @@ contract ThreatFaucet is Ownable, ReentrancyGuard {
     /// @notice Send `dripAmount` THREAT to the caller.
     function claim() external nonReentrant {
         // slither-disable-next-line timestamp
-        require(block.timestamp >= claimableFrom[msg.sender], "Come back later");
-        require(token.balanceOf(address(this)) >= dripAmount, "Faucet is empty");
+        require(
+            block.timestamp >= claimableFrom[msg.sender],
+            "Come back later"
+        );
+        require(
+            token.balanceOf(address(this)) >= dripAmount,
+            "Faucet is empty"
+        );
 
         claimableFrom[msg.sender] = block.timestamp + cooldown;
         token.safeTransfer(msg.sender, dripAmount);
