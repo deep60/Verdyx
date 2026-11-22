@@ -26,9 +26,10 @@ Browser
                                                   │
                                      ┌────────────┼────────────┐
                                      ▼            ▼            ▼
-                                  Neon        Redis        Cloudflare R2
-                               (Postgres,   (on-box,      (10 GB free,
-                                free)        ~15 MB)       S3-compatible)
+                                Postgres      Redis        Cloudflare R2
+                               (on-box,     (on-box,      (10 GB free,
+                                tuned)       ~15 MB)       S3-compatible,
+                                                           nightly backups)
 ```
 
 ### What runs where, and why
@@ -38,7 +39,7 @@ Browser
 | React SPA | Cloudflare Pages | Free, unlimited bandwidth, never sleeps. Also means almost no traffic crosses the VM, keeping GCP egress inside the free 1 GB/month. |
 | `/api/*` proxy | Pages Function | Keeps API same-origin with the app. `queryClient.ts` sends a `Bearer` token from `localStorage` — no cookies — so there is nothing to configure for cross-origin auth. |
 | 9 Rust services | GCP e2-micro | ~50 MB each. Always on. |
-| Postgres | Neon free | Removes ~150 MB from the VM and gives real backups. `sqlx` is built with `runtime-tokio-rustls`, so Neon's mandatory TLS works unchanged. |
+| Postgres | **On the VM** | Neon's free tier was used first, but its monthly compute allowance ran out (nine always-connected services keep it awake) and every service crash-looped. A tuned container costs ~60-120 MB instead. Backed up nightly to R2; see [postgres-on-vm.md](../operations/postgres-on-vm.md). |
 | Redis | **On the VM** | The `redis` crate is compiled without a TLS feature (`backend/Cargo.toml:28`), so it *cannot* speak `rediss://`. Upstash and every other managed Redis are therefore out. Capped at 64 MB, which is cheap enough that this doesn't matter. |
 | File storage | Cloudflare R2 | 10 GB free. S3-compatible, and `s3_client.rs` already accepts an endpoint override with path-style addressing — config only, no code change. |
 | ClamAV | **Disabled** | Its signature database alone wants ~1.5 GB, more than the whole VM. `ENABLE_CLAMAV=false`; the analyzer skips itself cleanly. |
@@ -48,11 +49,12 @@ Browser
 | | |
 |---|---|
 | 9 Rust services @ ~50 MB | ~450 MB |
+| Postgres (tuned, capped at 256 MB) | ~60-120 MB |
 | Redis (capped) | ~20 MB |
 | Caddy | ~20 MB |
 | Watchtower | ~15 MB |
 | Docker daemon + OS | ~200 MB |
-| **Total** | **~705 MB of 1024 MB** |
+| **Total** | **~800 MB of 1024 MB** |
 
 Tight but workable, and the bootstrap script adds 3 GB of swap so a spike
 degrades into a slow request instead of an OOM kill.
@@ -81,30 +83,12 @@ now — you'll set it in Part 6.
 
 ## Part 2 — Managed data tier (20 min, no card except R2)
 
-### Neon (Postgres)
+### Postgres
 
-1. Sign up at <https://neon.tech> with GitHub. No card.
-2. Create a project in a region near your VM region (`us-east` pairs well with
-   `us-east1`).
-3. Copy the connection string.
-4. **Create the nine databases.** Each service owns its own — if they are
-   missing, those services crashloop. From the Neon SQL editor, or with `psql`:
-
-```sql
-CREATE DATABASE verdyx_gateway;
-CREATE DATABASE verdyx_users;
-CREATE DATABASE verdyx_analysis;
-CREATE DATABASE verdyx_bounty;
-CREATE DATABASE verdyx_submissions;
-CREATE DATABASE verdyx_consensus;
-CREATE DATABASE verdyx_payments;
-CREATE DATABASE verdyx_reputation;
-CREATE DATABASE verdyx_notifications;
-```
-
-> Neon's free tier suspends compute after ~5 minutes idle and takes ~500 ms to
-> resume. The first API call after a quiet period is slightly slow; everything
-> after is normal. This does not make the *site* sleep — Pages and the VM stay up.
+Postgres runs in a container on the VM; nothing to sign up for. Set
+`POSTGRES_PASSWORD` in `.env` (Part 5) and the first start creates the nine
+databases. Backups need the R2 bucket below; see
+[postgres-on-vm.md](../operations/postgres-on-vm.md).
 
 ### Cloudflare R2 (file storage)
 
@@ -313,8 +297,8 @@ reservations, so the total is allowed to exceed 1 GB.
 disk. Raise to `info` only while debugging, then put it back.
 
 **Don't enable the `monitoring` profile.** Prometheus and Grafana together want
-more memory than the entire application. Use Neon's dashboard and
-`docker compose logs`.
+more memory than the entire application. Use `docker compose logs` and
+`docker stats`.
 
 ---
 
