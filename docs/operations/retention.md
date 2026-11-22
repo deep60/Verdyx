@@ -13,7 +13,7 @@ The gateway runs a retention job a minute after start-up (`RETENTION_FIRST_RUN_S
 | A team's scans | 30, 90, 180 or 365 days, or never | Teams → Settings (owners and admins) |
 | Someone's own scans | the same choices | Profile → Data |
 | Audit log entries | after 365 days | `AUDIT_RETENTION_DAYS` (minimum 30) |
-| Database backups | after 30 days | `scripts/backup/neon-backup.sh` |
+| Database backups | after 30 days | `scripts/backup/verify-backup.sh` |
 
 Notes:
 - **Scans with a bounty** are never deleted by retention or by hand, because the bounty, votes and payouts depend on them.

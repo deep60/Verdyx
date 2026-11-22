@@ -38,27 +38,26 @@ Use a free UptimeRobot account (or any uptime checker). Create these monitors, a
 
 ## 3. Database backups
 
-Neon keeps a short restore window of its own. `.github/workflows/db-backup.yml` adds an independent copy every night at 02:47 IST, using `scripts/backup/neon-backup.sh`. For each of the 9 databases it:
-1. dumps it;
-2. **restores it into a scratch Postgres to prove the dump works**;
-3. encrypts it with AES-256;
-4. uploads it to R2.
+Postgres runs on the VM ([postgres-on-vm.md](./postgres-on-vm.md)). Every night:
 
-It keeps 30 days of copies. If any database fails, the run fails and GitHub emails you.
+1. **20:30 UTC, on the VM:** the `pg-backup` container (`scripts/backup/vm-backup.sh`) dumps each of the 9 databases, encrypts it with AES-256 and uploads it to R2.
+2. **21:17 UTC, in GitHub Actions:** `.github/workflows/db-backup.yml` (`scripts/backup/verify-backup.sh`) downloads that set and **restores every database into a scratch Postgres to prove it works**.
+   - It fails if the set is missing, older than 26 hours, or doesn't restore.
+   - It keeps 30 days of copies, and always the newest 7.
+
+A failed run makes GitHub email you.
 
 **Set up**
-1. **Bucket:** in Cloudflare, go to **R2** and create a bucket `verdyx-backups`. Then **Manage R2 API Tokens** → create a token with *Object Read & Write* on that bucket only. Note its access key ID, secret access key, and the S3 endpoint `https://<account-id>.r2.cloudflarestorage.com`.
-2. **Database URL:** in Neon, go to **Connect**, turn **Connection pooling off** (`pg_dump` needs the direct host), and copy the URL. Remove the database name and everything after it, leaving `postgres://user:password@ep-….neon.tech`.
-3. **Passphrase:** make a long random one and **store it in your password manager**. Without it the backups can't be decrypted.
-4. In GitHub, go to **Settings → Secrets and variables → Actions** and add:
-   - **Secrets:** `BACKUP_PG_BASE_URL`, `BACKUP_PASSPHRASE`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY`
+1. **Bucket:** in Cloudflare, go to **R2** and create a bucket `verdyx-backups`.
+   - Then go to **Manage R2 API Tokens** and create a token with *Object Read & Write* on that bucket only.
+   - Note its access key ID, its secret access key, and the S3 endpoint `https://<account-id>.r2.cloudflarestorage.com`.
+2. **Passphrase:** make a long random one and **store it in your password manager**. Without it the backups can't be decrypted.
+3. **In GitHub,** go to **Settings → Secrets and variables → Actions** and add:
+   - **Secrets:** `BACKUP_PASSPHRASE`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY`
    - **Variables:** `BACKUP_S3_BUCKET` (`verdyx-backups`) and `BACKUP_S3_ENDPOINT`
-5. **First run:** go to **Actions → Database backup → Run workflow**. It should end with "all databases backed up and verified".
+4. **On the VM,** put the same five values in `/opt/verdyx/.env`. See `.env.gcp.example`.
+5. **First run:**
+   - On the VM, run `sudo docker compose -f docker-compose.gcp.yml run --rm pg-backup now`.
+   - Then go to **Actions → Database backup → Run workflow**. It should end with "backup <date> verified".
 
-**Restore** one database:
-```bash
-aws s3 cp s3://verdyx-backups/pg/<date>/<db>.dump.enc . --endpoint-url "$ENDPOINT"
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:BACKUP_PASSPHRASE -in <db>.dump.enc -out <db>.dump
-pg_restore --no-owner --no-acl -d "<target database url>" <db>.dump
-```
-Restore into a new Neon branch first, check it, then point the services at it.
+**Restore:** see [postgres-on-vm.md](./postgres-on-vm.md#restoring-later). The short version is `docker compose -f docker-compose.gcp.yml run --rm pg-backup restore <date>` into empty databases.

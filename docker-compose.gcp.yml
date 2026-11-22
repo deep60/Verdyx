@@ -6,8 +6,9 @@
 # no free tier provides.
 #
 # What was removed and where it went instead:
-#   postgres  -> Neon (free managed Postgres). sqlx is built with
-#                `runtime-tokio-rustls`, so Neon's mandatory TLS works as-is.
+#   (postgres was on Neon's free tier until its monthly compute quota ran
+#   out and every service crash-looped. It now runs here again, tuned small;
+#   see the postgres service below.)
 #   minio     -> Cloudflare R2 via S3_ENDPOINT. The S3 client already takes an
 #                endpoint override and uses path-style addressing, which R2
 #                accepts, so this is config-only.
@@ -20,8 +21,7 @@
 #   frontend  -> Cloudflare Pages. The Node BFF is redundant there because
 #                functions/api/[[path]].ts does the same /api proxying at the
 #                edge, for free, without using VM memory.
-#   pgadmin, prometheus, grafana -> not deployed. Use `docker compose logs` and
-#                Neon's own dashboard instead.
+#   pgadmin, prometheus, grafana -> not deployed. Use `docker compose logs`.
 #
 # Redis deliberately stays LOCAL. The `redis` crate is compiled without any TLS
 # feature (see backend/Cargo.toml), so it physically cannot speak `rediss://` —
@@ -33,13 +33,80 @@
 #
 # Budget: the mem_limit values sum to more than 1 GB on purpose. They are caps
 # that stop any single service from taking the box down, not reservations.
-# Steady-state usage is ~700 MB; the bootstrap script adds 3 GB of swap to
+# Steady-state usage is ~800 MB with Postgres; the bootstrap script adds 3 GB of swap to
 # absorb spikes. ClamAV is not included, so production runs without that engine.
 
 name: verdyx
 
 services:
-  # ── Data tier (the only stateful thing left on the box) ──────────────────
+  # ── Data tier ────────────────────────────────────────────────────────────
+  # Postgres, sized for a 1 GB VM: small buffers and few connections (9
+  # services x DATABASE_MAX_CONNECTIONS=3, plus the gateway pool the analysis
+  # engine opens, plus psql and backups). No published port: only the compose
+  # network reaches it, so it needs no TLS. Not watched by Watchtower; the
+  # major version changes only by editing the tag here (with a dump/restore).
+  postgres:
+    image: postgres:18-alpine
+    container_name: verdyx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: verdyx_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: verdyx
+    command: >
+      postgres
+      -c max_connections=50
+      -c shared_buffers=32MB
+      -c effective_cache_size=192MB
+      -c work_mem=2MB
+      -c maintenance_work_mem=32MB
+      -c wal_buffers=1MB
+      -c max_wal_size=256MB
+      -c min_wal_size=64MB
+      -c jit=off
+      -c huge_pages=off
+      -c max_parallel_workers_per_gather=0
+    volumes:
+      # The 18 image keeps its data under /var/lib/postgresql/18/docker and
+      # expects the volume at /var/lib/postgresql.
+      - pg_data:/var/lib/postgresql
+      # Creates the nine per-service databases on first start (empty volume only).
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    shm_size: 64m
+    mem_limit: 256m
+    networks: [verdyx-network]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verdyx_user -d verdyx"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # Nightly encrypted dump of every database to R2, and the restore tool.
+  # See scripts/backup/vm-backup.sh. Idles harmlessly until the BACKUP_*
+  # settings are in .env.
+  pg-backup:
+    image: postgres:18-alpine
+    container_name: verdyx-pg-backup
+    restart: unless-stopped
+    entrypoint: ["sh", "/backup/vm-backup.sh"]
+    environment:
+      PGHOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_AT_UTC: ${BACKUP_AT_UTC:-20:30}
+    volumes:
+      - ./scripts/backup:/backup:ro
+    mem_limit: 160m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [verdyx-network]
+
   redis:
     image: redis:7-alpine
     container_name: verdyx-redis
@@ -95,7 +162,7 @@ services:
       - RUST_LOG=${RUST_LOG:-warn}
       # Caddy is the only route to this container and overwrites X-Real-IP.
       - TRUST_PROXY_HEADERS=true
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_gateway?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_gateway
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -122,6 +189,8 @@ services:
       - uploads_data:/app/uploads
     mem_limit: 192m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -139,7 +208,7 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_users?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_users
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -157,6 +226,8 @@ services:
       - CHAIN_ID=${CHAIN_ID:-11155111}
     mem_limit: 160m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -174,8 +245,8 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_analysis?sslmode=require
-      - GATEWAY_DATABASE_URL=${PG_BASE_URL}/verdyx_gateway?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_analysis
+      - GATEWAY_DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_gateway
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -195,6 +266,8 @@ services:
       - uploads_data:/app/uploads
     mem_limit: 224m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -212,7 +285,7 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_bounty?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_bounty
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -223,6 +296,8 @@ services:
       - CHAIN_ID=${CHAIN_ID:-11155111}
     mem_limit: 160m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -240,7 +315,7 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_submissions?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_submissions
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -252,6 +327,8 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY}
     mem_limit: 160m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -269,7 +346,7 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_consensus?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_consensus
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -293,6 +370,8 @@ services:
       - MIN_SALT_LEN=${MIN_SALT_LEN:-16}
     mem_limit: 128m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -310,7 +389,7 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_payments?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_payments
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -321,6 +400,8 @@ services:
       - PAYMENT_CONTRACT_ADDRESS=${BOUNTY_MANAGER_ADDRESS}
     mem_limit: 128m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -338,7 +419,7 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_reputation?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_reputation
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -346,6 +427,8 @@ services:
       - REPUTATION_UPDATE_INTERVAL=3600
     mem_limit: 128m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -363,7 +446,7 @@ services:
     env_file: [.env]
     environment:
       - RUST_LOG=${RUST_LOG:-warn}
-      - DATABASE_URL=${PG_BASE_URL}/verdyx_notifications?sslmode=require
+      - DATABASE_URL=postgres://verdyx_user:${POSTGRES_PASSWORD}@postgres:5432/verdyx_notifications
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -376,6 +459,8 @@ services:
       - MAX_RETRY_ATTEMPTS=3
     mem_limit: 128m
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks: [verdyx-network]
@@ -389,7 +474,7 @@ services:
   # ── Auto-deploy ──────────────────────────────────────────────────────────
   # Same pull-based CD as the old AWS box: push to main -> deploy.yml pushes
   # :latest to GHCR -> this polls and rolling-restarts. Outbound only, so the
-  # firewall stays closed. Redis and Caddy are excluded by not being listed.
+  # firewall stays closed. Postgres, Redis and Caddy are excluded by not being listed.
   watchtower:
     image: containrrr/watchtower:latest
     container_name: verdyx-watchtower
@@ -422,6 +507,7 @@ networks:
     driver: bridge
 
 volumes:
+  pg_data:
   caddy_data:
   caddy_config:
   uploads_data:

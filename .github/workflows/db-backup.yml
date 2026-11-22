@@ -1,13 +1,16 @@
 name: Database backup
 
-# Nightly encrypted, restore-tested backup of every Neon database to R2.
-# See scripts/backup/neon-backup.sh for what it does and how to restore.
-# A failed run emails the repository owner (GitHub's default for scheduled
-# workflows), which doubles as the alert.
+# Nightly check that the VM's database backups exist and restore.
+# The pg-backup container on the VM uploads encrypted dumps to R2 at 20:30
+# UTC (scripts/backup/vm-backup.sh); this downloads the newest set, restores
+# every database into a scratch Postgres, fails if the set is stale, and
+# applies retention (scripts/backup/verify-backup.sh). A failed run emails the
+# repository owner (GitHub's default for scheduled workflows), which doubles
+# as the alert.
 
 on:
   schedule:
-    - cron: "17 21 * * *" # 02:47 IST
+    - cron: "17 21 * * *" # 02:47 IST, 47 minutes after the VM uploads
   workflow_dispatch:
 
 permissions:
@@ -19,7 +22,7 @@ concurrency:
 
 jobs:
   backup:
-    name: Back up and verify
+    name: Verify the newest backup
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -37,18 +40,17 @@ jobs:
       - name: Check configuration
         id: cfg
         env:
-          PG_BASE_URL: ${{ secrets.BACKUP_PG_BASE_URL }}
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
           BUCKET: ${{ vars.BACKUP_S3_BUCKET }}
         run: |
-          if [[ -z "$PG_BASE_URL" || -z "$BACKUP_PASSPHRASE" || -z "$BUCKET" ]]; then
-            echo "::warning::Backups aren't configured yet (see scripts/backup/neon-backup.sh); skipping."
+          if [[ -z "$BACKUP_PASSPHRASE" || -z "$BUCKET" ]]; then
+            echo "::warning::Backups aren't configured yet (see scripts/backup/verify-backup.sh); skipping."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           else
             echo "ok=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Install the Postgres 18 client (must be >= the Neon server version)
+      - name: Install the Postgres 18 client (must be >= the server that made the dumps)
         if: steps.cfg.outputs.ok == 'true'
         run: |
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -59,10 +61,9 @@ jobs:
           sudo apt-get install -y -qq postgresql-client-18
           echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
 
-      - name: Back up, verify, encrypt, upload
+      - name: Download, decrypt, restore, apply retention
         if: steps.cfg.outputs.ok == 'true'
         env:
-          PG_BASE_URL: ${{ secrets.BACKUP_PG_BASE_URL }}
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
           BACKUP_S3_BUCKET: ${{ vars.BACKUP_S3_BUCKET }}
           BACKUP_S3_ENDPOINT: ${{ vars.BACKUP_S3_ENDPOINT }}
@@ -70,4 +71,4 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           RESTORE_URL: postgres://postgres:restore-check-only@localhost:5432/postgres
-        run: bash scripts/backup/neon-backup.sh
+        run: bash scripts/backup/verify-backup.sh
