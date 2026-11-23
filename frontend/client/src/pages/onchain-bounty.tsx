@@ -27,7 +27,7 @@ export default function OnChainBountyPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SEO title={id ? `Bounty #${id}` : "Bounty"} description="An on-chain bounty: analyses, stakes and the outcome." />
+      <SEO noindex title={id ? `Bounty #${id}` : "Bounty"} description="An on-chain bounty: analyses, stakes and the outcome." />
       <Navigation />
       <main id="main-content" tabIndex={-1} className="relative z-10 py-8">
         <div className="mx-auto max-w-5xl space-y-8 px-4 sm:px-6 lg:px-8">

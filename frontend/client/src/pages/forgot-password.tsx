@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { verdyxFetch } from "@/lib/csrf";
+import { SEO } from "@/components/seo";
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState("");
@@ -50,6 +51,7 @@ export default function ForgotPassword() {
   if (isSubmitted) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <SEO noindex title="Reset password" description="Reset your Verdyx account password." />
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <Link href="/" className="flex justify-center items-center gap-2.5 mb-3">
@@ -78,6 +80,7 @@ export default function ForgotPassword() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <SEO noindex title="Reset password" description="Reset your Verdyx account password." />
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1">
           <Link href="/" className="flex justify-center items-center gap-2.5 mb-3">

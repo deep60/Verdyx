@@ -656,7 +656,7 @@ export default function Teams() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SEO title="Teams — Verdyx" description="Share scans and API keys with your team." />
+      <SEO noindex title="Teams — Verdyx" description="Share scans and API keys with your team." />
       <Navigation />
       <div id="main-content" tabIndex={-1} className="relative z-10 mx-auto max-w-6xl space-y-6 px-4 py-12 sm:px-6 lg:px-8">
         <div>
