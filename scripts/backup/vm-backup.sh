@@ -48,11 +48,12 @@ need_config() {
   configured || { log "BACKUP_PASSPHRASE, BACKUP_S3_BUCKET and BACKUP_S3_ENDPOINT must be set"; exit 1; }
 }
 
-# The postgres image has no S3 client; install one the first time.
+# The postgres image has neither an S3 client nor the openssl CLI that
+# encrypts the dumps; install both the first time.
 need_aws() {
-  command -v aws >/dev/null 2>&1 && return
-  log "installing aws-cli"
-  apk add --no-cache --quiet aws-cli >/dev/null
+  command -v aws >/dev/null 2>&1 && command -v openssl >/dev/null 2>&1 && return
+  log "installing aws-cli and openssl"
+  apk add --no-cache --quiet aws-cli openssl >/dev/null
 }
 
 s3() { aws s3 "$@" --endpoint-url "$BACKUP_S3_ENDPOINT" --only-show-errors; }
