@@ -142,5 +142,598 @@
       "mitre_technique": "T1059.004"
     },
     "enabled": true
+  },
+  {
+    "id": "SIG-007",
+    "name": "Mimikatz-Credential-Dumper",
+    "signature_type": "StringPattern",
+    "threat_family": "Mimikatz",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "gentilkiwi",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "sekurlsa::(logonpasswords|wdigest|msv|tickets|pth|ekeys)",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "lsadump::(sam|secrets|dcsync|lsa)",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Strings and module commands of Mimikatz, the Windows credential-dumping tool.",
+    "metadata": {
+      "category": "credential_access",
+      "mitre_technique": "T1003.001"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-008",
+    "name": "CobaltStrike-Default-Named-Pipes",
+    "signature_type": "StringPattern",
+    "threat_family": "CobaltStrike",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "MSSE-(%d|[0-9]+)-server",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "\\\\\\\\\\.\\\\pipe\\\\(msagent_|postex_|status_)[0-9a-f]{2,4}",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Cobalt Strike beacon's default named pipes, used for staging and post-exploitation jobs.",
+    "metadata": {
+      "category": "c2_framework",
+      "mitre_technique": "T1570"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-009",
+    "name": "CobaltStrike-Beacon-DLL-Name",
+    "signature_type": "StringPattern",
+    "threat_family": "CobaltStrike",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "beacon.x64.dll",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "String",
+        "value": "beacon.x86.dll",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Internal DLL name of the Cobalt Strike beacon payload.",
+    "metadata": {
+      "category": "c2_framework",
+      "mitre_technique": "T1055.001"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-010",
+    "name": "Metasploit-Meterpreter",
+    "signature_type": "StringPattern",
+    "threat_family": "Meterpreter",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "ext_server_stdapi",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "String",
+        "value": "metsrv.dll",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "stdapi_(sys_process_execute|fs_ls|net_config_get_interfaces)",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Extension and command names of Metasploit's Meterpreter payload.",
+    "metadata": {
+      "category": "c2_framework",
+      "mitre_technique": "T1059"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-011",
+    "name": "Ransomware-LockBit-Note",
+    "signature_type": "StringPattern",
+    "threat_family": "LockBit",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "Restore-My-Files.txt",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "String",
+        "value": "LockBit_Ransomware.hta",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Ransom-note file names dropped by LockBit 2.0.",
+    "metadata": {
+      "category": "ransomware",
+      "mitre_technique": "T1486"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-012",
+    "name": "Ransomware-Ryuk-Note",
+    "signature_type": "StringPattern",
+    "threat_family": "Ryuk",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "RyukReadMe.txt",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "String",
+        "value": "RyukReadMe.html",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Ransom-note file names dropped by Ryuk.",
+    "metadata": {
+      "category": "ransomware",
+      "mitre_technique": "T1486"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-013",
+    "name": "Inhibit-System-Recovery",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericRansomware",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)vssadmin(\\.exe)?\\s+delete\\s+shadows\\s+/all",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)wmic(\\.exe)?\\s+shadowcopy\\s+delete",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)bcdedit(\\.exe)?\\s+/set\\s+\\{default\\}\\s+recoveryenabled\\s+no",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)wbadmin(\\.exe)?\\s+delete\\s+catalog",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Deletes shadow copies or disables Windows recovery, done by ransomware before encrypting.",
+    "metadata": {
+      "category": "ransomware",
+      "mitre_technique": "T1490"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-014",
+    "name": "Mirai-Botnet",
+    "signature_type": "StringPattern",
+    "threat_family": "Mirai",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "/bin/busybox MIRAI",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "String",
+        "value": "MIRAI: applet not found",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Markers the Mirai IoT botnet uses to recognise infected BusyBox devices.",
+    "metadata": {
+      "category": "botnet",
+      "mitre_technique": "T1059.004"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-015",
+    "name": "Cryptominer-Stratum-Pool",
+    "signature_type": "StringPattern",
+    "threat_family": "CoinMiner",
+    "severity": "Medium",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "stratum\\+(tcp|ssl|tls)://[a-z0-9.-]+:\\d{2,5}",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "A cryptocurrency mining pool address. Common in coin miners installed without consent.",
+    "metadata": {
+      "category": "cryptominer",
+      "mitre_technique": "T1496"
+    },
+    "enabled": true,
+    "confidence": 0.6,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-016",
+    "name": "PowerShell-AMSI-Bypass",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "String",
+        "value": "amsiInitFailed",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)AmsiScanBuffer.{0,200}(VirtualProtect|0x80070057)",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Disables Windows' Antimalware Scan Interface so later scripts aren't scanned.",
+    "metadata": {
+      "category": "defense_evasion",
+      "mitre_technique": "T1562.001"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-017",
+    "name": "PowerShell-WebClient-Download-Execute",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)(IEX|Invoke-Expression)\\s*\\(?\\s*\\(?\\s*New-Object\\s+(System\\.)?Net\\.WebClient\\s*\\)?\\s*\\.\\s*Download(String|Data)",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Downloads a script and runs it in memory, the classic PowerShell download cradle.",
+    "metadata": {
+      "category": "execution",
+      "mitre_technique": "T1059.001"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-018",
+    "name": "LOLBin-Certutil-Download",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)certutil(\\.exe)?\\s+(-|/)urlcache\\s+((-|/)split\\s+)?(-|/)f\\s+https?://",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Uses certutil, a Windows certificate tool, to download a file.",
+    "metadata": {
+      "category": "lolbin",
+      "mitre_technique": "T1105"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-019",
+    "name": "LOLBin-Mshta-Remote-Script",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)mshta(\\.exe)?\\s+[\\\"']?(vbscript:|javascript:|https?://)",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Runs a remote or inline script through mshta, the HTML Application host.",
+    "metadata": {
+      "category": "lolbin",
+      "mitre_technique": "T1218.005"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-020",
+    "name": "LOLBin-Regsvr32-Squiblydoo",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)regsvr32(\\.exe)?\\s+(/s\\s+)?/n\\s+/u\\s+/i:https?://",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Loads a remote scriptlet through regsvr32 (\"Squiblydoo\").",
+    "metadata": {
+      "category": "lolbin",
+      "mitre_technique": "T1218.010"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-021",
+    "name": "LOLBin-Rundll32-JavaScript",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)rundll32(\\.exe)?\\s+javascript:",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Runs JavaScript through rundll32.",
+    "metadata": {
+      "category": "lolbin",
+      "mitre_technique": "T1218.011"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-022",
+    "name": "Linux-Reverse-Shell",
+    "signature_type": "StringPattern",
+    "threat_family": "ReverseShell",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "\\bnc(at)?\\s+(-[a-z]*\\s+)*-(e|c)\\s+/bin/(ba)?sh",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "python[23]?\\s+-c\\s+[\\\"']import\\s+socket\\s*,\\s*subprocess\\s*,\\s*os",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "exec\\s+\\d+<>/dev/tcp/[0-9.]+/\\d+",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "socat\\s+exec:[\\\"']?(ba)?sh[^\\n]*tcp(4)?:[0-9.]+:\\d+",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Gives a remote machine an interactive shell: netcat, Python, bash /dev/tcp and socat variants.",
+    "metadata": {
+      "category": "c2_channel",
+      "mitre_technique": "T1059.004"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-023",
+    "name": "Download-And-Run-From-IP",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(curl|wget)\\s+[^|;\\n]{0,80}https?://\\d{1,3}(\\.\\d{1,3}){3}[^|;\\n]{0,120}\\|\\s*(ba)?sh",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "(wget|curl)\\s+[^;\\n]{0,80}https?://\\d{1,3}(\\.\\d{1,3}){3}/[^;\\s]+\\s*;\\s*chmod\\s+(\\+x|7[0-7]{2})",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "Fetches a script or binary from a bare IP address and runs it, as IoT and Linux droppers do.",
+    "metadata": {
+      "category": "execution",
+      "mitre_technique": "T1105"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-024",
+    "name": "WSH-Shell-Object",
+    "signature_type": "StringPattern",
+    "threat_family": "GenericDropper",
+    "severity": "Medium",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "ActiveXObject\\(\\s*[\\\"'](WScript\\.Shell|Shell\\.Application)[\\\"']\\s*\\)",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "A Windows Script Host script that creates a shell object to run commands, typical of .js and .vbs droppers.",
+    "metadata": {
+      "category": "execution",
+      "mitre_technique": "T1059.007"
+    },
+    "enabled": true,
+    "confidence": 0.6,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-025",
+    "name": "PHP-Webshell-Eval-Request",
+    "signature_type": "StringPattern",
+    "threat_family": "Webshell",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)@?\\b(eval|assert)\\s*\\(\\s*(base64_decode\\s*\\(\\s*)?\\$_(POST|GET|REQUEST|COOKIE)\\s*\\[",
+        "offset": null,
+        "wildcard": false
+      },
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)\\b(system|shell_exec|passthru|exec)\\s*\\(\\s*\\$_(POST|GET|REQUEST)\\s*\\[",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "PHP that runs code or shell commands taken straight from the web request: a one-line webshell.",
+    "metadata": {
+      "category": "webshell",
+      "mitre_technique": "T1505.003"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-026",
+    "name": "ASPX-Webshell-China-Chopper",
+    "signature_type": "StringPattern",
+    "threat_family": "Webshell",
+    "severity": "Critical",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "(?i)<%@\\s*Page\\s+Language\\s*=\\s*\\\"?Jscript\\\"?\\s*%>\\s*<%\\s*eval\\s*\\(\\s*Request",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "The China Chopper ASP.NET webshell.",
+    "metadata": {
+      "category": "webshell",
+      "mitre_technique": "T1505.003"
+    },
+    "enabled": true,
+    "scope": "not_html"
+  },
+  {
+    "id": "SIG-027",
+    "name": "Telegram-Bot-Exfiltration",
+    "signature_type": "StringPattern",
+    "threat_family": "InfoStealer",
+    "severity": "High",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "api\\.telegram\\.org/bot\\d{6,}:[A-Za-z0-9_-]{30,}/send(Message|Document|Photo)",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "A hard-coded Telegram bot token used to send data out. Phishing kits and info-stealers send stolen credentials this way.",
+    "metadata": {
+      "category": "exfiltration",
+      "mitre_technique": "T1567"
+    },
+    "enabled": true
+  },
+  {
+    "id": "SIG-028",
+    "name": "Discord-Webhook-Exfiltration",
+    "signature_type": "StringPattern",
+    "threat_family": "InfoStealer",
+    "severity": "Medium",
+    "patterns": [
+      {
+        "pattern_type": "Regex",
+        "value": "discord(app)?\\.com/api/webhooks/\\d{17,20}/[A-Za-z0-9_-]{60,}",
+        "offset": null,
+        "wildcard": false
+      }
+    ],
+    "description": "A hard-coded Discord webhook, a common drop for stolen tokens and passwords. Also used by legitimate bots, so it only marks the file suspicious.",
+    "metadata": {
+      "category": "exfiltration",
+      "mitre_technique": "T1567"
+    },
+    "enabled": true,
+    "confidence": 0.6
   }
 ]
