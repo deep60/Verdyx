@@ -633,7 +633,7 @@ impl AnalysisEngine {
                         } else {
                             "not compiled"
                         },
-                        EngineType::Yara,
+                        EngineType::Antivirus,
                         e.to_string(),
                     ));
                     analysis_errors.push(format!("ClamAV: {e}"));
@@ -709,7 +709,7 @@ impl AnalysisEngine {
                         } else {
                             "not compiled"
                         },
-                        EngineType::Yara,
+                        EngineType::Antivirus,
                         e.to_string(),
                     ));
                 }

@@ -68,6 +68,11 @@ pub enum EngineType {
     Sandbox,
     Human,
     Ml,
+    /// A signature antivirus (ClamAV).
+    Antivirus,
+    /// A lookup in someone else's verdicts: URLhaus, ThreatFox, VirusTotal's
+    /// URL analysis, Google Safe Browsing.
+    ThreatIntel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
