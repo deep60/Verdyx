@@ -65,17 +65,23 @@ export function BountyCard({ submission, bounty }: BountyCardProps) {
   return (
     <Card className={`glassmorphism ${bountyInfo.color} ${bountyAmount >= 2 ? "glow-effect" : ""}`}>
       <CardContent className="p-6">
-        <div className="flex justify-between items-start mb-4">
-          <div className="flex items-center space-x-3">
+        <div className="flex justify-between items-start gap-4 mb-4">
+          {/* min-w-0 lets a long URL or file name shrink and truncate instead
+              of pushing past the card's edge. */}
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div
-              className={`w-14 h-14 ${
+              className={`w-14 h-14 shrink-0 ${
                 submission.submissionType === "url" ? "bg-accent/20" : "bg-destructive/20"
               } rounded-lg flex items-center justify-center`}
             >
               {getFileIcon(submission.submissionType ?? "")}
             </div>
-            <div>
-              <div className="font-semibold text-lg" data-testid={`bounty-filename-${submission.id}`}>
+            <div className="min-w-0">
+              <div
+                className="font-semibold text-lg truncate"
+                title={String(displayName)}
+                data-testid={`bounty-filename-${submission.id}`}
+              >
                 {displayName}
               </div>
               <div className="text-sm text-muted-foreground capitalize">
@@ -83,7 +89,7 @@ export function BountyCard({ submission, bounty }: BountyCardProps) {
               </div>
             </div>
           </div>
-          <div className="text-right">
+          <div className="text-right shrink-0">
             <div className="text-2xl font-bold text-secondary" data-testid={`bounty-amount-${submission.id}`}>
               {String(bounty.amount ?? "0")} ETH
             </div>

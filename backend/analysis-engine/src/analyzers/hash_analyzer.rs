@@ -371,21 +371,29 @@ struct VirusTotalAttributes {
     meaningful_name: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+// VirusTotal spells two of these keys with hyphens ("type-unsupported",
+// "confirmed-timeout"). Every count defaults to 0, so a key VirusTotal adds,
+// renames or drops can't make the whole response unreadable again.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct VirusTotalStats {
     malicious: u32,
     suspicious: u32,
     undetected: u32,
     harmless: u32,
     timeout: u32,
+    #[serde(rename = "confirmed-timeout")]
     confirmed_timeout: u32,
     failure: u32,
+    #[serde(rename = "type-unsupported")]
     type_unsupported: u32,
 }
 
 #[derive(Debug, Deserialize)]
 struct VirusTotalEngine {
+    #[serde(default)]
     category: String,
+    #[serde(default)]
     engine_name: String,
     engine_version: Option<String>,
     result: Option<String>,
@@ -1610,6 +1618,40 @@ impl HashAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shape VirusTotal's v3 file report really has, hyphenated keys
+    /// included. It used to fail with "error decoding response body".
+    #[test]
+    fn virustotal_file_report_parses() {
+        let body = r#"{"data":{"id":"x","type":"file","attributes":{
+            "last_analysis_stats":{"malicious":60,"suspicious":0,"undetected":5,
+              "harmless":0,"timeout":0,"confirmed-timeout":0,"failure":1,
+              "type-unsupported":10},
+            "last_analysis_results":{"Kaspersky":{"category":"malicious",
+              "engine_name":"Kaspersky","engine_version":"22.0","result":"EICAR-Test-File",
+              "method":"blacklist","engine_update":"20261124"},
+              "Other":{"category":"type-unsupported","engine_name":"Other",
+              "engine_version":null,"result":null,"method":"blacklist","engine_update":"20261124"}},
+            "first_submission_date":1148301722,"names":["eicar.com"],"size":68,
+            "type_description":"Text","meaningful_name":"eicar.com"}}}"#;
+        let parsed: VirusTotalResponse = serde_json::from_str(body).expect("parses");
+        let stats = &parsed.data.attributes.last_analysis_stats;
+        assert_eq!(stats.malicious, 60);
+        assert_eq!(stats.type_unsupported, 10);
+
+        let analyzer = HashAnalyzer::new(HashAnalyzerConfig::default()).unwrap();
+        let rep = analyzer.parse_virustotal_response(parsed, 5);
+        assert!(matches!(rep.verdict, ThreatVerdict::Malicious));
+    }
+
+    #[test]
+    fn virustotal_stats_tolerate_missing_keys() {
+        let parsed: VirusTotalResponse = serde_json::from_str(
+            r#"{"data":{"attributes":{"last_analysis_stats":{"malicious":0,"harmless":3}}}}"#,
+        )
+        .expect("parses");
+        assert_eq!(parsed.data.attributes.last_analysis_stats.harmless, 3);
+    }
 
     #[tokio::test]
     async fn test_enhanced_hash_validation() {
