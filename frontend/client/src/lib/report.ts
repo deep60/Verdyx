@@ -319,7 +319,8 @@ export function markdownReport(r: ReportInput, generatedAt = new Date()): string
     "---",
     "",
     "Results are what each engine recorded. An engine with no record or an advisory role does not vote. " +
-      "A match in a curated known-malware list (MalwareBazaar, URLhaus, ThreatFox) decides the verdict.",
+      "A match in a curated known-malware list (MalwareBazaar, URLhaus, ThreatFox, Google Safe Browsing) " +
+      "or three or more VirusTotal vendors decides the verdict.",
     "",
   );
   return lines.join("\n");
