@@ -1,7 +1,6 @@
 import { useState, useMemo } from "react";
 import { Navigation } from "@/components/navigation";
 import { EngineCard } from "@/components/engine-card";
-import { BountyCard } from "@/components/bounty-card";
 import { OnChainBounties } from "@/components/onchain-bounties";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,11 +16,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-import { EngineCardSkeleton, BountyCardSkeleton } from "@/components/loading-skeleton";
+import { EngineCardSkeleton } from "@/components/loading-skeleton";
 import { ErrorState } from "@/components/error-state";
 import { EmptyState } from "@/components/empty-state";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { PlusCircle, Info, Search, FileX, Shield } from "lucide-react";
+import { PlusCircle, Info, Search, Shield } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LeaderboardPanel } from "@/components/leaderboard-panel";
 import { SEO } from "@/components/seo";
@@ -29,19 +28,15 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth-context";
 import { useLocation } from "wouter";
-import type { ApiEngine, ApiSubmission, ApiStats } from "@/lib/api-types";
+import type { ApiEngine } from "@/lib/api-types";
 
 type SortOption = "newest" | "oldest" | "highest" | "lowest";
 type EngineFilter = "all" | "ml" | "signature" | "human" | "hybrid";
-type BountyFilter = "all" | "quick" | "full" | "deep" | "behavioral";
 
 export default function Marketplace() {
   const [engineSearch, setEngineSearch] = useState("");
-  const [bountySearch, setBountySearch] = useState("");
   const [engineFilter, setEngineFilter] = useState<EngineFilter>("all");
-  const [bountyFilter, setBountyFilter] = useState<BountyFilter>("all");
   const [engineSort, setEngineSort] = useState<SortOption>("newest");
-  const [bountySort, setBountySort] = useState<SortOption>("highest");
   const [view, setView] = useState("marketplace");
 
   // Register Engine modal state
@@ -64,20 +59,6 @@ export default function Marketplace() {
     refetch: refetchEngines,
   } = useQuery<ApiEngine[]>({
     queryKey: ["/api/engines"],
-  });
-
-  const {
-    data: rawSubmissions,
-    isError: submissionsError,
-    isLoading: submissionsLoading,
-    refetch: refetchSubmissions,
-  } = useQuery<ApiSubmission[]>({
-    queryKey: ["/api/submissions?scope=bounties"],
-  });
-  const submissions: ApiSubmission[] = Array.isArray(rawSubmissions) ? rawSubmissions : [];
-
-  const { data: stats } = useQuery<ApiStats>({
-    queryKey: ["/api/analysis/stats"],
   });
 
   const registerEngineMutation = useMutation({
@@ -112,14 +93,6 @@ export default function Marketplace() {
     },
   });
 
-  // Combine submissions with bounties for display (show all submissions carrying a bounty reward)
-  const activeBountySubmissions = submissions
-    .filter((sub) => parseFloat(String(sub.bountyAmount ?? "0.1")) > 0)
-    .map((sub) => ({
-      submission: sub,
-      bounty: { amount: sub.bountyAmount || "0.1", status: "active" },
-    }));
-
   // Filter and sort engines
   const filteredEngines = useMemo(() => {
     const filtered = engines.filter((engine) => {
@@ -146,38 +119,6 @@ export default function Marketplace() {
 
     return filtered;
   }, [engines, engineSearch, engineFilter, engineSort]);
-
-  // Filter and sort bounties
-  const filteredBounties = useMemo(() => {
-    const filtered = activeBountySubmissions.filter(({ submission }) => {
-      const nameStr =
-        submission.originalFilename ||
-        submission.filename ||
-        submission.fileName ||
-        submission.url ||
-        "";
-      const matchesSearch = nameStr.toLowerCase().includes(bountySearch.toLowerCase());
-      const matchesFilter = bountyFilter === "all" || submission.analysisType === bountyFilter;
-      return matchesSearch && matchesFilter;
-    });
-
-    filtered.sort((a, b) => {
-      switch (bountySort) {
-        case "newest":
-          return new Date(b.submission.createdAt ?? 0).getTime() - new Date(a.submission.createdAt ?? 0).getTime();
-        case "oldest":
-          return new Date(a.submission.createdAt ?? 0).getTime() - new Date(b.submission.createdAt ?? 0).getTime();
-        case "highest":
-          return Number(b.submission.bountyAmount || 0) - Number(a.submission.bountyAmount || 0);
-        case "lowest":
-          return Number(a.submission.bountyAmount || 0) - Number(b.submission.bountyAmount || 0);
-        default:
-          return 0;
-      }
-    });
-
-    return filtered;
-  }, [activeBountySubmissions, bountySearch, bountyFilter, bountySort]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -332,132 +273,6 @@ export default function Marketplace() {
             <OnChainBounties />
           </section>
 
-          {/* Active Bounties Section */}
-          <section className="mb-16">
-            <div className="flex flex-wrap items-end justify-between gap-4 mb-10">
-              <div>
-                <h2 className="text-3xl sm:text-4xl font-bold font-display tracking-[-0.03em] mb-2">
-                  Active Bounties
-                </h2>
-                <p className="text-sm sm:text-base text-muted-foreground">
-                  Inspect artifacts, seal a Commit-Reveal verdict, and claim staked ETH rewards
-                </p>
-              </div>
-              <Button
-                onClick={() => setLocation("/dashboard")}
-                data-testid="button-post-bounty"
-              >
-                <PlusCircle className="w-4 h-4 mr-2" />
-                Post a Threat Bounty
-              </Button>
-            </div>
-
-            {/* Bounty Filters */}
-            <div className="mb-8 space-y-4">
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search bounties..."
-                    value={bountySearch}
-                    onChange={(e) => setBountySearch(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                <Select value={bountyFilter} onValueChange={(value: BountyFilter) => setBountyFilter(value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Filter by analysis type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="quick">Quick Scan</SelectItem>
-                    <SelectItem value="full">Full Analysis</SelectItem>
-                    <SelectItem value="deep">Deep Inspection</SelectItem>
-                    <SelectItem value="behavioral">Behavioral</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={bountySort} onValueChange={(value: SortOption) => setBountySort(value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sort by" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="highest">Highest Bounty</SelectItem>
-                    <SelectItem value="lowest">Lowest Bounty</SelectItem>
-                    <SelectItem value="newest">Newest First</SelectItem>
-                    <SelectItem value="oldest">Oldest First</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="mb-10">
-              {submissionsError ? (
-                <ErrorState
-                  title="Failed to load bounties"
-                  message="Could not fetch active bounties. Please try again."
-                  onRetry={refetchSubmissions}
-                />
-              ) : submissionsLoading ? (
-                <div className="grid lg:grid-cols-2 gap-8">
-                  {Array.from({ length: 4 }).map((_, i) => (
-                    <BountyCardSkeleton key={i} />
-                  ))}
-                </div>
-              ) : filteredBounties.length === 0 ? (
-                <EmptyState
-                  icon={FileX}
-                  title="No bounties found"
-                  description={
-                    bountySearch || bountyFilter !== "all"
-                      ? "No bounties match your search criteria. Try adjusting your filters."
-                      : "No active bounties at the moment. Submit a file to create one!"
-                  }
-                />
-              ) : (
-                <div className="grid lg:grid-cols-2 gap-8">
-                  {filteredBounties.map(({ submission, bounty }) => (
-                    <BountyCard key={submission.id} submission={submission} bounty={bounty} />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Bounty Statistics */}
-            <div className="grid md:grid-cols-4 gap-6">
-              <Card className="glassmorphism text-center">
-                <CardContent className="p-6">
-                  <div className="text-3xl font-bold font-display tracking-tight text-primary mb-2" data-testid="stat-total-bounties">
-                    {stats?.totalActiveBounties || "0"} ETH
-                  </div>
-                  <div className="text-sm text-muted-foreground">Total Active Bounties</div>
-                </CardContent>
-              </Card>
-              <Card className="glassmorphism text-center">
-                <CardContent className="p-6">
-                  <div className="text-3xl font-bold font-display tracking-tight text-accent mb-2" data-testid="stat-files-queue">
-                    {activeBountySubmissions.length}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Files in Queue</div>
-                </CardContent>
-              </Card>
-              <Card className="glassmorphism text-center">
-                <CardContent className="p-6">
-                  <div className="text-3xl font-bold font-display tracking-tight text-secondary mb-2">
-                    {stats?.avgResponseTime || "1.2s"}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Avg Response Time</div>
-                </CardContent>
-              </Card>
-              <Card className="glassmorphism text-center">
-                <CardContent className="p-6">
-                  <div className="text-3xl font-bold font-display tracking-tight text-primary mb-2">
-                    {stats?.totalRewardsPaid || "0"} ETH
-                  </div>
-                  <div className="text-sm text-muted-foreground">Rewards Paid Out</div>
-                </CardContent>
-              </Card>
-            </div>
-          </section>
           </>
           )}
         </div>

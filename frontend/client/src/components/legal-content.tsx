@@ -131,7 +131,7 @@ export function PrivacyContent() {
         <ul>
           <li>Oracle Cloud (India) runs the servers that analyse files.</li>
           <li>Cloudflare serves the website and stores uploaded files (R2).</li>
-          <li>Neon hosts the database.</li>
+          <li>The database runs on our own server at Oracle Cloud, and its encrypted backups are stored on Cloudflare R2.</li>
           <li>Brevo sends account emails, such as password resets.</li>
           <li>
             Sentry receives error reports when something breaks: the error, the page address without its query string,
@@ -141,6 +141,15 @@ export function PrivacyContent() {
           <li>
             abuse.ch (URLhaus, ThreatFox, MalwareBazaar): we send a file&apos;s hash, or the web address you scanned, to
             check it against their lists of known threats. The file itself is not sent, and no account details are.
+          </li>
+          <li>
+            VirusTotal: we send a file&apos;s hash, or the web address you scanned, to read the result of its last
+            analysis. We only look results up; we never upload your file or ask VirusTotal to scan anything new.
+          </li>
+          <li>Google Safe Browsing: we send the web address you scanned to check it against Google&apos;s phishing and malware lists.</li>
+          <li>
+            RDAP (rdap.org and the domain&apos;s registry): we send the domain name of the address you scanned to read
+            when it was registered.
           </li>
         </ul>
         <p>
