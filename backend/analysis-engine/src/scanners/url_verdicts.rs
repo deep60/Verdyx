@@ -226,7 +226,7 @@ fn detection(
         engine_type: if name == URL_CHECKS {
             EngineType::Static
         } else {
-            EngineType::Hash
+            EngineType::ThreatIntel
         },
         verdict,
         confidence,
@@ -554,6 +554,28 @@ mod tests {
             d.error_message.as_deref(),
             Some("URLhaus lookup failed: timeout")
         );
+    }
+
+    #[test]
+    fn feeds_are_labelled_threat_intel_and_own_checks_static() {
+        let feed = detection(
+            URLHAUS,
+            ThreatVerdict::Unknown,
+            0.0,
+            SeverityLevel::Info,
+            HashMap::new(),
+            1,
+        );
+        assert_eq!(feed.engine_type, EngineType::ThreatIntel);
+        let own = detection(
+            URL_CHECKS,
+            ThreatVerdict::Benign,
+            0.6,
+            SeverityLevel::Info,
+            HashMap::new(),
+            1,
+        );
+        assert_eq!(own.engine_type, EngineType::Static);
     }
 
     fn vt(malicious: u32, suspicious: u32, harmless: u32) -> VirusTotalUrl {
