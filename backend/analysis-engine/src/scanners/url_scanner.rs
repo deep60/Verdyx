@@ -22,6 +22,7 @@ use super::url_policy::{
     is_fetch_refusal, is_public_ip, parse_certificate, refusal, validate_url_policy,
     MAX_FETCH_BYTES,
 };
+use super::url_reputation::{UrlReputationClient, UrlReputationReport};
 use super::{
     ArtifactType, Finding, FindingCategory, ScanResult, Scanner, ScannerConfig, ThreatLevel,
 };
@@ -72,6 +73,10 @@ pub struct UrlScanResult {
     /// URLhaus / ThreatFox results; `None` when no abuse.ch key is configured.
     #[serde(default)]
     pub threat_intel: Option<ThreatIntelReport>,
+    /// VirusTotal, Google Safe Browsing and domain age; `None` when the
+    /// destination was blocked and nothing was looked up.
+    #[serde(default)]
+    pub reputation: Option<UrlReputationReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +159,7 @@ pub struct ContentAnalysis {
 pub struct UrlScanner {
     config: UrlScannerConfig,
     abuse_ch: Option<AbuseChClient>,
+    reputation: Option<UrlReputationClient>,
     blocklist_domains: Vec<String>,
     blocklist_keywords: Vec<String>,
     suspicious_tlds: Vec<String>,
@@ -177,9 +183,33 @@ impl Scanner for UrlScanner {
             info!("URL scanner: ABUSE_CH_API_KEY not set; URLhaus and ThreatFox skipped");
         }
 
+        let reputation = match UrlReputationClient::from_env() {
+            Ok(client) => {
+                info!(
+                    "URL scanner: domain age on; VirusTotal {}; Google Safe Browsing {}",
+                    if client.virustotal_enabled() {
+                        "on"
+                    } else {
+                        "off (VIRUSTOTAL_API_KEY not set)"
+                    },
+                    if client.safe_browsing_enabled() {
+                        "on"
+                    } else {
+                        "off (GOOGLE_SAFE_BROWSING_API_KEY not set)"
+                    },
+                );
+                Some(client)
+            }
+            Err(e) => {
+                warn!("URL scanner: reputation lookups disabled: {e}");
+                None
+            }
+        };
+
         Ok(Self {
             config,
             abuse_ch,
+            reputation,
             blocklist_domains: Self::load_blocklist_domains(),
             blocklist_keywords: Self::load_blocklist_keywords(),
             suspicious_tlds: Self::load_suspicious_tlds(),
@@ -212,7 +242,7 @@ impl Scanner for UrlScanner {
         let url_info = self.analyze_url(&parsed);
 
         // Check domain reputation
-        let domain_reputation = if self.config.check_reputation {
+        let mut domain_reputation = if self.config.check_reputation {
             self.check_domain_reputation(&url_info.parsed_url.domain)
         } else {
             DomainReputation {
@@ -238,18 +268,6 @@ impl Scanner for UrlScanner {
                 severity: ThreatLevel::Critical,
                 evidence: vec![format!("Blocklist match: {}", domain_reputation.domain)],
                 recommendation: Some("Block access immediately".to_string()),
-            });
-        }
-
-        if domain_reputation.is_newly_registered {
-            base_result.add_finding(Finding {
-                finding_id: Uuid::new_v4(),
-                category: FindingCategory::Suspicious,
-                title: "Newly registered domain".to_string(),
-                description: "Domain registered within last 30 days".to_string(),
-                severity: ThreatLevel::Medium,
-                evidence: vec![format!("Domain age: {:?} days", domain_reputation.age_days)],
-                recommendation: Some("Exercise caution".to_string()),
             });
         }
 
@@ -339,6 +357,26 @@ impl Scanner for UrlScanner {
             }
             _ => None,
         };
+
+        // VirusTotal, Safe Browsing and domain age. Like the feeds above, a
+        // blocked (private) destination is never sent to a third party. A
+        // well-known site's or an IP address's age says nothing, so it isn't
+        // looked up.
+        let reputation = match &self.reputation {
+            Some(client) if !start_blocked => {
+                let check_age =
+                    !url_info.is_ip_based && !self.is_trusted_domain(&url_info.parsed_url.domain);
+                Some(client.check(&parsed, check_age).await)
+            }
+            _ => None,
+        };
+        if let Some(age) = reputation.as_ref().and_then(|r| r.domain_age.as_ref()) {
+            domain_reputation.age_days = Some(age.age_days.max(0) as u64);
+            domain_reputation.is_newly_registered = age.age_days < NEW_DOMAIN_DAYS;
+            if let Some(finding) = domain_age_finding(age) {
+                base_result.add_finding(finding);
+            }
+        }
 
         if redirect_chain.len() > 1 {
             base_result.add_finding(Finding {
@@ -480,6 +518,7 @@ impl Scanner for UrlScanner {
             ssl_info,
             content_analysis,
             threat_intel,
+            reputation,
         })
     }
 
@@ -1015,6 +1054,43 @@ fn unencrypted_finding(
             evidence: redirect_chain.to_vec(),
             recommendation: Some("Don't enter personal information on this site".to_string()),
         }
+    })
+}
+
+/// A domain younger than this is "newly registered".
+const NEW_DOMAIN_DAYS: i64 = 30;
+/// Younger than this, it's a strong warning on its own.
+const BRAND_NEW_DOMAIN_DAYS: i64 = 7;
+
+/// Phishing sites mostly live on domains registered days before the attack.
+/// Under a week counts as a strong (high) sign; under a month as one of the
+/// medium signs that add up.
+fn domain_age_finding(age: &super::url_reputation::DomainAge) -> Option<Finding> {
+    let severity = if age.age_days < BRAND_NEW_DOMAIN_DAYS {
+        ThreatLevel::High
+    } else if age.age_days < NEW_DOMAIN_DAYS {
+        ThreatLevel::Medium
+    } else {
+        return None;
+    };
+    let when = match age.age_days {
+        0 => "today".to_string(),
+        1 => "1 day ago".to_string(),
+        n => format!("{n} days ago"),
+    };
+    Some(Finding {
+        finding_id: Uuid::new_v4(),
+        category: FindingCategory::Suspicious,
+        title: "Newly registered domain".to_string(),
+        description: format!("{} was registered {when}", age.domain),
+        severity,
+        evidence: vec![format!(
+            "RDAP registration date: {}",
+            age.registered.format("%Y-%m-%d")
+        )],
+        recommendation: Some(
+            "New domains are common for phishing; check who runs it before trusting it".to_string(),
+        ),
     })
 }
 
@@ -1673,6 +1749,36 @@ mod tests {
         assert!(is_public_ip("8.8.8.8".parse().unwrap()));
         assert!(!is_public_ip("169.254.169.254".parse().unwrap()));
         assert!(!is_public_ip("::ffff:10.0.0.1".parse().unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod domain_age_tests {
+    use super::*;
+    use crate::scanners::url_reputation::DomainAge;
+
+    fn aged(days: i64) -> DomainAge {
+        DomainAge {
+            domain: "example.com".to_string(),
+            registered: chrono::Utc::now() - chrono::Duration::days(days),
+            age_days: days,
+        }
+    }
+
+    #[test]
+    fn brand_new_is_high_new_is_medium_old_is_nothing() {
+        let f = domain_age_finding(&aged(2)).unwrap();
+        assert!(matches!(f.severity, ThreatLevel::High));
+        assert_eq!(f.description, "example.com was registered 2 days ago");
+        assert!(matches!(
+            domain_age_finding(&aged(20)).unwrap().severity,
+            ThreatLevel::Medium
+        ));
+        assert!(domain_age_finding(&aged(400)).is_none());
+        assert_eq!(
+            domain_age_finding(&aged(0)).unwrap().description,
+            "example.com was registered today"
+        );
     }
 }
 

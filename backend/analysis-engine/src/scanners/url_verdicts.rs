@@ -6,7 +6,10 @@
 //!
 //! - **URLhaus**: abuse.ch's list of URLs and hosts serving malware.
 //! - **ThreatFox**: abuse.ch's list of indicators (C2 domains, payload URLs).
-//! - **URL checks**: Verdyx's own checks on the URL, redirects, TLS and page.
+//! - **VirusTotal**: the URL's last analysis by ~90 security vendors.
+//! - **Google Safe Browsing**: Google's malware and phishing lists.
+//! - **URL checks**: Verdyx's own checks on the URL, redirects, TLS, page
+//!   and the domain's registration age.
 //!
 //! A feed that doesn't list the URL has no opinion ("no record"), because
 //! absence from a blocklist doesn't make a site safe.
@@ -18,6 +21,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use super::abuse_ch::ThreatIntelMatch;
+use super::url_reputation::{SafeBrowsing, VirusTotalUrl};
 use super::url_scanner::UrlScanResult;
 use super::{Finding, ThreatLevel};
 use crate::models::analysis_result::{
@@ -27,6 +31,8 @@ use crate::models::analysis_result::{
 pub const URLHAUS: &str = "URLhaus";
 pub const THREATFOX: &str = "ThreatFox";
 pub const URL_CHECKS: &str = "URL checks";
+pub const VIRUSTOTAL: &str = "VirusTotal";
+pub const SAFE_BROWSING: &str = "Google Safe Browsing";
 
 /// One detection per URL engine. Feeds are left out when no abuse.ch key is set.
 pub fn url_detections(scan: &UrlScanResult, host_is_trusted: bool) -> Vec<DetectionResult> {
@@ -52,8 +58,153 @@ pub fn url_detections(scan: &UrlScanResult, host_is_trusted: bool) -> Vec<Detect
             ));
         }
     }
+    if let Some(rep) = &scan.reputation {
+        let ms = scan.base.scan_duration_ms;
+        if let Some(vt) = &rep.virustotal {
+            out.push(virustotal_detection(vt, ms));
+        }
+        if let Some(gsb) = &rep.safe_browsing {
+            out.push(safe_browsing_detection(gsb, ms));
+        }
+    }
     out.push(url_checks_detection(scan));
     out
+}
+
+/// An engine that answered but has nothing on this URL.
+fn no_record(name: &str, reason: &str, duration_ms: u64) -> DetectionResult {
+    detection(
+        name,
+        ThreatVerdict::Unknown,
+        0.0,
+        SeverityLevel::Info,
+        HashMap::from([("reason".to_string(), json!(reason))]),
+        duration_ms,
+    )
+}
+
+/// An engine that couldn't answer (network, key, rate limit).
+fn unavailable(name: &str, error: &str, duration_ms: u64) -> DetectionResult {
+    let mut d = detection(
+        name,
+        ThreatVerdict::Unknown,
+        0.0,
+        SeverityLevel::Info,
+        HashMap::new(),
+        duration_ms,
+    );
+    d.error_message = Some(format!("{name} lookup failed: {error}"));
+    d
+}
+
+/// VirusTotal's vendors vote together. One vendor alone is often a false
+/// positive, so it only makes the URL suspicious; three or more decide it.
+/// "Harmless" from vendors that actually rated the URL counts as a clean vote;
+/// "undetected" alone is no opinion.
+pub(crate) fn virustotal_detection(vt: &VirusTotalUrl, duration_ms: u64) -> DetectionResult {
+    let (malicious, suspicious, harmless, undetected, flagged_by, date, reference) = match vt {
+        VirusTotalUrl::NotSeen => {
+            return no_record(
+                VIRUSTOTAL,
+                "VirusTotal has no record of this URL",
+                duration_ms,
+            )
+        }
+        VirusTotalUrl::Error(e) => return unavailable(VIRUSTOTAL, e, duration_ms),
+        VirusTotalUrl::Analysed {
+            malicious,
+            suspicious,
+            harmless,
+            undetected,
+            flagged_by,
+            last_analysis_date,
+            reference,
+        } => (
+            *malicious,
+            *suspicious,
+            *harmless,
+            *undetected,
+            flagged_by,
+            last_analysis_date,
+            reference,
+        ),
+    };
+    let (verdict, confidence, severity, authoritative) = match (malicious, suspicious) {
+        (3.., _) => (ThreatVerdict::Malicious, 0.9, SeverityLevel::Critical, true),
+        (2, _) => (ThreatVerdict::Malicious, 0.7, SeverityLevel::High, false),
+        (1, _) | (0, 2..) => (ThreatVerdict::Suspicious, 0.5, SeverityLevel::Medium, false),
+        _ if harmless > 0 => (ThreatVerdict::Benign, 0.5, SeverityLevel::Info, false),
+        _ => {
+            return no_record(
+                VIRUSTOTAL,
+                "No VirusTotal vendor has rated this URL",
+                duration_ms,
+            )
+        }
+    };
+    let mut metadata = HashMap::from([
+        ("malicious".to_string(), json!(malicious)),
+        ("suspicious".to_string(), json!(suspicious)),
+        ("harmless".to_string(), json!(harmless)),
+        ("undetected".to_string(), json!(undetected)),
+        (
+            "flagged_by".to_string(),
+            Value::Array(
+                flagged_by
+                    .iter()
+                    .map(|(vendor, label)| json!({"vendor": vendor, "result": label}))
+                    .collect(),
+            ),
+        ),
+        ("reference".to_string(), json!(reference)),
+    ]);
+    if let Some(ts) = date {
+        if let Some(d) = chrono::DateTime::from_timestamp(*ts, 0) {
+            metadata.insert("last_analysed".to_string(), json!(d.to_rfc3339()));
+        }
+    }
+    if authoritative {
+        metadata.insert(AUTHORITATIVE_KEY.to_string(), Value::Bool(true));
+    }
+    detection(
+        VIRUSTOTAL,
+        verdict,
+        confidence,
+        severity,
+        metadata,
+        duration_ms,
+    )
+}
+
+/// A Safe Browsing listing is a curated, current decision, so it decides the
+/// verdict. Not being listed is no opinion.
+pub(crate) fn safe_browsing_detection(gsb: &SafeBrowsing, duration_ms: u64) -> DetectionResult {
+    match gsb {
+        SafeBrowsing::NotListed => no_record(
+            SAFE_BROWSING,
+            "Not on Google Safe Browsing's lists",
+            duration_ms,
+        ),
+        SafeBrowsing::Error(e) => unavailable(SAFE_BROWSING, e, duration_ms),
+        SafeBrowsing::Listed(types) => {
+            let phishing = types.iter().any(|t| t == "SOCIAL_ENGINEERING");
+            let mut d = detection(
+                SAFE_BROWSING,
+                ThreatVerdict::Malicious,
+                0.95,
+                SeverityLevel::Critical,
+                HashMap::from([
+                    ("threat_types".to_string(), json!(types)),
+                    (AUTHORITATIVE_KEY.to_string(), Value::Bool(true)),
+                ]),
+                duration_ms,
+            );
+            if phishing {
+                d.categories = vec![ThreatCategory::Phishing];
+            }
+            d
+        }
+    }
 }
 
 fn detection(
@@ -276,6 +427,16 @@ fn url_checks_detection(scan: &UrlScanResult) -> DetectionResult {
         ),
     );
     metadata.insert("domain".to_string(), json!(scan.url_info.parsed_url.domain));
+    if let Some(age) = scan.reputation.as_ref().and_then(|r| r.domain_age.as_ref()) {
+        metadata.insert(
+            "domain_age".to_string(),
+            json!({
+                "registered_domain": age.domain,
+                "registered": age.registered.format("%Y-%m-%d").to_string(),
+                "age_days": age.age_days,
+            }),
+        );
+    }
     metadata.insert(
         "redirects".to_string(),
         json!(scan.redirect_chain.len().saturating_sub(1)),
@@ -393,5 +554,60 @@ mod tests {
             d.error_message.as_deref(),
             Some("URLhaus lookup failed: timeout")
         );
+    }
+
+    fn vt(malicious: u32, suspicious: u32, harmless: u32) -> VirusTotalUrl {
+        VirusTotalUrl::Analysed {
+            malicious,
+            suspicious,
+            harmless,
+            undetected: 10,
+            flagged_by: vec![],
+            last_analysis_date: Some(1_764_000_000),
+            reference: "https://www.virustotal.com/gui/url/x".to_string(),
+        }
+    }
+
+    #[test]
+    fn virustotal_votes_by_how_many_vendors_flag_it() {
+        let d = virustotal_detection(&vt(5, 0, 60), 1);
+        assert_eq!(d.verdict, ThreatVerdict::Malicious);
+        assert!(d.metadata.contains_key(AUTHORITATIVE_KEY));
+
+        let d = virustotal_detection(&vt(2, 0, 60), 1);
+        assert_eq!(d.verdict, ThreatVerdict::Malicious);
+        assert!(!d.metadata.contains_key(AUTHORITATIVE_KEY));
+
+        assert_eq!(
+            virustotal_detection(&vt(1, 0, 60), 1).verdict,
+            ThreatVerdict::Suspicious
+        );
+        assert_eq!(
+            virustotal_detection(&vt(0, 0, 60), 1).verdict,
+            ThreatVerdict::Benign
+        );
+        // Nobody rated it: no opinion, not "clean".
+        assert!(virustotal_detection(&vt(0, 0, 0), 1).non_vote().is_some());
+        assert!(virustotal_detection(&VirusTotalUrl::NotSeen, 1)
+            .non_vote()
+            .is_some());
+        let err = virustotal_detection(&VirusTotalUrl::Error("rate limit".into()), 1);
+        assert_eq!(
+            err.error_message.as_deref(),
+            Some("VirusTotal lookup failed: rate limit")
+        );
+    }
+
+    #[test]
+    fn safe_browsing_listing_decides_and_absence_is_no_opinion() {
+        let d =
+            safe_browsing_detection(&SafeBrowsing::Listed(vec!["SOCIAL_ENGINEERING".into()]), 1);
+        assert_eq!(d.verdict, ThreatVerdict::Malicious);
+        assert_eq!(d.categories, vec![ThreatCategory::Phishing]);
+        assert!(d.metadata.contains_key(AUTHORITATIVE_KEY));
+
+        let d = safe_browsing_detection(&SafeBrowsing::NotListed, 1);
+        assert_eq!(d.verdict, ThreatVerdict::Unknown);
+        assert!(d.non_vote().is_some());
     }
 }

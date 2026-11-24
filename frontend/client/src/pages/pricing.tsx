@@ -10,7 +10,7 @@ const GITHUB_ISSUES = "https://github.com/deep60/Verdyx/issues/new";
 /** What the free beta includes today. Every line maps to something running. */
 const INCLUDED = [
   "File scans with every voting engine, per-engine evidence, and the consensus",
-  "URL scans: redirect chain, TLS, DNS and mail auth, page checks, URLhaus and ThreatFox",
+  "URL scans: redirect chain, TLS, DNS and mail auth, page checks, domain age, URLhaus, ThreatFox, VirusTotal and Google Safe Browsing",
   "36 website inspection checks",
   "Uploads up to 100 MB",
   "REST API with the same submissions as the console",
