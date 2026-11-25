@@ -1,0 +1,47 @@
+{
+  "name": "verdyx",
+  "version": "0.1.0",
+  "description": "Verdyx malware and URL scanning: JavaScript/TypeScript SDK and the verdyx command",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "bin": {
+    "verdyx": "./bin/verdyx.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.18"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deep60/Verdyx.git",
+    "directory": "sdk/typescript"
+  },
+  "homepage": "https://verdyx.dev",
+  "keywords": [
+    "malware",
+    "scanner",
+    "security",
+    "threat-intelligence",
+    "yara",
+    "cli"
+  ]
+}

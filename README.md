@@ -141,11 +141,18 @@ cd blockchain && npx hardhat test
 The gateway exposes a REST API under `/api/v1` (auth, bounties, submissions, wallet, webhooks). See [`docs/API.md`](docs/API.md) for the full route reference and [`docs/api/openapi.yaml`](docs/api/openapi.yaml) for the OpenAPI spec.
 
 ```bash
-curl -X POST https://api.verdyx.dev/api/v1/bounties \
-  -H "Authorization: Bearer <TOKEN>" \
-  -F "file=@/path/to/sample.exe" \
-  -F "bounty=0.05"
+curl -X POST https://api.verdyx.dev/api/v1/submissions/file \
+  -H "X-API-Key: $VERDYX_API_KEY" \
+  -F "file=@/path/to/sample.exe"
 ```
+
+### Clients
+
+| | |
+|---|---|
+| [`verdyx` command and JavaScript/TypeScript SDK](sdk/typescript) | `verdyx scan sample.exe https://example.com`, with exit codes for CI |
+| [Python SDK](sdk/python) | `Verdyx().scan("sample.exe").verdict` |
+| [GitHub Action](action) | Scan build artifacts and fail the job on a malicious verdict |
 
 ## Documentation
 
