@@ -93,6 +93,11 @@ class MockApi:
                              "verdict": scan["verdict"] if flagged else "benign", "confidence": 90, "vote": "counted"},
                             {"engine": {"name": "MalwareBazaar"}, "verdict": None, "vote": "no_record",
                              "reason": "Not in MalwareBazaar"},
+                            # Like the live API: "unknown" for an engine that didn't vote.
+                            {"engine": {"name": "ClamAV"}, "verdict": "unknown",
+                             "reason": "No known-bad pattern matched"},
+                            {"engine": {"name": "Verdyx PE Model"}, "verdict": "clean", "confidence": 36,
+                             "metadata": {"probability": 0.6421}},
                         ])
                 return self._send(404, {"message": "no mock"})
 
@@ -144,7 +149,7 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(len(r.sha256), 64)
         self.assertEqual(r.votes, {"malicious": 1, "suspicious": 0, "clean": 1, "total": 2})
         self.assertEqual(r.report_url, f"https://verdyx.dev/analysis/{r.id}")
-        self.assertEqual([e.name for e in r.engines], ["YARA", "MalwareBazaar"])
+        self.assertEqual([e.name for e in r.engines], ["YARA", "MalwareBazaar", "ClamAV", "Verdyx PE Model"])
         self.assertEqual(r.engines[1].vote, "no_record")
         self.assertTrue(r.meets("malicious"))
         method, path, headers, _ = next(x for x in self.api.requests if x[0] == "POST")
@@ -163,6 +168,9 @@ class ClientTest(unittest.TestCase):
         r = self.client.scan("https://example.org/", poll_interval=0.02)
         self.assertEqual(r.engines[0].verdict, "clean")
         self.assertIsNone(r.engines[1].verdict)
+        self.assertIsNone(r.engines[2].verdict, "unknown means the engine didn't vote")
+        self.assertIsNone(r.engines[2].malware_chance)
+        self.assertEqual(r.engines[3].malware_chance, 64)
 
     def test_bytes_with_options(self):
         sub = self.client.submit_file(b"hello", filename='odd"name.txt', description="note",

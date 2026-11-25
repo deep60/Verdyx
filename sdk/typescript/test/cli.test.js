@@ -78,7 +78,9 @@ test("--output writes JSON while the table still prints", async () => {
 
 test("--verbose lists each engine", async () => {
   const r = await run(["scan", "-v", "https://example.com/"]);
-  assert.match(r.stdout, /· MalwareBazaar: no_record — Not in MalwareBazaar/);
+  assert.match(r.stdout, /· MalwareBazaar: no vote — Not in MalwareBazaar/);
+  assert.match(r.stdout, /· Heuristic Engine: clean \(60%\)/);
+  assert.match(r.stdout, /· Verdyx PE Model: clean \(64% malware chance\)/);
 });
 
 test("--summary appends a Markdown table", async () => {

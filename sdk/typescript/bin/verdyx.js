@@ -187,11 +187,18 @@ function printTable(results, verbose) {
     console.log(`${label} ${(r.target ?? r.id).padEnd(width)}  ${describeVotes(r)}  ${paint("2", r.reportUrl)}`);
     if (verbose) {
       for (const e of r.engines) {
-        const what = e.verdict ? `${e.verdict}${e.confidence != null ? ` (${e.confidence}%)` : ""}` : (e.vote ?? "no vote");
-        console.log(`           ${paint("2", "·")} ${e.name}: ${what}${e.reason ? paint("2", ` — ${e.reason}`) : ""}`);
+        console.log(`           ${paint("2", "·")} ${e.name}: ${engineVote(e)}${e.reason ? paint("2", ` — ${e.reason}`) : ""}`);
       }
     }
   }
+}
+
+/** "malicious (90%)", "clean (64% malware chance)" or "no vote". */
+function engineVote(e) {
+  if (!e.verdict) return "no vote";
+  // A model's malware chance reads better than its confidence in "clean".
+  if (e.malwareChance != null) return `${e.verdict} (${e.malwareChance}% malware chance)`;
+  return e.confidence != null ? `${e.verdict} (${e.confidence}%)` : e.verdict;
 }
 
 function cell(s) {

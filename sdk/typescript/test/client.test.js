@@ -31,9 +31,11 @@ test("scans a file by path and returns the verdict", async () => {
   assert.match(r.sha256, /^[0-9a-f]{64}$/);
   assert.deepEqual(r.votes, { malicious: 1, suspicious: 0, clean: 1, total: 2 });
   assert.equal(r.reportUrl, `https://verdyx.dev/analysis/${r.id}`);
-  assert.equal(r.engines.length, 3);
+  assert.equal(r.engines.length, 4);
   assert.equal(r.engines[1].verdict, "clean", "benign is reported as clean");
-  assert.equal(r.engines[2].vote, "no_record");
+  assert.equal(r.engines[2].verdict, null, "an engine that didn't vote has no verdict");
+  assert.equal(r.engines[2].malwareChance, null);
+  assert.equal(r.engines[3].malwareChance, 64);
 
   const upload = srv.log.find((l) => l.method === "POST");
   assert.equal(upload.path, "/api/v1/submissions/file");
