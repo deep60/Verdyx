@@ -23,6 +23,9 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # ort is a pre-release (2.0.0-rc.N) whose API changes between release
+      # candidates; rc.15 broke the production build. Upgrade it by hand.
+      - dependency-name: "ort"
     groups:
       cargo-minor-patch:
         update-types: [minor, patch]
