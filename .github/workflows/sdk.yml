@@ -1,0 +1,128 @@
+# Tests for the clients in sdk/ and the GitHub Action in action/.
+name: SDKs and Action
+
+on:
+  push:
+    branches: [main]
+    paths: ["sdk/**", "action/**", ".github/workflows/sdk.yml"]
+  pull_request:
+    paths: ["sdk/**", "action/**", ".github/workflows/sdk.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  javascript:
+    name: JavaScript SDK and CLI (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["18", "20", "22"]
+    defaults:
+      run:
+        working-directory: sdk/typescript
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test test/*.test.js
+      - name: Type definitions
+        if: matrix.node == '22'
+        run: npm install --no-save --no-audit --no-fund typescript@5.6.3 && npx tsc -p tsconfig.json
+      - name: Package contents
+        if: matrix.node == '22'
+        run: npm pack --dry-run
+
+  python:
+    name: Python SDK (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s tests -v
+      - name: Builds as a package
+        if: matrix.python == '3.13'
+        run: python -m pip install --quiet build && python -m build && ls dist
+
+  action:
+    name: GitHub Action against a mock API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Start the mock API and make sample files
+        run: |
+          node sdk/typescript/test/mock-server.js 8787 > "$RUNNER_TEMP/mock.log" 2>&1 &
+          for _ in $(seq 50); do grep -q listening "$RUNNER_TEMP/mock.log" && break; sleep 0.1; done
+          mkdir -p samples/nested
+          echo "release build" > samples/app.bin
+          echo "stand-in with EICAR marker" > samples/nested/bad.exe
+          echo "library" > samples/nested/lib.dll
+
+      - name: Clean files pass
+        id: clean
+        uses: ./action
+        env:
+          VERDYX_POLL_INTERVAL: "0.05"
+        with:
+          api-url: http://127.0.0.1:8787
+          paths: |
+            samples/app.bin
+            samples/**/*.dll
+          urls: https://example.com/
+
+      - name: A malicious file fails the step
+        id: bad
+        continue-on-error: true
+        uses: ./action
+        env:
+          VERDYX_POLL_INTERVAL: "0.05"
+        with:
+          api-url: http://127.0.0.1:8787
+          paths: samples/**
+
+      - name: fail-on never reports without failing
+        id: never
+        uses: ./action
+        env:
+          VERDYX_POLL_INTERVAL: "0.05"
+        with:
+          api-url: http://127.0.0.1:8787
+          paths: samples/nested/bad.exe
+          fail-on: never
+
+      - name: Check the outcomes and outputs
+        env:
+          CLEAN_VERDICT: ${{ steps.clean.outputs.verdict }}
+          BAD_OUTCOME: ${{ steps.bad.outcome }}
+          BAD_VERDICT: ${{ steps.bad.outputs.verdict }}
+          BAD_FLAGGED: ${{ steps.bad.outputs.flagged }}
+          NEVER_VERDICT: ${{ steps.never.outputs.verdict }}
+          NEVER_FLAGGED: ${{ steps.never.outputs.flagged }}
+          RESULTS: ${{ steps.never.outputs.results }}
+        run: |
+          set -x
+          test "$CLEAN_VERDICT" = clean
+          test "$BAD_OUTCOME" = failure
+          test "$BAD_VERDICT" = malicious
+          test "$BAD_FLAGGED" = 1
+          test "$NEVER_VERDICT" = malicious
+          test "$NEVER_FLAGGED" = 0
+          node -e 'const d=require(process.argv[1]); if (d.results[0].target !== "samples/nested/bad.exe") process.exit(1)' "$RESULTS"

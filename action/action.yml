@@ -1,0 +1,68 @@
+name: Verdyx scan
+description: Scan build artifacts, files and URLs with Verdyx, and fail the job on a malicious verdict.
+author: Verdyx
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  paths:
+    description: >
+      Files to scan, one per line. Globs work, including ** (for example
+      dist/**/*.exe). Directories are skipped.
+    required: false
+    default: ""
+  urls:
+    description: URLs to scan, one per line.
+    required: false
+    default: ""
+  api-key:
+    description: >
+      A Verdyx API key with the scan and read scopes, from a repository secret.
+      Without one, scans are anonymous and more tightly rate limited.
+    required: false
+    default: ""
+  fail-on:
+    description: "Fail the job when a verdict is at least this bad: malicious, suspicious or never."
+    required: false
+    default: malicious
+  timeout:
+    description: Seconds to wait for each scan before giving up.
+    required: false
+    default: "300"
+  team:
+    description: Save the scans to this team (organization id).
+    required: false
+    default: ""
+  api-url:
+    description: The Verdyx API.
+    required: false
+    default: https://api.verdyx.dev
+
+outputs:
+  verdict:
+    description: The worst verdict across all targets (malicious, suspicious, clean or unknown).
+    value: ${{ steps.scan.outputs.verdict }}
+  flagged:
+    description: How many targets reached fail-on.
+    value: ${{ steps.scan.outputs.flagged }}
+  results:
+    description: Path to a JSON file with every result.
+    value: ${{ steps.scan.outputs.results }}
+
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: bash
+      # Inputs reach the script only through the environment, never pasted
+      # into it, so a file name or URL can't inject shell commands.
+      env:
+        VERDYX_API_KEY: ${{ inputs.api-key }}
+        VERDYX_API_URL: ${{ inputs.api-url }}
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_URLS: ${{ inputs.urls }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_TEAM: ${{ inputs.team }}
+      run: bash "$GITHUB_ACTION_PATH/run.sh"

@@ -7,6 +7,19 @@ This guide documents the currently implemented API gateway surface at `backend/a
 - Local: `http://localhost:8080/api/v1`
 - Production: `https://api.verdyx.dev/api/v1`
 
+## Clients
+
+Rather than calling the routes by hand, you can use:
+
+- **The `verdyx` command and JavaScript/TypeScript SDK**: [`sdk/typescript`](../sdk/typescript)
+- **The Python SDK**: [`sdk/python`](../sdk/python)
+- **The GitHub Action**: [`action`](../action)
+
+They all scan the same way:
+1. `POST /submissions/file`, a multipart form with `file`, or `url` for a URL, plus optional `description`, `organizationId` and `priority`.
+2. Poll `GET /submissions/{id}` until `analysisStatus` is `completed` or `failed`.
+3. Read the verdict from `GET /submissions/{id}/consensus` and each engine's result from `GET /submissions/{id}/analyses`.
+
 ## Authentication
 
 Most write routes require authentication: a session token from sign-in, or an API key.
