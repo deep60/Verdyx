@@ -549,6 +549,26 @@ async fn process_submission(
     // Update submission status to completed and clear any retry diagnostic.
     record_job_status(db_pool, submission_id, "completed", "").await?;
 
+    super::webhooks::enqueue(
+        db_pool,
+        submission.submitter_id,
+        shared::webhooks::ANALYSIS_COMPLETED,
+        super::webhooks::analysis_data(
+            submission_id,
+            &submission.submission_type,
+            submission
+                .url
+                .as_deref()
+                .or(submission.original_filename.as_deref()),
+            submission.file_hash.as_deref(),
+            is_malicious,
+            confidence_score,
+            analysis_result.detections.len(),
+            submission.organization_id,
+        ),
+    )
+    .await;
+
     // Publish WebSocket event: analysis completed
     publish_ws_event(
         redis_client,
@@ -661,6 +681,25 @@ async fn follow_up_sandbox(
     {
         error!("Could not store the sandbox report for {submission_id}: {e}");
         return;
+    }
+    // The verdict may have changed: tell the uploader's webhooks.
+    if let Ok(sub) = fetch_submission_from_db(&db_pool, submission_id).await {
+        super::webhooks::enqueue(
+            &db_pool,
+            sub.submitter_id,
+            shared::webhooks::ANALYSIS_UPDATED,
+            super::webhooks::analysis_data(
+                submission_id,
+                &sub.submission_type,
+                sub.url.as_deref().or(sub.original_filename.as_deref()),
+                sub.file_hash.as_deref(),
+                is_malicious,
+                confidence,
+                result.detections.len(),
+                sub.organization_id,
+            ),
+        )
+        .await;
     }
     let _ = publish_ws_event(
         &redis_client,

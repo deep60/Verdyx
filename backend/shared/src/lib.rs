@@ -37,6 +37,7 @@ pub mod live_hunts;
 pub mod metrics_mw;
 #[cfg(feature = "validation")]
 pub mod validation;
+pub mod webhooks;
 pub mod yara_rules;
 
 pub use service_metrics::MetricsRegistry;

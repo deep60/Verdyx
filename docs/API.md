@@ -14,6 +14,7 @@ Rather than calling the routes by hand, you can use:
 - **The `verdyx` command and JavaScript/TypeScript SDK**: [`sdk/typescript`](../sdk/typescript)
 - **The Python SDK**: [`sdk/python`](../sdk/python)
 - **The GitHub Action**: [`action`](../action)
+- **Webhooks**, to have results pushed to you: [webhooks.md](api/webhooks.md)
 
 They all scan the same way:
 1. `POST /submissions/file`, a multipart form with `file`, or `url` for a URL, plus optional `description`, `organizationId` and `priority`.
@@ -334,7 +335,7 @@ The API root URL in discovery is absolute: `PUBLIC_API_URL` if set, otherwise th
 - User profile: `GET /users/me`, `PUT /users/me`, `GET /users/me/stats`
 - Wallet: `POST /auth/wallet/connect` links a wallet by a signed message; balances and transfers are read and signed in the wallet itself
 - Submissions: `GET /submissions`, `POST /submissions`, `POST /submissions/:id/vote`
-- Webhooks: CRUD and delivery routes under ` /webhooks`
+- Webhooks: CRUD and delivery routes under `/webhooks`. Events, signatures and retries: [webhooks.md](api/webhooks.md)
 - Teams: `/orgs` and `/invitations` (see [Teams](#teams))
 - Audit log: `GET /users/me/audit`, `GET /orgs/{id}/audit` (see [Audit log](#audit-log))
 - Your data: retention, deleting scans, export (see [Your data](#your-data))

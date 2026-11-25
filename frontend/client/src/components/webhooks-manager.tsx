@@ -41,12 +41,11 @@ interface DeliveryListResponse {
   total: number;
 }
 
+// The events the server delivers (shared::webhooks::EVENTS in the backend).
 const DEFAULT_EVENTS = [
-  { id: "analysis.completed", label: "analysis.completed", desc: "Multi-engine scan & consensus completed" },
-  { id: "bounty.created", label: "bounty.created", desc: "New threat bounty posted" },
-  { id: "bounty.submission", label: "bounty.submission", desc: "Engine or analyst staked a verdict" },
-  { id: "bounty.finalized", label: "bounty.finalized", desc: "Bounty quorum settled & rewards paid" },
-  { id: "reputation.updated", label: "reputation.updated", desc: "Analyst or engine reputation changed" },
+  { id: "analysis.completed", label: "analysis.completed", desc: "A scan you submitted finished, with its verdict" },
+  { id: "analysis.updated", label: "analysis.updated", desc: "A finished scan's verdict changed, e.g. a sandbox report arrived" },
+  { id: "livehunt.match", label: "livehunt.match", desc: "One of your live YARA hunts matched a new upload" },
 ];
 
 export function WebhooksManager() {
@@ -56,7 +55,7 @@ export function WebhooksManager() {
   const [description, setDescription] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>([
     "analysis.completed",
-    "bounty.finalized",
+    "livehunt.match",
   ]);
   const [selectedWebhookId, setSelectedWebhookId] = useState<string | null>(null);
 
@@ -126,12 +125,18 @@ export function WebhooksManager() {
     mutationFn: async (id: string) => {
       const res = await apiRequest("POST", `/api/webhooks/${id}/test`, {
         event_type: "analysis.completed",
+        // The same shape as a real analysis.completed delivery's `data`.
         sample_payload: {
-          event: "analysis.completed",
+          test: true,
           submissionId: "00000000-0000-0000-0000-000000000001",
-          finalVerdict: "malicious",
-          confidenceScore: 96.4,
-          enginesCompleted: 8,
+          status: "completed",
+          type: "file",
+          target: "invoice.exe",
+          sha256: "0".repeat(64),
+          isMalicious: true,
+          confidence: 0.75,
+          engineResults: 9,
+          teamId: null,
         },
       });
       return (await res.json()) as WebhookDelivery;
