@@ -147,10 +147,10 @@ export default function Dashboard() {
           </nav>
 
           {tab === "overview" && (
-            <div className="space-y-6 animate-fade-in" data-testid="dashboard-overview">
-              <div className="grid items-start gap-6 lg:grid-cols-12">
-                {/* Scan */}
-                <Card className="p-5 sm:p-6 lg:col-span-7">
+            <div className="grid items-start gap-6 animate-fade-in lg:grid-cols-12" data-testid="dashboard-overview">
+              {/* Each column stacks on its own, so a tall card never leaves a hole beside it. */}
+              <div className="space-y-6 lg:col-span-7">
+                <Card className="p-5 sm:p-6">
                   <div className="mb-5">
                     <h2 className="text-lg font-medium tracking-tight">New scan</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -159,37 +159,28 @@ export default function Dashboard() {
                   </div>
                   <FileSubmissionForm />
                 </Card>
-
-                {/* Your numbers */}
-                <div className="space-y-6 lg:col-span-5">
-                  <KpiStrip counts={counts} loading={submissionsQuery.isLoading} stats={statsQuery.data} />
-                  <LatestCatch scan={catchScan} />
-                </div>
-              </div>
-
-              <div className="grid items-start gap-6 lg:grid-cols-12">
-                <div className="lg:col-span-7">
-                  {submissionsQuery.isError ? (
-                    <Card className="p-5">
-                      <ErrorState
-                        title="Couldn't load your scans"
-                        message="Your session may have ended. Sign in again, or retry."
-                        onRetry={() => submissionsQuery.refetch()}
-                      />
-                    </Card>
-                  ) : (
-                    <SubmissionList
-                      submissions={submissions}
-                      limit={8}
-                      title="Recent scans"
-                      onShowAll={() => setLocation("/profile#submissions")}
+                {submissionsQuery.isError ? (
+                  <Card className="p-5">
+                    <ErrorState
+                      title="Couldn't load your scans"
+                      message="Your session may have ended. Sign in again, or retry."
+                      onRetry={() => submissionsQuery.refetch()}
                     />
-                  )}
-                </div>
-                <div className="space-y-6 lg:col-span-5">
-                  <EngineHealth engines={engines} loading={enginesQuery.isLoading} error={enginesQuery.isError} />
-                  <VerdictMixCard stats={statsQuery.data} loading={statsQuery.isLoading} onOpenAnalytics={() => setTab("analytics")} />
-                </div>
+                  </Card>
+                ) : (
+                  <SubmissionList
+                    submissions={submissions}
+                    limit={8}
+                    title="Recent scans"
+                    onShowAll={() => setLocation("/profile#submissions")}
+                  />
+                )}
+              </div>
+              <div className="space-y-6 lg:col-span-5">
+                <KpiStrip counts={counts} loading={submissionsQuery.isLoading} stats={statsQuery.data} />
+                <LatestCatch scan={catchScan} />
+                <EngineHealth engines={engines} loading={enginesQuery.isLoading} error={enginesQuery.isError} />
+                <VerdictMixCard stats={statsQuery.data} loading={statsQuery.isLoading} onOpenAnalytics={() => setTab("analytics")} />
               </div>
             </div>
           )}
