@@ -40,6 +40,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # The production image builds the analysis engine with its optional
+      # engines. Without this, a dependency bump that only breaks the ML engine
+      # (ort 2.0.0-rc.15 changed Session::builder) passed CI and failed the
+      # deploy. YARA is left out: it needs libyara installed.
+      - name: Clippy (ML and ClamAV engines)
+        run: cargo clippy -p analysis-engine --features ml-engine,clamav --all-targets -- -D warnings
+
       - name: Cargo deny (licenses, bans, advisories)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
