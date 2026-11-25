@@ -35,6 +35,7 @@
 //! | `account.retention_changed`, `team.retention_changed` | a scan retention choice changed |
 //! | `account.exported` | someone downloaded their data |
 //! | `retrohunt.started` | a YARA hunt over past uploads was queued (`details.rules`) |
+//! | `livehunt.created`, `livehunt.updated`, `livehunt.deleted` | a live YARA hunt was saved (`details.rules`), turned on or off or edited (`details.enabled`, `details.ruleChanged`), or removed |
 
 use std::net::SocketAddr;
 

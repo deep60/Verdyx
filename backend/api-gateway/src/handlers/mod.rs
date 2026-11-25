@@ -17,6 +17,7 @@ pub mod data;
 pub mod engines;
 pub mod health;
 pub mod identity;
+pub mod livehunt;
 pub mod oauth;
 pub mod organization;
 pub mod reputation;

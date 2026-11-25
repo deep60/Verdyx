@@ -185,6 +185,7 @@ Both take:
 | `team.api_key.created`, `team.api_key.revoked` | |
 | `account.retention_changed`, `team.retention_changed`, `account.exported` | |
 | `retrohunt.started` | a hunt was queued (`details.rules`) |
+| `livehunt.created`, `livehunt.updated`, `livehunt.deleted` | a live hunt was saved (`details.rules`), turned on or off or edited (`details.enabled`, `details.ruleChanged`), or removed |
 | `scan.deleted`, `scan.expired` | deleted by hand, or by retention (`via: system`, `details.count`) |
 | `scan.created` | a signed-in scan (`targetId` is the submission; `teamId` when saved to a team) |
 
@@ -219,6 +220,31 @@ Rules are checked before they're queued:
 A rule that doesn't compile ends as `failed`, with the compiler's message.
 
 Each file gets 10 seconds. A hunt covers at most 5,000 files and runs for at most 15 minutes. Only stored files are searched, and those are kept for 30 days. API keys need the `scan` scope; team keys can't hunt.
+
+## Live hunts
+
+Save a YARA rule to run, with real YARA, on every new upload in its scope, and see each file it matches. Each hunt covers either:
+- your own uploads, or
+- a team's uploads (`teamId`), for as long as you're a member.
+
+Rules follow the same rules as retrohunt.
+
+| Request | What |
+|---|---|
+| `POST /livehunts` `{"name": "...", "rule": "...", "teamId": null}` | Save a hunt. `201` with the hunt. Up to 10 turned on (`409`) and 25 in all |
+| `GET /livehunts` | Your hunts: `enabled`, `matches`, `unseen`, `lastMatchAt`, `lastError`, `ruleNames` |
+| `GET /livehunts/{id}` | One hunt with its `rule` and latest 200 `results`. Each result has `submissionId`, file name or URL, SHA-256, the rules that matched, `matchedAt`, `seen` and `isMalicious`. Scans you can no longer see are left out |
+| `PATCH /livehunts/{id}` `{"name"?, "rule"?, "enabled"?}` | Rename, replace the rule or turn the hunt on or off. A new rule clears `lastError` |
+| `POST /livehunts/{id}/seen` | Mark its matches as seen |
+| `DELETE /livehunts/{id}` | Remove it and its matches |
+
+How hunts run:
+- **When:** after each uploaded file or email (not URL pages) is loaded, before the other engines run.
+- **Time limits:** each hunt gets 5 seconds per file, and all hunts together get 20 seconds per upload.
+- **Anonymous uploads** are in nobody's scope.
+- **A rule that doesn't compile** turns its hunt off, with the compiler's message in `lastError`.
+- **Matches** are recorded once per hunt and file.
+- **API keys** need the `write` scope to change hunts and `read` to list them. Team keys can't use hunts.
 
 ## Marketplace network
 

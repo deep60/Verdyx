@@ -32,6 +32,7 @@ pub mod types;
 pub mod circuit_breaker;
 #[cfg(feature = "idempotency")]
 pub mod idempotency;
+pub mod live_hunts;
 #[cfg(feature = "axum-mw")]
 pub mod metrics_mw;
 #[cfg(feature = "validation")]
