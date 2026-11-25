@@ -8,6 +8,7 @@ import { runYaraSubset, type YaraRuleResult } from "@/lib/yara-subset";
 import type { ApiSubmission } from "@/lib/api-types";
 import { Binary, Download, Sparkles } from "lucide-react";
 import { RetrohuntPanel } from "@/components/retrohunt-panel";
+import { LiveHuntsPanel } from "@/components/live-hunts-panel";
 
 const RULE_PRESETS: Record<string, { label: string; rule: string }> = {
   injection: {
@@ -258,8 +259,15 @@ export function YaraStudio() {
             </div>
           ))}
         </div>
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-2 space-y-4">
           <RetrohuntPanel rule={rule} />
+          <LiveHuntsPanel
+            rule={rule}
+            onEditRule={(r) => {
+              setRule(r);
+              setResults(null);
+            }}
+          />
         </div>
       </CardContent>
     </Card>

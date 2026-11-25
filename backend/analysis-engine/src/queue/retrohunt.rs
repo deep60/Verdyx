@@ -34,6 +34,8 @@ const IDLE_POLL: Duration = Duration::from_secs(3);
 pub trait Hunter: Send + Sync {
     /// Rule names that match the file at `path`.
     fn scan_file(&self, path: &std::path::Path) -> Result<Vec<String>, String>;
+    /// Rule names that match these bytes, giving up after `timeout_secs`.
+    fn scan_bytes(&self, data: &[u8], timeout_secs: i32) -> Result<Vec<String>, String>;
 }
 
 #[cfg(feature = "yara-engine")]
@@ -46,6 +48,13 @@ mod engine {
         fn scan_file(&self, path: &std::path::Path) -> Result<Vec<String>, String> {
             self.0
                 .scan_file(path, FILE_TIMEOUT_SECS)
+                .map(|hits| hits.iter().map(|r| r.identifier.to_string()).collect())
+                .map_err(|e| e.to_string())
+        }
+
+        fn scan_bytes(&self, data: &[u8], timeout_secs: i32) -> Result<Vec<String>, String> {
+            self.0
+                .scan_mem(data, timeout_secs)
                 .map(|hits| hits.iter().map(|r| r.identifier.to_string()).collect())
                 .map_err(|e| e.to_string())
         }

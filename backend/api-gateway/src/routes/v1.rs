@@ -59,6 +59,7 @@ pub fn create_routes(state: AppState) -> Router {
         .nest("/orgs", team_routes())
         .nest("/invitations", invitation_routes())
         .nest("/retrohunts", retrohunt_routes())
+        .nest("/livehunts", livehunt_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_mw::auth_middleware,
@@ -277,6 +278,14 @@ fn retrohunt_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(r::list).post(r::start))
         .route("/{id}", get(r::get).delete(r::cancel_or_remove))
+}
+
+fn livehunt_routes() -> Router<AppState> {
+    use crate::handlers::livehunt as l;
+    Router::new()
+        .route("/", get(l::list).post(l::create))
+        .route("/{id}", get(l::get).patch(l::update).delete(l::remove))
+        .route("/{id}/seen", post(l::mark_seen))
 }
 
 fn invitation_routes() -> Router<AppState> {

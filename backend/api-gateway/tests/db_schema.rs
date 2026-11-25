@@ -109,3 +109,132 @@ async fn seeded_engines_carry_no_invented_stats() {
         );
     }
 }
+
+/// Which live hunts cover an upload (the analysis engine runs this query).
+#[tokio::test]
+async fn live_hunts_only_see_their_owners_or_teams_uploads() {
+    let Some(database_url) = test_database_url() else {
+        eprintln!("skipping api-gateway schema test; API_GATEWAY_DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await
+        .expect("connect to test database");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations apply cleanly");
+
+    let mut tx = pool.begin().await.expect("begin tx");
+    let (alice, bob, carol) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let team = Uuid::new_v4();
+    sqlx::query("INSERT INTO organizations (id, name, created_by) VALUES ($1, 'SOC', $2)")
+        .bind(team)
+        .bind(alice)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    for (user, role) in [(alice, "owner"), (bob, "member")] {
+        sqlx::query(
+            "INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, $3)",
+        )
+        .bind(team)
+        .bind(user)
+        .bind(role)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+
+    let hunt = |owner: Uuid, team: Option<Uuid>, enabled: bool| {
+        let id = Uuid::new_v4();
+        (id, owner, team, enabled)
+    };
+    let alice_own = hunt(alice, None, true);
+    let alice_off = hunt(alice, None, false);
+    let bob_team = hunt(bob, Some(team), true);
+    let carol_team = hunt(carol, Some(team), true); // carol isn't in the team
+    for (id, owner, t, enabled) in [alice_own, alice_off, bob_team, carol_team] {
+        sqlx::query(
+            "INSERT INTO live_hunts (id, user_id, organization_id, name, rule_text, enabled) \
+             VALUES ($1, $2, $3, 'h', 'rule a { condition: true }', $4)",
+        )
+        .bind(id)
+        .bind(owner)
+        .bind(t)
+        .bind(enabled)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+
+    let scope_sql = format!(
+        "SELECT id FROM ({}) s",
+        shared::live_hunts::IN_SCOPE_SQL.replace("SELECT h.id, h.rule_text", "SELECT h.id")
+    );
+    let in_scope = |submitter: Option<Uuid>, upload_team: Option<Uuid>| {
+        sqlx::query_scalar::<_, Uuid>(&scope_sql)
+            .bind(submitter)
+            .bind(upload_team)
+    };
+
+    // Alice's own upload: her enabled personal hunt only.
+    let mut ids = in_scope(Some(alice), None)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(ids, vec![alice_own.0]);
+
+    // Bob's own upload: nobody's (Bob has no personal hunt; team hunts need a team upload).
+    ids = in_scope(Some(bob), None).fetch_all(&mut *tx).await.unwrap();
+    assert!(ids.is_empty());
+
+    // An upload saved to the team, by Alice: her personal hunt and Bob's team
+    // hunt; never Carol's, who isn't a member.
+    ids = in_scope(Some(alice), Some(team))
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    ids.sort();
+    let mut want = vec![alice_own.0, bob_team.0];
+    want.sort();
+    assert_eq!(ids, want);
+
+    // Anonymous upload: nobody's.
+    ids = in_scope(None, None).fetch_all(&mut *tx).await.unwrap();
+    assert!(ids.is_empty());
+
+    // Bob leaves the team: his team hunt stops matching.
+    sqlx::query("DELETE FROM organization_members WHERE user_id = $1")
+        .bind(bob)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    ids = in_scope(Some(alice), Some(team))
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(ids, vec![alice_own.0]);
+
+    // A match is recorded once per hunt and upload.
+    let sub = Uuid::new_v4();
+    for _ in 0..2 {
+        sqlx::query(shared::live_hunts::RECORD_MATCH_SQL)
+            .bind(alice_own.0)
+            .bind(sub)
+            .bind(vec!["a".to_string()])
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    let n: i32 = sqlx::query_scalar("SELECT matches FROM live_hunts WHERE id = $1")
+        .bind(alice_own.0)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+
+    tx.rollback().await.expect("rollback");
+}

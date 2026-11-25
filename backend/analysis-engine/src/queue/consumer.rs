@@ -39,6 +39,8 @@ struct Submission {
     pub file_path: Option<String>,
     pub submission_type: String,
     pub analysis_status: String,
+    /// The team the upload was saved to, if any.
+    pub organization_id: Option<Uuid>,
 }
 
 /// Start the analysis queue consumer worker
@@ -412,6 +414,21 @@ async fn process_submission(
         _ => return Err(anyhow!("Submission has no file_path")),
     };
 
+    // Step 3b: the uploader's (and their team's) live YARA hunts, on uploaded
+    // files and emails. Not on fetched pages: those aren't uploads.
+    if submission.submission_type != "url" {
+        if let Some(data) = file_data.as_deref() {
+            super::livehunt::run_for_upload(
+                db_pool,
+                submission_id,
+                submission.submitter_id.filter(|u| !u.is_nil()),
+                submission.organization_id,
+                data,
+            )
+            .await;
+        }
+    }
+
     // Step 4: Run ClamAV + other analyzers on the bytes, when there are any.
     let mut analysis_result = match file_data {
         Some(file_data) => {
@@ -567,7 +584,7 @@ async fn fetch_submission_from_db(db_pool: &PgPool, submission_id: Uuid) -> Resu
     let submission = sqlx::query_as::<_, Submission>(
         r#"
         SELECT id, submitter_id, file_hash, url, original_filename, file_size,
-               mime_type, file_path, submission_type, analysis_status
+               mime_type, file_path, submission_type, analysis_status, organization_id
         FROM submissions
         WHERE id = $1
         "#,
