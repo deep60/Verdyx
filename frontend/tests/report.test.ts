@@ -192,3 +192,48 @@ describe("scan report", () => {
     expect(md).not.toMatch(/ETH|stake/i);
   });
 });
+
+describe("sandbox report", () => {
+  it("shows what the sandboxes saw and links to VirusTotal", () => {
+    const facts = engineFacts(
+      engine("VirusTotal sandbox", {
+        verdict: "malicious",
+        metadata: {
+          sandbox_status: "complete",
+          reference: "https://www.virustotal.com/gui/file/abc/behavior",
+          behaviour: {
+            verdicts: ["MALWARE", "RANSOM"],
+            techniques: [
+              { id: "T1486", description: "Encrypts files", severity: "high" },
+              { id: "T1573", description: "Uses HTTPS", severity: "info" },
+            ],
+            processes: ["tasksche.exe"],
+            files_written: [],
+            dns: ["example.test"],
+            ips: ["10.0.0.1:445"],
+          },
+        },
+      }),
+    );
+    const byLabel = Object.fromEntries(facts.map((f) => [f.label, f]));
+    expect(byLabel["Sandbox verdict"]).toMatchObject({ value: "MALWARE, RANSOM", tone: "danger" });
+    expect(byLabel["ATT&CK T1486"]).toMatchObject({ value: "Encrypts files (high)", tone: "danger" });
+    expect(byLabel["ATT&CK T1573"].value).toBe("Uses HTTPS");
+    expect(byLabel["Processes started"].value).toBe("tasksche.exe");
+    expect(byLabel["Network"].value).toBe("example.test, 10.0.0.1:445");
+    expect(byLabel["Files written"]).toBeUndefined();
+    expect(byLabel["Source report"].href).toBe("https://www.virustotal.com/gui/file/abc/behavior");
+  });
+
+  it("says when the report is still coming", () => {
+    const facts = engineFacts(
+      engine("VirusTotal sandbox", { verdict: "unknown", vote: "no_record", metadata: { sandbox_status: "pending" } }),
+    );
+    expect(facts.some((f) => f.label === "Sandbox" && f.value.includes("updates when it's ready"))).toBe(true);
+  });
+
+  it("never links to anything but https", () => {
+    const facts = engineFacts(engine("X", { metadata: { reference: "javascript:alert(1)" } }));
+    expect(facts.find((f) => f.label === "Source report")).toBeUndefined();
+  });
+});

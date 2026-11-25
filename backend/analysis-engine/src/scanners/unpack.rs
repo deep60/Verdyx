@@ -27,6 +27,17 @@ pub struct UnpackLimits {
     pub max_total_bytes: u64,
 }
 
+impl UnpackLimits {
+    /// Deep Inspection: twice the files per archive. The byte limits stay,
+    /// because they are what keeps the engine inside its memory limit.
+    pub fn deep() -> Self {
+        Self {
+            max_members: 50,
+            ..Self::default()
+        }
+    }
+}
+
 impl Default for UnpackLimits {
     fn default() -> Self {
         Self {

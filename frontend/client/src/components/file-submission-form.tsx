@@ -11,6 +11,30 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth-context";
 import { canScan, type TeamSummary } from "@/lib/teams";
 
+/** What each analysis type runs. Mirrors `analysis_options_for` in the analysis engine. */
+const ANALYSIS_TYPES = [
+  {
+    value: "full",
+    label: "Full Analysis",
+    description: "Every engine: ClamAV, YARA, signatures, static, heuristic and ML analysis, reputation lookups, and the files inside archives.",
+  },
+  {
+    value: "quick",
+    label: "Quick Scan",
+    description: "Reputation lookups (VirusTotal, MalwareBazaar), ClamAV, YARA and signatures. Fastest; archives aren't unpacked.",
+  },
+  {
+    value: "deep",
+    label: "Deep Inspection",
+    description: "Full Analysis, plus archives inside archives one level deeper and up to 50 files per archive.",
+  },
+  {
+    value: "behavioral",
+    label: "Behavioral Analysis",
+    description: "Deep Inspection, plus VirusTotal's sandboxes run the file and report what it does: processes, files, network, MITRE ATT&CK.",
+  },
+] as const;
+
 export function FileSubmissionForm() {
   const [submissionMode, setSubmissionMode] = useState<"file" | "url" | "email">("file");
   const [file, setFile] = useState<File | null>(null);
@@ -316,12 +340,25 @@ export function FileSubmissionForm() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="full">Full Analysis</SelectItem>
-              <SelectItem value="quick">Quick Scan</SelectItem>
-              <SelectItem value="deep">Deep Inspection</SelectItem>
-              <SelectItem value="behavioral">Behavioral Analysis</SelectItem>
+              {ANALYSIS_TYPES.map((t) => (
+                <SelectItem key={t.value} value={t.value}>
+                  {t.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground mt-1" data-testid="analysis-type-description">
+            {submissionMode === "url"
+              ? "URL scans always run every URL engine; the analysis type applies to files and emails."
+              : ANALYSIS_TYPES.find((t) => t.value === analysisType)?.description}
+          </p>
+          {analysisType === "behavioral" && submissionMode !== "url" && (
+            <p className="text-xs text-warning mt-2" data-testid="behavioral-notice">
+              If VirusTotal hasn't seen this file, it is uploaded there to be run, and VirusTotal's users can then
+              download it. Don't use this for private documents. The sandbox report is added to the scan within about
+              30 minutes.
+            </p>
+          )}
         </div>
         <div>
           <label className="block text-sm font-medium mb-2">Bounty Amount (ETH)</label>
