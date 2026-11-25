@@ -119,7 +119,7 @@ export function ExportReport({
             a.confidence ?? "",
             a.processingTimeMs ?? "",
             engineFacts(a)
-              .map((f) => `${f.label}: ${f.value}`)
+              .map((f) => `${f.label}: ${f.href ?? f.value}`)
               .join("; "),
           ]
             .map(csvCell)

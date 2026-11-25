@@ -14,6 +14,7 @@ pub mod url_policy;
 pub mod url_reputation;
 pub mod url_scanner;
 pub mod url_verdicts;
+pub mod vt_sandbox;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

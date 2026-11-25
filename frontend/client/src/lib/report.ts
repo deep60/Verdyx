@@ -78,6 +78,8 @@ export interface Fact {
   label: string;
   value: string;
   tone?: Tone;
+  /** Shown as a link to the source's own report. */
+  href?: string;
 }
 
 type Meta = Record<string, unknown>;
@@ -195,9 +197,55 @@ export function engineFacts(a: ApiAnalysis): Fact[] {
     facts.push({ label: "Not scanned", value: `${skipped} file(s): size, count or time limit`, tone: "muted" });
   }
 
+  facts.push(...sandboxFacts(m));
+
   const advisory = str(m.advisory_verdict);
   if (advisory) facts.push({ label: "Prediction (not counted)", value: advisory });
 
+  const reference = str(m.reference);
+  if (reference && /^https:\/\//.test(reference)) {
+    facts.push({ label: "Source report", value: "Open on VirusTotal", href: reference });
+  }
+
+  return facts;
+}
+
+const strs = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x.trim()) : [];
+
+function listed(items: string[], max = 5): string {
+  return items.length > max ? `${items.slice(0, max).join(", ")} and ${items.length - max} more` : items.join(", ");
+}
+
+/** What VirusTotal's sandboxes saw the file do (Behavioral Analysis). */
+export function sandboxFacts(m: Meta): Fact[] {
+  const facts: Fact[] = [];
+  const status = str(m.sandbox_status);
+  if (status === "pending") {
+    facts.push({ label: "Sandbox", value: "Running in VirusTotal's sandboxes; this report updates when it's ready", tone: "muted" });
+  }
+  const b = m.behaviour && typeof m.behaviour === "object" ? (m.behaviour as Meta) : undefined;
+  if (!b) return facts;
+
+  const verdicts = strs(b.verdicts);
+  if (verdicts.length > 0) {
+    const bad = verdicts.some((v) => v !== "CLEAN" && v !== "UNKNOWN");
+    facts.push({ label: "Sandbox verdict", value: verdicts.join(", "), tone: bad ? "danger" : undefined });
+  }
+  for (const t of arr(b.techniques).slice(0, 6)) {
+    const sev = str(t.severity);
+    facts.push({
+      label: `ATT&CK ${str(t.id) ?? ""}`.trim(),
+      value: [str(t.description), sev && sev !== "info" ? `(${sev})` : ""].filter(Boolean).join(" "),
+      tone: sev === "high" ? "danger" : sev === "medium" ? "warning" : "muted",
+    });
+  }
+  const processes = strs(b.processes);
+  if (processes.length > 0) facts.push({ label: "Processes started", value: listed(processes) });
+  const files = strs(b.files_written);
+  if (files.length > 0) facts.push({ label: "Files written", value: listed(files) });
+  const network = [...strs(b.dns), ...strs(b.ips)];
+  if (network.length > 0) facts.push({ label: "Network", value: listed(network) });
   return facts;
 }
 
@@ -308,7 +356,7 @@ export function markdownReport(r: ReportInput, generatedAt = new Date()): string
   for (const a of sortEngines(r.analyses)) {
     const role = engineRole(a);
     const evidence = engineFacts(a)
-      .map((f) => (f.value ? `${f.label}: ${f.value}` : f.label))
+      .map((f) => (f.value ? `${f.label}: ${f.href ?? f.value}` : f.label))
       .join("; ")
       .replace(/\|/g, "\\|");
     const confidence = typeof a.confidence === "number" ? `${a.confidence}%` : "—";

@@ -100,7 +100,15 @@ function EngineRow({ analysis }: { analysis: ApiAnalysis }) {
           {facts.map((f, i) => (
             <div key={i} className="contents">
               <dt className="text-muted-foreground">{f.label}</dt>
-              <dd className={`break-words ${f.tone ? TONE_TEXT[f.tone] : "text-foreground/90"}`}>{f.value || "—"}</dd>
+              <dd className={`break-words ${f.tone ? TONE_TEXT[f.tone] : "text-foreground/90"}`}>
+                {f.href ? (
+                  <a href={f.href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-primary">
+                    {f.value}
+                  </a>
+                ) : (
+                  f.value || "—"
+                )}
+              </dd>
             </div>
           ))}
         </dl>

@@ -420,8 +420,47 @@ pub struct AnalysisOptions {
     pub enable_ml_analysis: bool,
     pub enable_heuristic_analysis: bool,
     pub enable_signature_analysis: bool,
+    /// Unpack archives and scan the files inside.
+    pub unpack_archives: bool,
+    /// Deep Inspection: follow archives one level further, take more files
+    /// from each and give them more time.
+    pub deep: bool,
     pub priority: AnalysisPriority,
     pub custom_metadata: HashMap<String, String>,
+}
+
+/// The analysis type picked on the submit form (`metadata.analysisType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AnalysisMode {
+    /// Reputation lookups, ClamAV, YARA and signatures. No unpacking.
+    Quick,
+    /// Every engine. What an unspecified scan gets.
+    #[default]
+    Full,
+    /// Every engine, with deeper archive unpacking.
+    Deep,
+    /// Deep, plus VirusTotal's sandbox report.
+    Behavioral,
+}
+
+impl AnalysisMode {
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+            Some("quick") => Self::Quick,
+            Some("deep") => Self::Deep,
+            Some("behavioral") | Some("behavioural") => Self::Behavioral,
+            _ => Self::Full,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Quick => "quick",
+            Self::Full => "full",
+            Self::Deep => "deep",
+            Self::Behavioral => "behavioral",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -441,6 +480,8 @@ impl Default for AnalysisOptions {
             enable_ml_analysis: true,
             enable_heuristic_analysis: true,
             enable_signature_analysis: true,
+            unpack_archives: true,
+            deep: false,
             priority: AnalysisPriority::Normal,
             custom_metadata: HashMap::new(),
         }
@@ -756,7 +797,15 @@ impl AnalysisEngine {
             detections.push(pdf_det);
         }
 
-        if depth < MAX_ARCHIVE_DEPTH {
+        let max_depth = match (
+            request.analysis_options.unpack_archives,
+            request.analysis_options.deep,
+        ) {
+            (false, _) => 0,
+            (true, false) => MAX_ARCHIVE_DEPTH,
+            (true, true) => DEEP_ARCHIVE_DEPTH,
+        };
+        if depth < max_depth {
             if let Some(det) = self.scan_archive_contents(request, depth).await {
                 detections.push(det);
             }
@@ -790,14 +839,25 @@ impl AnalysisEngine {
 
         // Decompressing is bounded by UnpackLimits; the engine handles one
         // job at a time, so doing it inline costs no other request anything.
-        let mut unpacked = unpack::unpack(&request.file_data, UnpackLimits::default())?;
+        let deep = request.analysis_options.deep;
+        let limits = if deep {
+            UnpackLimits::deep()
+        } else {
+            UnpackLimits::default()
+        };
+        let budget = if deep {
+            DEEP_ARCHIVE_TIME_BUDGET
+        } else {
+            ARCHIVE_TIME_BUDGET
+        };
+        let mut unpacked = unpack::unpack(&request.file_data, limits)?;
         let members = std::mem::take(&mut unpacked.members);
 
         let started = std::time::Instant::now();
         let mut skipped = unpacked.skipped.clone();
         let mut scanned = Vec::new();
         for member in members {
-            if started.elapsed() > ARCHIVE_TIME_BUDGET {
+            if started.elapsed() > budget {
                 skipped.push(format!("{}: archive time limit reached", member.path));
                 continue;
             }
@@ -1645,6 +1705,10 @@ const MAX_ARCHIVE_DEPTH: usize = 2;
 /// Time spent analysing one archive's files before the rest are skipped, so
 /// a large archive can't run past the overall analysis timeout.
 const ARCHIVE_TIME_BUDGET: Duration = Duration::from_secs(60);
+/// Deep Inspection's limits. The whole scan still has to finish within the
+/// engine's analysis timeout (300 s by default).
+const DEEP_ARCHIVE_DEPTH: usize = 3;
+const DEEP_ARCHIVE_TIME_BUDGET: Duration = Duration::from_secs(150);
 
 fn verdict_rank(v: &ThreatVerdict) -> u8 {
     match v {
@@ -1876,6 +1940,8 @@ mod tests {
             enable_ml_analysis: false,
             enable_heuristic_analysis: true,
             enable_signature_analysis: true,
+            unpack_archives: true,
+            deep: false,
             priority: AnalysisPriority::High,
             custom_metadata: HashMap::from([("source".to_string(), "unit_test".to_string())]),
         };
