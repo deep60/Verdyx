@@ -153,6 +153,7 @@ curl -X POST https://api.verdyx.dev/api/v1/submissions/file \
 | [`verdyx` command and JavaScript/TypeScript SDK](sdk/typescript) | `verdyx scan sample.exe https://example.com`, with exit codes for CI |
 | [Python SDK](sdk/python) | `Verdyx().scan("sample.exe").verdict` |
 | [GitHub Action](action) | Scan build artifacts and fail the job on a malicious verdict |
+| [MCP server](sdk/typescript#mcp-server-for-ai-assistants) | `verdyx mcp`: lets Claude, Cursor and other AI assistants scan files and links |
 
 ## Documentation
 
