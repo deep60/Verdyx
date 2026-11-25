@@ -1,6 +1,6 @@
 # verdyx (Python)
 
-A Python SDK for [Verdyx](https://verdyx.dev) malware and URL scanning. Python 3.9 or later, standard library only.
+A Python SDK for [Verdyx](https://verdyx.dev) malware and URL scanning. Python 3.10 or later, standard library only.
 
 ## Install
 

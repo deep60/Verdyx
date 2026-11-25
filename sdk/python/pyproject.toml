@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Verdyx malware and URL scanning: Python SDK"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = []
 keywords = ["malware", "scanner", "security", "threat-intelligence", "yara"]
 classifiers = [
