@@ -58,6 +58,52 @@ Exit codes: `0` everything is fine, `1` an error, a failed scan or a timeout, `2
 verdyx scan --fail-on suspicious dist/*.exe || exit 1
 ```
 
+## MCP server for AI assistants
+
+`verdyx mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio. Claude, Cursor, VS Code and other MCP clients can then scan files and links during a conversation, for example: "is this download safe?" or "check this link before I open it".
+
+| Tool | What it does |
+|---|---|
+| `scan_url` | Scan a URL and return the verdict, each engine's result and the report link |
+| `scan_file` | Upload a local file and return the same |
+| `get_scan_result` | Check an earlier scan by id |
+| `list_engines` | Which engines are online |
+
+Each result comes back as readable text for the model, plus the same data as structured JSON.
+
+**Which files it can read.** `scan_file` uploads files to Verdyx, so an assistant that has been tricked by a malicious web page or document could try to make it upload private files. To stop that:
+- **Allowed folders only:** it reads files only inside the folders in `VERDYX_MCP_ROOTS`, separated by `:` (`;` on Windows).
+- **Default:** without that setting, it uses the folder the server starts in. It never defaults to your home folder or the filesystem root.
+- **No escaping through links:** a symlink that points outside the allowed folders is refused.
+- **No hidden files:** files whose path inside the folder includes a hidden name (`.ssh`, `.aws`, `.env` and so on) are always refused.
+
+Set it to a downloads or quarantine folder, not your whole home folder.
+
+**Claude Code:**
+
+```bash
+claude mcp add verdyx --env VERDYX_API_KEY=vdx_... --env VERDYX_MCP_ROOTS="$HOME/Downloads" -- verdyx mcp
+```
+
+**Claude Desktop, Cursor and other clients** that use a JSON config (`claude_desktop_config.json`, `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "verdyx": {
+      "command": "verdyx",
+      "args": ["mcp"],
+      "env": {
+        "VERDYX_API_KEY": "vdx_...",
+        "VERDYX_MCP_ROOTS": "/Users/you/Downloads"
+      }
+    }
+  }
+}
+```
+
+Until the package is on npm, run `npm link` in this folder first (see Install), or use `"command": "node"` with `"args": ["/path/to/Verdyx/sdk/typescript/bin/verdyx.js", "mcp"]`.
+
 ## The SDK
 
 ```js

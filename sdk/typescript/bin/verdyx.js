@@ -13,6 +13,7 @@ Usage:
   verdyx scan <file-or-url>...   Submit and wait for the verdicts
   verdyx result <scan-id>...     Show the result of earlier scans
   verdyx engines                 List the engines and whether they're online
+  verdyx mcp                     Run as an MCP server (stdio) for AI assistants
 
 Options for scan and result:
   --json                 Print JSON instead of a table
@@ -34,6 +35,8 @@ Environment:
                          your profile page at https://verdyx.dev. Without one,
                          scans are anonymous and more tightly rate limited.
   VERDYX_API_URL         Default https://api.verdyx.dev
+  VERDYX_MCP_ROOTS       For "verdyx mcp": the folders whose files may be uploaded
+                         (default: the current folder, unless it's / or home)
   NO_COLOR               Turn off colours
 
 Exit codes: 0 ok, 1 error or timeout, 2 a verdict reached --fail-on.
@@ -51,6 +54,12 @@ async function main(argv) {
   }
   if (command === "--version" || command === "-V") {
     console.log(VERSION);
+    return 0;
+  }
+  if (command === "mcp") {
+    // stdout belongs to the protocol; everything else goes to stderr.
+    const { runStdio } = await import("../src/mcp.js");
+    await runStdio({ version: VERSION });
     return 0;
   }
 
