@@ -206,7 +206,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
-      <SEO
+      <SEO noindex
         title="Analysis Dashboard — Verdyx Command Center"
         description="Submit files or URLs for multi-engine malware analysis, inspect 36+ website OSINT modules, and see how the backend pipeline works."
       />

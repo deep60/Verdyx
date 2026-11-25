@@ -1,0 +1,12 @@
+# https://verdyx.dev/robots.txt
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /profile
+Disallow: /teams
+Disallow: /marketplace
+Disallow: /reset-password
+Disallow: /forgot-password
+
+Sitemap: https://verdyx.dev/sitemap.xml

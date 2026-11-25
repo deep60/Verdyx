@@ -69,7 +69,7 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SEO
+      <SEO noindex
         title="Profile, Wallet & Webhooks — Verdyx"
         description="Manage your Verdyx profile, wallet stakes & withdrawals, outbound webhooks, and submission history."
       />

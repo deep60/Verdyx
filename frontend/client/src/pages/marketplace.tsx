@@ -122,7 +122,7 @@ export default function Marketplace() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SEO title="Bounty Marketplace" description="Analyze intelligence reports and claim rewards by staking confidence." />
+      <SEO noindex title="Bounty Marketplace" description="Analyze intelligence reports and claim rewards by staking confidence." />
       <Navigation />
 
       <main id="main-content" tabIndex={-1} className="relative z-10 py-8">

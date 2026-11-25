@@ -227,7 +227,7 @@ export default function AnalysisDetails() {
   if (submissionError || analysesError) {
     return (
       <div className="min-h-screen bg-background text-foreground">
-        <SEO title="Scan not found" description="This scan couldn't be loaded." />
+        <SEO noindex title="Scan not found" description="This scan couldn't be loaded." />
         <Navigation />
         <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
           <ErrorState
@@ -246,7 +246,7 @@ export default function AnalysisDetails() {
   if (submissionLoading || !submission) {
     return (
       <div className="min-h-screen bg-background text-foreground">
-        <SEO title="Loading scan" description="Loading scan results." />
+        <SEO noindex title="Loading scan" description="Loading scan results." />
         <Navigation />
         <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
           <div className="mb-8 grid gap-6 md:grid-cols-3">
@@ -275,7 +275,7 @@ export default function AnalysisDetails() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <SEO title={`Scan: ${target}`} description="Verdyx scan results: verdict, per-engine evidence and checks." />
+      <SEO noindex title={`Scan: ${target}`} description="Verdyx scan results: verdict, per-engine evidence and checks." />
       <Navigation />
 
       <main id="main-content" tabIndex={-1} className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
