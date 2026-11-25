@@ -67,7 +67,7 @@ export function Footer({ tag = "commit · reveal" }: FooterProps) {
                 </div>
                 <ul className="space-y-2.5">
                   {section.links.map((link) => (
-                    <li key={link.href}>
+                    <li key={`${link.href}-${link.label}`}>
                       <Link
                         href={link.href}
                         className="text-sm text-muted-foreground hover:text-primary transition-colors inline-flex items-center gap-1 group"

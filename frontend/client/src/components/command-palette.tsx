@@ -155,7 +155,7 @@ export function CommandPalette() {
             onSelect={() => openDashboardTab("scanner")}
           >
             <LayoutDashboard className="h-4 w-4" />
-            <span>Live Scanner &amp; Feed (File / Email / URL)</span>
+            <span>New scan (file, URL or email)</span>
             <CommandShortcut>SCAN</CommandShortcut>
           </CommandItem>
           <CommandItem
@@ -176,7 +176,7 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem
             value="scan-diff-side-by-side-comparison"
-            onSelect={() => openDashboardTab("diff")}
+            onSelect={() => openDashboardTab("compare")}
           >
             <GitCompare className="h-4 w-4" />
             <span>Scan Diff · Compare Saved Scans or Live Domains</span>
@@ -184,7 +184,7 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem
             value="backend-pipeline-worker-telemetry"
-            onSelect={() => openDashboardTab("pipeline")}
+            onSelect={() => runCommand(() => setLocation("/#architecture"))}
           >
             <Cpu className="h-4 w-4" />
             <span>Backend Pipeline &amp; 9-Service Architecture</span>

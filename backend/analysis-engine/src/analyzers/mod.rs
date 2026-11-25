@@ -1535,21 +1535,23 @@ impl AnalysisEngine {
                     Ok(_) => (
                         "online",
                         "clamd",
-                        format!(
-                            "ClamAV daemon reachable at {}",
-                            self.config.clamav_analyzer.address
-                        ),
+                        // The daemon's address is internal; this text is public.
+                        "ClamAV daemon connected; signatures checked on every file".to_string(),
                         None,
                     ),
-                    Err(e) => (
-                        "unavailable",
-                        "clamd",
-                        format!(
-                            "Cannot connect to ClamAV daemon at {}",
-                            self.config.clamav_analyzer.address
-                        ),
-                        Some(e.to_string()),
-                    ),
+                    Err(e) => {
+                        tracing::warn!(
+                            address = %self.config.clamav_analyzer.address,
+                            error = %e,
+                            "ClamAV daemon unreachable"
+                        );
+                        (
+                            "unavailable",
+                            "clamd",
+                            "Cannot connect to the ClamAV daemon".to_string(),
+                            Some("ClamAV daemon unreachable".to_string()),
+                        )
+                    }
                 }
             }
         } else {
