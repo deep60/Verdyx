@@ -6,10 +6,14 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::analyzers::{AnalysisEngine, AnalysisOptions, FileAnalysisRequest};
+use crate::analyzers::{AnalysisEngine, AnalysisMode, AnalysisOptions, FileAnalysisRequest};
 use crate::models::analysis_result::without_nul;
 use crate::scanners::url_scanner::UrlScanner;
 use crate::scanners::url_verdicts::{url_detections, URL_CHECKS};
+use crate::scanners::vt_sandbox::{
+    sandbox_detection, SandboxClient, SandboxOutcome, MAX_UPLOAD_BYTES, POLL_ATTEMPTS,
+    POLL_INTERVAL, SANDBOX,
+};
 use crate::scanners::Scanner;
 use crate::storage::S3Client;
 
@@ -39,6 +43,8 @@ struct Submission {
     pub file_path: Option<String>,
     pub submission_type: String,
     pub analysis_status: String,
+    /// `metadata.analysisType` from the submit form.
+    pub analysis_type: Option<String>,
 }
 
 /// Start the analysis queue consumer worker
@@ -50,6 +56,16 @@ pub async fn start_analysis_worker(
     analysis_engine: Arc<Mutex<AnalysisEngine>>,
 ) -> Result<()> {
     info!("Starting analysis queue consumer worker");
+
+    let sandbox = SandboxClient::from_env();
+    info!(
+        "Behavioral analysis (VirusTotal sandbox): {}",
+        if sandbox.is_some() {
+            "on"
+        } else {
+            "off (VIRUSTOTAL_API_KEY not set)"
+        }
+    );
 
     // Ensure submissions.confidence_score is DOUBLE PRECISION so 0..100 f64 scores never overflow DECIMAL(5,4)
     let _ = sqlx::query(
@@ -112,6 +128,7 @@ pub async fn start_analysis_worker(
             &s3_client,
             &url_scanner,
             &analysis_engine,
+            sandbox.as_ref(),
         )
         .await
         {
@@ -359,13 +376,18 @@ async fn process_submission(
     s3_client: &S3Client,
     url_scanner: &UrlScanner,
     analysis_engine: &Arc<Mutex<AnalysisEngine>>,
+    sandbox: Option<&SandboxClient>,
 ) -> Result<()> {
     // Step 2: Fetch submission from database
     let submission = fetch_submission_from_db(db_pool, submission_id).await?;
+    let mode = AnalysisMode::parse(submission.analysis_type.as_deref());
 
     info!(
-        "Processing submission: id={}, filename={:?}, file_path={:?}",
-        submission.id, submission.original_filename, submission.file_path
+        "Processing submission: id={}, filename={:?}, file_path={:?}, mode={}",
+        submission.id,
+        submission.original_filename,
+        submission.file_path,
+        mode.as_str()
     );
 
     // Update status to analyzing
@@ -412,6 +434,17 @@ async fn process_submission(
         _ => return Err(anyhow!("Submission has no file_path")),
     };
 
+    // Behavioral scans of files keep what the sandbox step needs: the hash
+    // and, when small enough to upload, the bytes.
+    let is_file = submission.submission_type != "url";
+    let sandbox_input = match (&file_data, mode, is_file) {
+        (Some(data), AnalysisMode::Behavioral, true) => Some((
+            sha256_hex(data),
+            (data.len() <= MAX_UPLOAD_BYTES).then(|| data.clone()),
+        )),
+        _ => None,
+    };
+
     // Step 4: Run ClamAV + other analyzers on the bytes, when there are any.
     let mut analysis_result = match file_data {
         Some(file_data) => {
@@ -430,7 +463,7 @@ async fn process_submission(
                 filename,
                 file_data,
                 file_hashes: None,
-                analysis_options: analysis_options_for(&submission.submission_type),
+                analysis_options: analysis_options_for(&submission.submission_type, mode),
             };
 
             let mut engine = analysis_engine.lock().await;
@@ -456,6 +489,25 @@ async fn process_submission(
     }
     if let Some(err) = page_error {
         note_unreachable_page(&mut analysis_result, &err);
+    }
+
+    // Step 4b: Behavioral Analysis asks VirusTotal's sandboxes.
+    let mut follow_up_sha = None;
+    if let Some((sha256, bytes)) = sandbox_input {
+        let filename = submission
+            .original_filename
+            .clone()
+            .unwrap_or_else(|| "sample.bin".to_string());
+        let started = std::time::Instant::now();
+        let outcome = sandbox_step(sandbox, &sha256, &filename, bytes).await;
+        if outcome == SandboxOutcome::Submitted {
+            follow_up_sha = Some(sha256.clone());
+        }
+        analysis_result.add_detection(sandbox_detection(
+            &outcome,
+            &sha256,
+            started.elapsed().as_millis() as u64,
+        ));
     }
 
     info!(
@@ -499,7 +551,112 @@ async fn process_submission(
         submission_id, is_malicious, confidence_score
     );
 
+    // The sandbox report comes later; wait for it off the queue, so other
+    // scans don't wait behind it.
+    if let (Some(sha256), Some(client)) = (follow_up_sha, sandbox) {
+        tokio::spawn(follow_up_sandbox(
+            client.clone(),
+            redis_client.clone(),
+            db_pool.clone(),
+            submission_id,
+            sha256,
+            analysis_result,
+        ));
+    }
+
     Ok(())
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(data))
+}
+
+/// Looks up VirusTotal's behaviour report and, when there is none, uploads
+/// the file so the sandboxes run it.
+async fn sandbox_step(
+    sandbox: Option<&SandboxClient>,
+    sha256: &str,
+    filename: &str,
+    bytes: Option<Vec<u8>>,
+) -> SandboxOutcome {
+    let Some(client) = sandbox else {
+        return SandboxOutcome::Skipped(
+            "Behavioral analysis needs a VirusTotal key, and none is configured.".to_string(),
+        );
+    };
+    match client.behaviour(sha256).await {
+        Ok(Some(report)) => SandboxOutcome::Report(report),
+        Ok(None) => match bytes {
+            None => SandboxOutcome::Skipped(
+                "VirusTotal has no sandbox report for this file, and files over 32 MB aren't uploaded.".to_string(),
+            ),
+            Some(bytes) => match client.upload(filename, bytes).await {
+                Ok(()) => SandboxOutcome::Submitted,
+                Err(e) => SandboxOutcome::Error(e.to_string()),
+            },
+        },
+        Err(e) => SandboxOutcome::Error(e.to_string()),
+    }
+}
+
+/// Polls for the report of an uploaded file, then stores the scan again
+/// with the sandbox's vote. A worker restart loses the wait; the report then
+/// keeps saying "pending", and VirusTotal's link still shows the behaviour.
+async fn follow_up_sandbox(
+    client: SandboxClient,
+    redis_client: redis::Client,
+    db_pool: PgPool,
+    submission_id: Uuid,
+    sha256: String,
+    mut result: crate::models::analysis_result::AnalysisResult,
+) {
+    let started = std::time::Instant::now();
+    let mut outcome = SandboxOutcome::TimedOut;
+    for _ in 0..POLL_ATTEMPTS {
+        tokio::time::sleep(POLL_INTERVAL).await;
+        match client.behaviour(&sha256).await {
+            Ok(Some(report)) => {
+                outcome = SandboxOutcome::Report(report);
+                break;
+            }
+            Ok(None) => {}
+            Err(e) => warn!("Sandbox report for {submission_id} not read yet: {e}"),
+        }
+    }
+    info!(
+        "Sandbox follow-up for {submission_id}: {}",
+        match &outcome {
+            SandboxOutcome::Report(_) => "report received",
+            _ => "no report in time",
+        }
+    );
+
+    result.detections.retain(|d| d.engine_name != SANDBOX);
+    result.add_detection(sandbox_detection(
+        &outcome,
+        &sha256,
+        started.elapsed().as_millis() as u64,
+    ));
+    let (is_malicious, confidence) = calculate_verdict(&result);
+    if let Err(e) =
+        store_analysis_results(&db_pool, submission_id, is_malicious, confidence, &result).await
+    {
+        error!("Could not store the sandbox report for {submission_id}: {e}");
+        return;
+    }
+    let _ = publish_ws_event(
+        &redis_client,
+        WS_CHANNEL_ANALYSIS_COMPLETED,
+        &serde_json::json!({
+            "submission_id": submission_id.to_string(),
+            "status": "completed",
+            "is_malicious": is_malicious,
+            "confidence_score": confidence,
+            "detections_count": result.detections.len()
+        }),
+    )
+    .await;
 }
 
 /// Engine name for the page itself, shown when it couldn't be loaded.
@@ -567,7 +724,8 @@ async fn fetch_submission_from_db(db_pool: &PgPool, submission_id: Uuid) -> Resu
     let submission = sqlx::query_as::<_, Submission>(
         r#"
         SELECT id, submitter_id, file_hash, url, original_filename, file_size,
-               mime_type, file_path, submission_type, analysis_status
+               mime_type, file_path, submission_type, analysis_status,
+               metadata ->> 'analysisType' AS analysis_type
         FROM submissions
         WHERE id = $1
         "#,
@@ -687,14 +845,36 @@ async fn url_engine_votes(
 ///
 /// YARA and the signature matcher still read the HTML, where they can find
 /// phishing kits and web shells.
-fn analysis_options_for(submission_type: &str) -> AnalysisOptions {
-    let is_page = submission_type == "url";
-    AnalysisOptions {
-        enable_static_analysis: !is_page,
-        enable_heuristic_analysis: !is_page,
-        enable_hash_analysis: !is_page,
-        enable_ml_analysis: !is_page,
-        ..AnalysisOptions::default()
+///
+/// For files the analysis type picks the engines:
+/// - Quick Scan: reputation lookups, ClamAV, YARA and signatures. The
+///   slower static, heuristic and ML analysis and archive unpacking are off.
+/// - Full Analysis: every engine.
+/// - Deep Inspection and Behavioral Analysis: every engine, with deeper
+///   archive unpacking (Behavioral adds the sandbox step itself).
+fn analysis_options_for(submission_type: &str, mode: AnalysisMode) -> AnalysisOptions {
+    if submission_type == "url" {
+        return AnalysisOptions {
+            enable_static_analysis: false,
+            enable_heuristic_analysis: false,
+            enable_hash_analysis: false,
+            enable_ml_analysis: false,
+            ..AnalysisOptions::default()
+        };
+    }
+    match mode {
+        AnalysisMode::Quick => AnalysisOptions {
+            enable_static_analysis: false,
+            enable_heuristic_analysis: false,
+            enable_ml_analysis: false,
+            unpack_archives: false,
+            ..AnalysisOptions::default()
+        },
+        AnalysisMode::Full => AnalysisOptions::default(),
+        AnalysisMode::Deep | AnalysisMode::Behavioral => AnalysisOptions {
+            deep: true,
+            ..AnalysisOptions::default()
+        },
     }
 }
 
@@ -864,6 +1044,7 @@ async fn publish_ws_event(
 #[cfg(test)]
 mod analysis_options_tests {
     use super::{analysis_options_for, detection_metadata};
+    use crate::analyzers::AnalysisMode;
     use crate::models::analysis_result::{
         DetectionResult, EngineType, SeverityLevel, ThreatVerdict,
     };
@@ -900,7 +1081,7 @@ mod analysis_options_tests {
 
     #[test]
     fn web_pages_skip_analyzers_built_for_program_files() {
-        let options = analysis_options_for("url");
+        let options = analysis_options_for("url", AnalysisMode::Deep);
         assert!(!options.enable_static_analysis);
         assert!(!options.enable_heuristic_analysis);
         assert!(options.enable_signature_analysis);
@@ -912,9 +1093,31 @@ mod analysis_options_tests {
 
     #[test]
     fn files_run_every_analyzer() {
-        let options = analysis_options_for("file");
+        let options = analysis_options_for("file", AnalysisMode::Full);
         assert!(options.enable_static_analysis);
         assert!(options.enable_heuristic_analysis);
+        assert!(options.unpack_archives);
+        assert!(!options.deep);
+    }
+
+    #[test]
+    fn each_analysis_type_picks_its_engines() {
+        let quick = analysis_options_for("file", AnalysisMode::Quick);
+        assert!(quick.enable_hash_analysis && quick.enable_signature_analysis);
+        assert!(!quick.enable_static_analysis && !quick.enable_ml_analysis);
+        assert!(!quick.unpack_archives);
+
+        for mode in [AnalysisMode::Deep, AnalysisMode::Behavioral] {
+            let o = analysis_options_for("file", mode);
+            assert!(o.deep && o.unpack_archives && o.enable_static_analysis);
+        }
+        // Unknown or missing values are a Full scan.
+        assert_eq!(AnalysisMode::parse(None), AnalysisMode::Full);
+        assert_eq!(
+            AnalysisMode::parse(Some("Behavioral")),
+            AnalysisMode::Behavioral
+        );
+        assert_eq!(AnalysisMode::parse(Some("nonsense")), AnalysisMode::Full);
     }
 }
 
