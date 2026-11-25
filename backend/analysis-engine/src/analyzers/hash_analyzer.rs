@@ -401,6 +401,26 @@ struct VirusTotalEngine {
     engine_update: Option<String>,
 }
 
+/// VirusTotal detections at which the file counts as confirmed malware: the
+/// verdict is Malicious whatever engines that found nothing say.
+const VT_CONFIRMED_DETECTIONS: u32 = 10;
+/// VirusTotal detections at which engines that found nothing can't clear the
+/// file: the verdict is at least Suspicious. One or two detections are often a
+/// single vendor's false positive, so they stay an ordinary vote.
+const VT_STRONG_DETECTIONS: u32 = 3;
+
+/// The consensus key for a VirusTotal result with this many detections.
+fn virustotal_weight(malicious: u32) -> Option<&'static str> {
+    use crate::models::analysis_result::{AUTHORITATIVE_KEY, STRONG_SIGNAL_KEY};
+    if malicious >= VT_CONFIRMED_DETECTIONS {
+        Some(AUTHORITATIVE_KEY)
+    } else if malicious >= VT_STRONG_DETECTIONS {
+        Some(STRONG_SIGNAL_KEY)
+    } else {
+        None
+    }
+}
+
 /// Enhanced hash-based threat analyzer
 pub struct HashAnalyzer {
     config: HashAnalyzerConfig,
@@ -865,6 +885,11 @@ impl HashAnalyzer {
             "suspicious_count".to_string(),
             serde_json::Value::Number(stats.suspicious.into()),
         );
+        // How much the consensus trusts this verdict, so engines that found
+        // nothing can't outvote antivirus engines that did.
+        if let Some(key) = virustotal_weight(stats.malicious) {
+            metadata.insert(key.to_string(), serde_json::Value::Bool(true));
+        }
 
         if let Some(size) = response.data.attributes.size {
             metadata.insert(
@@ -1642,6 +1667,22 @@ mod tests {
         let analyzer = HashAnalyzer::new(HashAnalyzerConfig::default()).unwrap();
         let rep = analyzer.parse_virustotal_response(parsed, 5);
         assert!(matches!(rep.verdict, ThreatVerdict::Malicious));
+        // 60 engines agree: engines that found nothing can't outvote that.
+        assert_eq!(
+            rep.metadata
+                .get(crate::models::analysis_result::AUTHORITATIVE_KEY),
+            Some(&serde_json::Value::Bool(true))
+        );
+    }
+
+    #[test]
+    fn virustotal_weight_grows_with_detections() {
+        use crate::models::analysis_result::{AUTHORITATIVE_KEY, STRONG_SIGNAL_KEY};
+        assert_eq!(virustotal_weight(0), None);
+        assert_eq!(virustotal_weight(2), None);
+        assert_eq!(virustotal_weight(3), Some(STRONG_SIGNAL_KEY));
+        assert_eq!(virustotal_weight(9), Some(STRONG_SIGNAL_KEY));
+        assert_eq!(virustotal_weight(10), Some(AUTHORITATIVE_KEY));
     }
 
     #[test]

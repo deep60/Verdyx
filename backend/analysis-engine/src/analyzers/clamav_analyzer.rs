@@ -4,7 +4,7 @@ use tokio::time::timeout;
 use tracing::{error, info, warn};
 
 use crate::models::analysis_result::{
-    DetectionResult, EngineType, SeverityLevel, ThreatCategory, ThreatVerdict,
+    DetectionResult, EngineType, SeverityLevel, ThreatCategory, ThreatVerdict, STRONG_SIGNAL_KEY,
 };
 
 /// Configuration for ClamAV analyzer
@@ -160,6 +160,13 @@ impl ClamAvAnalyzer {
             metadata.insert(
                 "filename".to_string(),
                 serde_json::Value::String(filename.to_string()),
+            );
+            // A named antivirus signature is specific evidence: engines that
+            // found nothing can't clear it. "Potentially unwanted" (PUA.*)
+            // signatures flag adware and tools, so they stay an ordinary vote.
+            metadata.insert(
+                STRONG_SIGNAL_KEY.to_string(),
+                serde_json::Value::Bool(!virus_name.starts_with("PUA.")),
             );
 
             return DetectionResult {
@@ -319,6 +326,22 @@ mod tests {
             Some("Win.Test.EICAR_HDB-1".to_string())
         );
         assert_eq!(ClamAvAnalyzer::parse_signature("stream: OK\0"), None);
+    }
+
+    #[test]
+    fn a_signature_hit_is_strong_unless_it_is_only_unwanted() {
+        let analyzer = ClamAvAnalyzer::new(ClamAvAnalyzerConfig {
+            address: "localhost:3310".to_string(),
+            timeout_seconds: 1,
+            enabled: true,
+        });
+        let strong = |reply: &[u8]| {
+            let d = analyzer.interpret_response(reply, "f", 1);
+            assert_eq!(d.verdict, ThreatVerdict::Malicious);
+            d.metadata[STRONG_SIGNAL_KEY] == serde_json::Value::Bool(true)
+        };
+        assert!(strong(b"stream: Win.Trojan.Agent-123 FOUND\0"));
+        assert!(!strong(b"stream: PUA.Win.Tool.Netcat-1 FOUND\0"));
     }
 
     #[tokio::test]

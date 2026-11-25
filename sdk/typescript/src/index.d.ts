@@ -52,8 +52,14 @@ export interface EngineResult {
   type: string | null;
   /** null when the engine gave no verdict. */
   verdict: Verdict | null;
-  /** Percent, when the engine gave a verdict. */
+  /** Percent: how sure the engine is of the verdict it gave. */
   confidence: number | null;
+  /**
+   * Percent: a model's calibrated chance that the file is malware (the
+   * Windows Program Model). A model can say clean at 64% when its line for
+   * suspicious is higher; its confidence in "clean" is then 36%.
+   */
+  malwareChance: number | null;
   /** "counted", "no_record", "advisory" or "unavailable". */
   vote: string | null;
   /** Why it didn't vote, when it didn't. */

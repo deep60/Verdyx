@@ -63,8 +63,12 @@ class EngineResult:
     type: Optional[str] = None
     #: None when the engine gave no verdict.
     verdict: Optional[str] = None
-    #: Percent, when the engine gave a verdict.
+    #: Percent: how sure the engine is of the verdict it gave.
     confidence: Optional[float] = None
+    #: Percent: a model's calibrated chance that the file is malware (the
+    #: Windows Program Model). It can say clean at 64% when its line for
+    #: suspicious is higher.
+    malware_chance: Optional[int] = None
     #: "counted", "no_record", "advisory" or "unavailable".
     vote: Optional[str] = None
     reason: Optional[str] = None
@@ -344,11 +348,19 @@ def _as_list(data: Any, key: str) -> List[Dict[str, Any]]:
 
 def _engine(a: Dict[str, Any]) -> EngineResult:
     eng = a.get("engine") or {}
+    # The API sends "unknown" for an engine that ran but didn't vote.
+    verdict = _normalise_verdict(a["verdict"]) if a.get("verdict") else "unknown"
+    probability = (a.get("metadata") or {}).get("probability")
     return EngineResult(
         name=eng.get("name") or a.get("engineName") or "engine",
         type=eng.get("type") or a.get("engineType"),
-        verdict=_normalise_verdict(a["verdict"]) if a.get("verdict") else None,
+        verdict=None if verdict == "unknown" else verdict,
         confidence=a.get("confidence"),
+        malware_chance=(
+            round(probability * 100)
+            if isinstance(probability, (int, float)) and not isinstance(probability, bool)
+            else None
+        ),
         vote=a.get("vote"),
         reason=a.get("reason"),
     )

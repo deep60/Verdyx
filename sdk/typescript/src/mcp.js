@@ -162,7 +162,15 @@ function summarise(r) {
     const silent = r.engines.filter((e) => !e.verdict);
     if (voted.length) {
       lines.push("", "Engines:");
-      for (const e of voted) lines.push(`- ${e.name}: ${e.verdict}${e.confidence != null ? ` (${e.confidence}%)` : ""}`);
+      for (const e of voted) {
+        const detail =
+          e.malwareChance != null
+            ? ` (${e.malwareChance}% malware chance)`
+            : e.confidence != null
+              ? ` (${e.confidence}% confidence)`
+              : "";
+        lines.push(`- ${e.name}: ${e.verdict}${detail}`);
+      }
     }
     if (silent.length) {
       lines.push("", "Not voting:");

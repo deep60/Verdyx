@@ -112,7 +112,9 @@ export function startMockServer({ port = 0, apiKey = process.env.MOCK_API_KEY, r
       return send(200, [
         { id: randomUUID(), engine: { name: "YARA", type: "yara" }, verdict: flagged ? scan.verdict : "benign", confidence: 90, vote: "counted", reason: null },
         { id: randomUUID(), engine: { name: "Heuristic Engine", type: "heuristic" }, verdict: "benign", confidence: 60, vote: "counted", reason: null },
-        { id: randomUUID(), engine: { name: "MalwareBazaar", type: "threat_intel" }, verdict: null, confidence: null, vote: "no_record", reason: "Not in MalwareBazaar's known-malware database" },
+        // Like the live API: an engine that ran without voting says "unknown".
+        { id: randomUUID(), engine: { name: "MalwareBazaar", type: "hash" }, verdict: "unknown", confidence: null, reason: "Not in MalwareBazaar's known-malware database" },
+        { id: randomUUID(), engine: { name: "Verdyx PE Model", type: "ml" }, verdict: "clean", confidence: 36, reason: null, metadata: { probability: 0.6421 } },
       ]);
     }
 

@@ -278,11 +278,15 @@ function normaliseVerdict(v) {
 }
 
 function engineResult(a) {
+  // The API sends "unknown" for an engine that ran but didn't vote.
+  const verdict = a?.verdict ? normaliseVerdict(a.verdict) : "unknown";
+  const probability = a?.metadata?.probability;
   return {
     name: a?.engine?.name ?? a?.engineName ?? "engine",
     type: a?.engine?.type ?? a?.engineType ?? null,
-    verdict: a?.verdict ? normaliseVerdict(a.verdict) : null,
+    verdict: verdict === "unknown" ? null : verdict,
     confidence: a?.confidence ?? null,
+    malwareChance: typeof probability === "number" ? Math.round(probability * 100) : null,
     vote: a?.vote ?? null,
     reason: a?.reason ?? null,
   };
