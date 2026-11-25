@@ -96,6 +96,9 @@ pub struct FileSubmissionListItem {
     /// existing call site working without touching the client.
     pub status: String,
     pub is_malicious: Option<bool>,
+    /// The consensus verdict once the scan is done: "malicious",
+    /// "suspicious", "benign" or "unknown".
+    pub verdict: Option<String>,
     pub description: Option<String>,
     pub analysis_type: Option<String>,
     pub bounty_amount: Option<String>,
@@ -1918,6 +1921,7 @@ mod tests {
             analysis_status: "completed".to_string(),
             status: "completed".to_string(),
             is_malicious: None,
+            verdict: None,
             description: None,
             analysis_type: None,
             bounty_amount: None,

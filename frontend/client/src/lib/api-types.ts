@@ -27,6 +27,8 @@ export interface ApiSubmission {
   submissionType?: string;
   analysisType?: string;
   isMalicious?: boolean;
+  /** Consensus verdict once completed: "malicious", "suspicious", "benign", "unknown". */
+  verdict?: string | null;
   confidenceScore?: string;
   status?: string;
   analysisStatus?: string;

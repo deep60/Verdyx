@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
 import { Navigation } from "@/components/navigation";
@@ -7,24 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import {
-  User,
-  Mail,
-  Wallet,
-  Shield,
-  Award,
-  TrendingUp,
-  FileText,
-  CheckCircle2,
-  BarChart3,
-  Webhook,
-  KeyRound,
-  History,
-  Database,
-} from "lucide-react";
+import { User, Mail } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { UserAnalyticsDashboard } from "@/components/user-analytics-dashboard";
 import { WebhooksManager } from "@/components/webhooks-manager";
@@ -33,7 +16,29 @@ import { AuditLog } from "@/components/audit-log";
 import { DataControls } from "@/components/data-controls";
 import { ThreatFeedCard } from "@/components/threat-feed-card";
 import { SEO } from "@/components/seo";
+import {
+  ActivityGrid,
+  LatestCatch,
+  ProfileHero,
+  ProfileStats,
+  SubmissionList,
+} from "@/components/analyst-profile";
 import type { ApiSubmission } from "@/lib/api-types";
+import { amount, findStanding, latestCatch, scanCounts, type Standing } from "@/lib/profile";
+
+interface MyStats {
+  total_bounties_participated?: number;
+  total_rewards_earned?: string;
+}
+
+const TABS = ["overview", "submissions", "rewards", "developer", "account"] as const;
+type Tab = (typeof TABS)[number];
+
+function tabFromHash(): Tab {
+  if (typeof window === "undefined") return "overview";
+  const h = window.location.hash.replace("#", "");
+  return (TABS as readonly string[]).includes(h) ? (h as Tab) : "overview";
+}
 
 export default function Profile() {
   const { user, connectWallet, disconnectWallet, updateProfile, deleteAccount, logout } = useAuth();
@@ -42,324 +47,154 @@ export default function Profile() {
   const [email, setEmail] = useState(user?.email ?? "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // The tab lives in the address (#submissions), so it survives a reload and can be linked.
+  const [tab, setTab] = useState<Tab>(tabFromHash);
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const changeTab = (next: string) => {
+    setTab(next as Tab);
+    window.history.replaceState(null, "", next === "overview" ? window.location.pathname : `#${next}`);
+  };
 
-  const { data: submissions } = useQuery<ApiSubmission[]>({
+  const { data: submissions, isLoading: loadingScans } = useQuery<ApiSubmission[]>({
     queryKey: ["/api/submissions"],
+    enabled: !!user,
   });
-
-  const userSubmissions =
-    submissions?.filter((s) => (s.submitterId || s.userId) === user?.id) || [];
-  const completedAnalyses = userSubmissions.filter(
-    (s) => (s.analysisStatus || s.status) === "completed"
-  ).length;
-  const accuracyDisplay =
-    completedAnalyses > 0 && userSubmissions.length > 0
-      ? `${((completedAnalyses / userSubmissions.length) * 100).toFixed(1)}%`
-      : "—";
+  const { data: standings } = useQuery<{ analysts?: Standing[] }>({
+    queryKey: ["/api/reputation/standings"],
+    enabled: !!user,
+  });
+  const { data: stats } = useQuery<MyStats>({
+    queryKey: ["/api/users/me/stats"],
+    enabled: !!user,
+  });
 
   if (!user) {
     return null;
   }
 
-  const initials = user.username
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase();
+  const mine = (submissions ?? []).filter((s) => (s.submitterId || s.userId) === user.id);
+  const counts = scanCounts(mine);
+  const standing = findStanding(standings?.analysts, user.id);
+  const rank = standing ? { rank: standing.rank, of: standing.of } : null;
+  const accuracyRaw = amount(standing?.standing.accuracyRate);
+  // The reputation service reports accuracy as 0..1 or 0..100.
+  const accuracy = accuracyRaw === null ? null : accuracyRaw <= 1 ? accuracyRaw * 100 : accuracyRaw;
+  const rewards = amount(stats?.total_rewards_earned) ?? amount(user.totalEarnings);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <SEO
-        title="Profile, Wallet & Webhooks — Verdyx"
-        description="Manage your Verdyx profile, wallet stakes & withdrawals, outbound webhooks, and submission history."
+        title="Analyst profile — Verdyx"
+        description="Your Verdyx analyst profile: scans, threats caught, reputation, rewards, API keys and webhooks."
       />
       <Navigation />
 
-      <div id="main-content" tabIndex={-1} className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Profile Sidebar */}
-          <div className="lg:col-span-1">
-            <Card className="glassmorphism border-primary/20">
-              <CardHeader className="text-center">
-                <div className="flex justify-center mb-4">
-                  <Avatar className="h-24 w-24 border-2 border-primary">
-                    <AvatarFallback className="text-2xl bg-gradient-to-br from-primary to-secondary">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                </div>
-                <CardTitle className="text-2xl">{user.username}</CardTitle>
-                <CardDescription>{user.email}</CardDescription>
-                <div className="flex justify-center gap-2 mt-4">
-                  <Badge variant="outline" className="border-accent/50 text-accent">
-                    <Shield className="w-3 h-3 mr-1" />
-                    Security Analyst
-                  </Badge>
-                </div>
+      <div id="main-content" tabIndex={-1} className="relative z-10 mx-auto max-w-6xl space-y-6 px-4 py-10 sm:px-6 lg:px-8">
+        <ProfileHero
+          username={user.username}
+          email={user.email}
+          createdAt={user.createdAt}
+          walletAddress={user.walletAddress}
+          rank={rank}
+          onConnectWallet={connectWallet}
+        />
+
+        <Tabs value={tab} onValueChange={changeTab} className="space-y-6">
+          <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto p-1 sm:w-auto">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="submissions" data-testid="tab-profile-submissions">
+              Submissions
+              <span className="ml-1.5 rounded bg-muted px-1.5 text-[11px] tabular-nums text-muted-foreground">
+                {counts.total}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="rewards" data-testid="tab-profile-wallet">Rewards</TabsTrigger>
+            <TabsTrigger value="developer" data-testid="tab-profile-api-keys">API and webhooks</TabsTrigger>
+            <TabsTrigger value="account">Account</TabsTrigger>
+          </TabsList>
+
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="space-y-6">
+            <ProfileStats
+              counts={counts}
+              reputation={user.reputationScore}
+              rank={rank}
+              accuracy={accuracy}
+              rewards={rewards}
+              bountiesJoined={stats?.total_bounties_participated ?? null}
+              loading={loadingScans}
+            />
+            <div className="grid gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <ActivityGrid submissions={mine} />
+              </div>
+              <LatestCatch scan={latestCatch(mine)} />
+            </div>
+            <SubmissionList
+              submissions={mine}
+              limit={6}
+              title="Recent submissions"
+              onShowAll={() => changeTab("submissions")}
+            />
+          </TabsContent>
+
+          {/* Submissions Tab */}
+          <TabsContent value="submissions" className="space-y-6">
+            <SubmissionList submissions={mine} />
+          </TabsContent>
+
+          {/* Rewards Tab */}
+          <TabsContent value="rewards" className="space-y-6">
+            <Card data-testid="card-profile-wallet" className="glassmorphism border-primary/20">
+              <CardHeader>
+                <CardTitle>Wallet and rewards</CardTitle>
+                <CardDescription>
+                  Your THREAT, stakes and rewards are held by the contracts on the chain, not by
+                  Verdyx. You sign every transfer in your own wallet.
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <Separator />
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground flex items-center">
-                      <Award className="w-4 h-4 mr-2" />
-                      Reputation
-                    </span>
-                    <span className="font-semibold text-accent">{user.reputationScore}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground flex items-center">
-                      <FileText className="w-4 h-4 mr-2" />
-                      Submissions
-                    </span>
-                    <span className="font-semibold">{userSubmissions.length}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground flex items-center">
-                      <CheckCircle2 className="w-4 h-4 mr-2" />
-                      Completed
-                    </span>
-                    <span className="font-semibold text-success">{completedAnalyses}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground flex items-center">
-                      <TrendingUp className="w-4 h-4 mr-2" />
-                      Accuracy
-                    </span>
-                    <span className="font-semibold text-muted-foreground">{accuracyDisplay}</span>
-                  </div>
-                </div>
-                <Separator />
-                <div className="space-y-2">
-                  {user.walletAddress ? (
-                    <>
-                      <Label className="text-xs text-muted-foreground">Wallet Address</Label>
-                      <div className="flex items-center gap-2">
-                        <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">
-                          {user.walletAddress}
-                        </code>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full"
-                        onClick={disconnectWallet}
-                      >
-                        Disconnect Wallet
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      className="w-full border-primary/20"
-                      onClick={connectWallet}
-                    >
-                      <Wallet className="w-4 h-4 mr-2" />
-                      Connect Wallet
+              <CardContent className="space-y-4 text-sm">
+                {user.walletAddress ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 text-xs">
+                      {user.walletAddress}
+                    </code>
+                    <Button variant="outline" size="sm" onClick={disconnectWallet}>
+                      Disconnect wallet
                     </Button>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <Button variant="outline" onClick={connectWallet}>
+                    Connect wallet
+                  </Button>
+                )}
+                <p className="text-muted-foreground">
+                  On the marketplace you can see your balance, claim test THREAT, post bounties,
+                  stake on a verdict and withdraw what you have won.
+                </p>
+                <Button asChild>
+                  <Link href="/marketplace" data-testid="link-profile-marketplace">
+                    Open the marketplace
+                  </Link>
+                </Button>
               </CardContent>
             </Card>
-          </div>
+            <UserAnalyticsDashboard />
+          </TabsContent>
 
-          {/* Profile Content */}
-          <div className="lg:col-span-2">
-            <Tabs defaultValue="overview" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 h-auto p-1 gap-1">
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="wallet" data-testid="tab-profile-wallet">
-                  <Wallet className="w-3.5 h-3.5 mr-1.5" />
-                  Wallet
-                </TabsTrigger>
-                <TabsTrigger value="webhooks" data-testid="tab-profile-webhooks">
-                  <Webhook className="w-3.5 h-3.5 mr-1.5" />
-                  Webhooks
-                </TabsTrigger>
-                <TabsTrigger value="api-keys" data-testid="tab-profile-api-keys">
-                  <KeyRound className="w-3.5 h-3.5 mr-1.5" />
-                  API keys
-                </TabsTrigger>
-                <TabsTrigger value="activity" data-testid="tab-profile-activity">
-                  <History className="w-3.5 h-3.5 mr-1.5" />
-                  Activity
-                </TabsTrigger>
-                <TabsTrigger value="data" data-testid="tab-profile-data">
-                  <Database className="w-3.5 h-3.5 mr-1.5" />
-                  Data
-                </TabsTrigger>
-                <TabsTrigger value="analytics">
-                  <BarChart3 className="w-3.5 h-3.5 mr-1.5" />
-                  Analytics
-                </TabsTrigger>
-                <TabsTrigger value="submissions">Submissions</TabsTrigger>
-                <TabsTrigger value="settings">Settings</TabsTrigger>
-              </TabsList>
+          {/* Developer Tab */}
+          <TabsContent value="developer" className="space-y-6">
+            <ApiKeysManager />
+            <WebhooksManager />
+            <ThreatFeedCard />
+          </TabsContent>
 
-              {/* Overview Tab */}
-              <TabsContent value="overview" className="space-y-6">
-                <Card className="glassmorphism border-primary/20">
-                  <CardHeader>
-                    <CardTitle>Activity Overview</CardTitle>
-                    <CardDescription>Your recent activity on the platform</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid md:grid-cols-3 gap-6">
-                      <div className="text-center p-4 bg-primary/10 rounded-lg border border-primary/20">
-                        <div className="text-3xl font-bold font-display tracking-tight text-primary mb-2">
-                          {userSubmissions.length}
-                        </div>
-                        <div className="text-sm text-muted-foreground">Total Submissions</div>
-                      </div>
-                      <div className="text-center p-4 bg-accent/10 rounded-lg border border-accent/20">
-                        <div className="text-3xl font-bold font-display tracking-tight text-accent mb-2">
-                          {completedAnalyses}
-                        </div>
-                        <div className="text-sm text-muted-foreground">Completed Analyses</div>
-                      </div>
-                      <div className="text-center p-4 bg-secondary/10 rounded-lg border border-secondary/20">
-                        <div className="text-3xl font-bold font-display tracking-tight text-secondary mb-2">
-                          {user.reputationScore}
-                        </div>
-                        <div className="text-sm text-muted-foreground">Reputation Score</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="glassmorphism border-primary/20">
-                  <CardHeader>
-                    <CardTitle>Account Information</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Member Since</span>
-                      <span className="font-medium">
-                        {new Date(user.createdAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                    <Separator />
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Account Status</span>
-                      <Badge variant="outline" className="border-success text-success">
-                        Active
-                      </Badge>
-                    </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* Wallet & Rewards Tab */}
-              <TabsContent value="wallet" className="space-y-6">
-                <Card data-testid="card-profile-wallet">
-                  <CardHeader>
-                    <CardTitle>Wallet and rewards</CardTitle>
-                    <CardDescription>
-                      Your THREAT, stakes and rewards are held by the contracts on the chain, not by
-                      Verdyx. You sign every transfer in your own wallet.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3 text-sm">
-                    <p>
-                      On the marketplace page you can see your balance, claim test THREAT, post
-                      bounties, stake on a verdict and withdraw what you have won.
-                    </p>
-                    <Button asChild>
-                      <Link href="/marketplace" data-testid="link-profile-marketplace">
-                        Open the marketplace
-                      </Link>
-                    </Button>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* Webhooks Tab */}
-              <TabsContent value="webhooks" className="space-y-6">
-                <WebhooksManager />
-              </TabsContent>
-
-              {/* API keys Tab */}
-              <TabsContent value="api-keys" className="space-y-6">
-                <ApiKeysManager />
-                <ThreatFeedCard />
-              </TabsContent>
-
-              {/* Activity Tab */}
-              <TabsContent value="activity" className="space-y-6">
-                <AuditLog endpoint="/api/users/me/audit" personal viewerId={user.id} />
-              </TabsContent>
-
-              {/* Data Tab */}
-              <TabsContent value="data" className="space-y-6">
-                <DataControls />
-              </TabsContent>
-
-              {/* Analytics Tab */}
-              <TabsContent value="analytics" className="space-y-6">
-                <UserAnalyticsDashboard />
-              </TabsContent>
-
-              {/* Submissions Tab */}
-              <TabsContent value="submissions" className="space-y-6">
-                <Card className="glassmorphism border-primary/20">
-                  <CardHeader>
-                    <CardTitle>Your Submissions</CardTitle>
-                    <CardDescription>
-                      Files, emails, and URLs you&apos;ve submitted for analysis
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {userSubmissions.length > 0 ? (
-                      <div className="space-y-3">
-                        {userSubmissions.map((submission) => {
-                          const subStatus = submission.analysisStatus || submission.status || "pending";
-                          const displayName =
-                            submission.originalFilename ||
-                            submission.filename ||
-                            submission.fileName ||
-                            submission.url ||
-                            submission.id;
-                          return (
-                            <div
-                              key={submission.id}
-                              className="flex items-center justify-between p-3 bg-muted/20 rounded-lg border border-border"
-                            >
-                              <div className="flex-1">
-                                <div className="font-medium">{displayName}</div>
-                                <div className="text-sm text-muted-foreground">
-                                  {new Date(submission.createdAt ?? "").toLocaleDateString()}
-                                </div>
-                              </div>
-                              <Badge
-                                variant={
-                                  subStatus === "completed"
-                                    ? "default"
-                                    : subStatus === "analyzing"
-                                    ? "secondary"
-                                    : "outline"
-                                }
-                              >
-                                {subStatus}
-                              </Badge>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-12">
-                        <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                        <p className="text-muted-foreground">No submissions yet</p>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          Submit your first file, email, or URL for analysis
-                        </p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              {/* Settings Tab */}
-              <TabsContent value="settings" className="space-y-6">
+              {/* Account Tab */}
+              <TabsContent value="account" className="space-y-6">
                 <Card className="glassmorphism border-primary/20">
                   <CardHeader>
                     <CardTitle>Profile Settings</CardTitle>
@@ -434,6 +269,9 @@ export default function Profile() {
                   </CardContent>
                 </Card>
 
+                <DataControls />
+                <AuditLog endpoint="/api/users/me/audit" personal viewerId={user.id} />
+
                 <Card className="glassmorphism border-destructive/20">
                   <CardHeader>
                     <CardTitle className="text-destructive">Danger Zone</CardTitle>
@@ -463,9 +301,7 @@ export default function Profile() {
                   </CardContent>
                 </Card>
               </TabsContent>
-            </Tabs>
-          </div>
-        </div>
+          </Tabs>
       </div>
     </div>
   );

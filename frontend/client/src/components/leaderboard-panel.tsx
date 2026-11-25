@@ -52,7 +52,7 @@ export function LeaderboardPanel({ engines }: { engines: ApiEngine[] }) {
   }, [engines, sort]);
 
   return (
-    <section className="mb-16">
+    <section id="leaderboard" className="mb-16 scroll-mt-24">
       <div className="text-center mb-8">
         <h1 className="text-4xl md:text-5xl font-bold font-display tracking-[-0.03em] mb-4">
           Reputation Leaderboard
