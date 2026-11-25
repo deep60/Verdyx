@@ -30,6 +30,15 @@ const TABS: { value: DashboardTab; label: string; icon: typeof Globe }[] = [
   { value: "analytics", label: "Analytics", icon: BarChart3 },
 ];
 
+/** Cards rise in one after another; reduced-motion users get them at once (global CSS). */
+function Rise({ i, children }: { i: number; children: React.ReactNode }) {
+  return (
+    <div className="animate-fade-up" style={{ animationDelay: `${80 + i * 70}ms` }}>
+      {children}
+    </div>
+  );
+}
+
 function initialTab(): DashboardTab {
   if (typeof window === "undefined") return "overview";
   // The command palette leaves the tab here before it navigates.
@@ -82,7 +91,11 @@ export default function Dashboard() {
   });
 
   const { isConnected } = useWebSocket((message) => {
-    if (message.type === "analysis_updated" || message.type === "analysis_completed" || message.type === "new_submission") {
+    if (
+      message.type === "analysis_updated" ||
+      message.type === "analysis_completed" ||
+      message.type === "new_submission"
+    ) {
       submissionsQuery.refetch();
       statsQuery.refetch();
     }
@@ -108,10 +121,10 @@ export default function Dashboard() {
       <main id="main-content" tabIndex={-1} className="relative z-10 flex-1 pb-16 pt-8 sm:pt-10">
         <div className="mx-auto max-w-7xl space-y-6 px-4 sm:px-6 lg:px-8">
           {/* Header */}
-          <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <header className="flex animate-fade-up flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
               <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Console</p>
-              <h1 className="mt-2 truncate text-3xl font-medium tracking-[-0.03em] sm:text-4xl">
+              <h1 className="mt-2 truncate font-display text-3xl font-medium leading-[1.05] tracking-[-0.04em] sm:text-[2.75rem]">
                 {greeting()}
                 {name && <span className="text-muted-foreground">, {name}</span>}
               </h1>
@@ -134,10 +147,11 @@ export default function Dashboard() {
                 onClick={() => setTab(value)}
                 data-testid={`dashboard-tab-${value}`}
                 className={cn(
-                  "-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-sm transition-colors",
+                  "relative inline-flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm transition-colors duration-200",
+                  "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:origin-center after:rounded-full after:bg-foreground after:transition-transform after:duration-300 after:ease-expo-out",
                   tab === value
-                    ? "border-foreground text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
+                    ? "text-foreground after:scale-x-100"
+                    : "text-muted-foreground after:scale-x-0 hover:text-foreground",
                 )}
               >
                 <Icon className="h-4 w-4" aria-hidden />
@@ -147,61 +161,77 @@ export default function Dashboard() {
           </nav>
 
           {tab === "overview" && (
-            <div className="grid items-start gap-6 animate-fade-in lg:grid-cols-12" data-testid="dashboard-overview">
+            <div className="grid items-start gap-6 lg:grid-cols-12" data-testid="dashboard-overview">
               {/* Each column stacks on its own, so a tall card never leaves a hole beside it. */}
               <div className="space-y-6 lg:col-span-7">
-                <Card className="p-5 sm:p-6">
-                  <div className="mb-5">
-                    <h2 className="text-lg font-medium tracking-tight">New scan</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Every engine reads it, and you get one verdict with each engine's evidence.
-                    </p>
-                  </div>
-                  <FileSubmissionForm />
-                </Card>
-                {submissionsQuery.isError ? (
-                  <Card className="p-5">
-                    <ErrorState
-                      title="Couldn't load your scans"
-                      message="Your session may have ended. Sign in again, or retry."
-                      onRetry={() => submissionsQuery.refetch()}
-                    />
+                <Rise i={0}>
+                  <Card className="p-5 sm:p-6">
+                    <div className="mb-5">
+                      <h2 className="text-lg font-medium tracking-tight">New scan</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Every engine reads it, and you get one verdict with each engine's evidence.
+                      </p>
+                    </div>
+                    <FileSubmissionForm />
                   </Card>
-                ) : (
-                  <SubmissionList
-                    submissions={submissions}
-                    limit={8}
-                    title="Recent scans"
-                    onShowAll={() => setLocation("/profile#submissions")}
-                  />
-                )}
+                </Rise>
+                <Rise i={2}>
+                  {submissionsQuery.isError ? (
+                    <Card className="p-5">
+                      <ErrorState
+                        title="Couldn't load your scans"
+                        message="Your session may have ended. Sign in again, or retry."
+                        onRetry={() => submissionsQuery.refetch()}
+                      />
+                    </Card>
+                  ) : (
+                    <SubmissionList
+                      submissions={submissions}
+                      limit={8}
+                      title="Recent scans"
+                      onShowAll={() => setLocation("/profile#submissions")}
+                    />
+                  )}
+                </Rise>
               </div>
               <div className="space-y-6 lg:col-span-5">
-                <KpiStrip counts={counts} loading={submissionsQuery.isLoading} stats={statsQuery.data} />
-                <LatestCatch scan={catchScan} />
-                <EngineHealth engines={engines} loading={enginesQuery.isLoading} error={enginesQuery.isError} />
-                <VerdictMixCard stats={statsQuery.data} loading={statsQuery.isLoading} onOpenAnalytics={() => setTab("analytics")} />
+                <Rise i={1}>
+                  <KpiStrip counts={counts} loading={submissionsQuery.isLoading} stats={statsQuery.data} />
+                </Rise>
+                <Rise i={2}>
+                  <LatestCatch scan={catchScan} />
+                </Rise>
+                <Rise i={3}>
+                  <EngineHealth engines={engines} loading={enginesQuery.isLoading} error={enginesQuery.isError} />
+                </Rise>
+                <Rise i={4}>
+                  <VerdictMixCard
+                    stats={statsQuery.data}
+                    loading={statsQuery.isLoading}
+                    onOpenAnalytics={() => setTab("analytics")}
+                  />
+                </Rise>
               </div>
             </div>
           )}
 
           {tab === "recon" && (
-            <div className="animate-fade-in">
+            <div className="animate-fade-up">
               <WebsiteIntelligencePanel />
             </div>
           )}
           {tab === "yara" && (
-            <div className="animate-fade-in">
+            <div className="animate-fade-up">
               <YaraStudio />
             </div>
           )}
           {tab === "compare" && (
-            <div className="animate-fade-in">
+            <div className="animate-fade-up">
               <ScanDiffPanel />
             </div>
           )}
           {tab === "analytics" && (
-            <div className="animate-fade-in">
+            <div className="animate-fade-up">
               <PlatformAnalytics />
             </div>
           )}
