@@ -110,28 +110,17 @@ pub struct WebhookEvent {
     pub category: String,
 }
 
+/// See `services::webhook_delivery::check_url`; hosts are checked again,
+/// by resolved address, when a delivery connects.
 fn is_safe_webhook_url(raw_url: &str) -> bool {
-    let parsed = match reqwest::Url::parse(raw_url) {
-        Ok(u) => u,
-        Err(_) => return false,
-    };
-    if parsed.scheme() != "https" && parsed.scheme() != "http" {
-        return false;
-    }
-    let Some(host) = parsed.host_str() else {
-        return false;
-    };
-    let lower = host.to_lowercase();
-    let internal = lower == "localhost"
-        || lower == "0.0.0.0"
-        || lower == "::1"
-        || lower.starts_with("127.")
-        || lower.starts_with("10.")
-        || lower.starts_with("192.168.")
-        || lower.starts_with("169.254.")
-        || lower.ends_with(".internal")
-        || lower.ends_with(".local");
-    !internal
+    crate::services::webhook_delivery::check_url(raw_url).is_ok()
+}
+
+/// Every event must be one that's delivered (or `*` for all).
+fn events_ok(events: &[String]) -> bool {
+    !events.is_empty()
+        && events.len() <= 20
+        && events.iter().all(|e| shared::webhooks::is_known_event(e))
 }
 
 // ─── Handlers ───
@@ -142,7 +131,7 @@ pub async fn create_webhook(
     claims: crate::middleware::auth::Claims,
     Json(payload): Json<RegisterWebhookRequest>,
 ) -> Result<Json<Webhook>, StatusCode> {
-    if !is_safe_webhook_url(&payload.url) {
+    if !is_safe_webhook_url(&payload.url) || !events_ok(&payload.events) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -246,6 +235,11 @@ pub async fn update_webhook(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
+    if let Some(ref events) = payload.events {
+        if !events_ok(events) {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
 
     // Build dynamic UPDATE query
     let webhook = sqlx::query_as::<_, Webhook>(
@@ -321,55 +315,50 @@ pub async fn test_webhook(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let test_payload = payload.sample_payload.unwrap_or(serde_json::json!({
-        "event": payload.event_type,
+    if payload.event_type == shared::webhooks::ALL
+        || !shared::webhooks::is_known_event(&payload.event_type)
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let data = payload.sample_payload.unwrap_or(serde_json::json!({
         "test": true,
-        "timestamp": chrono::Utc::now().to_rfc3339()
+        "message": "This is a test delivery from Verdyx."
     }));
 
-    // Send HTTP POST to webhook URL
-    let client = reqwest::Client::new();
-    let result = client
-        .post(&webhook.url)
-        .header("Content-Type", "application/json")
-        .header("X-Webhook-Event", &payload.event_type)
-        .json(&test_payload)
-        .timeout(std::time::Duration::from_secs(10))
-        .send()
-        .await;
-
-    let (status, status_code, response_body, error_message) = match result {
-        Ok(resp) => {
-            let code = resp.status().as_u16() as i16;
-            let body = resp.text().await.unwrap_or_default();
-            if (200..300).contains(&code) {
-                ("success".to_string(), Some(code), Some(body), None)
-            } else {
-                (
-                    "failed".to_string(),
-                    Some(code),
-                    Some(body),
-                    Some(format!("HTTP {code}")),
-                )
-            }
-        }
-        Err(e) => ("failed".to_string(), None, None, Some(e.to_string())),
+    use crate::services::webhook_delivery as wd;
+    let id = Uuid::new_v4();
+    let now = chrono::Utc::now();
+    let target = wd::Target {
+        url: webhook.url.clone(),
+        secret: webhook.secret.clone(),
+        headers: webhook.headers.clone(),
     };
+    let result = wd::send(
+        &wd::client(false),
+        &target,
+        id,
+        &payload.event_type,
+        now,
+        &data,
+        &wd::web_url(),
+    )
+    .await;
 
     // Record delivery
     let delivery = sqlx::query_as::<_, WebhookDelivery>(
-        "INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, status, status_code, response_body, error_message, attempt_number, completed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW())
+        "INSERT INTO webhook_deliveries (id, webhook_id, event_type, payload, status, status_code, response_body, error_message, attempt_number, triggered_at, completed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, NOW())
          RETURNING *"
     )
-    .bind(Uuid::new_v4())
+    .bind(id)
     .bind(webhook_id)
     .bind(&payload.event_type)
-    .bind(&test_payload)
-    .bind(&status)
-    .bind(status_code)
-    .bind(&response_body)
-    .bind(&error_message)
+    .bind(&data)
+    .bind(if result.ok { "success" } else { "failed" })
+    .bind(result.status_code)
+    .bind(&result.response_body)
+    .bind(&result.error)
+    .bind(now)
     .fetch_one(state.db.pool())
     .await
     .map_err(|e| {
@@ -437,36 +426,14 @@ pub async fn get_webhook_deliveries(
 pub async fn list_available_events(
     State(_state): State<AppState>,
 ) -> Result<Json<Vec<WebhookEvent>>, StatusCode> {
-    Ok(Json(vec![
-        WebhookEvent {
-            name: "analysis.completed".into(),
-            description: "Analysis completed".into(),
-            category: "analysis".into(),
-        },
-        WebhookEvent {
-            name: "bounty.created".into(),
-            description: "New bounty created".into(),
-            category: "bounty".into(),
-        },
-        WebhookEvent {
-            name: "bounty.submission".into(),
-            description: "Analysis submitted to bounty".into(),
-            category: "bounty".into(),
-        },
-        WebhookEvent {
-            name: "bounty.finalized".into(),
-            description: "Bounty resolved with winner".into(),
-            category: "bounty".into(),
-        },
-        WebhookEvent {
-            name: "transaction.confirmed".into(),
-            description: "Blockchain tx confirmed".into(),
-            category: "transaction".into(),
-        },
-        WebhookEvent {
-            name: "reputation.updated".into(),
-            description: "Reputation score changed".into(),
-            category: "reputation".into(),
-        },
-    ]))
+    Ok(Json(
+        shared::webhooks::EVENTS
+            .iter()
+            .map(|(name, description)| WebhookEvent {
+                name: (*name).into(),
+                description: (*description).into(),
+                category: name.split('.').next().unwrap_or("other").into(),
+            })
+            .collect(),
+    ))
 }

@@ -132,7 +132,14 @@ pub async fn run_for_upload(
         let result = match &outcome {
             Outcome::Matched(rules) => {
                 info!("live hunt {hunt} matched {submission_id}: {rules:?}");
-                record_match(db, hunt, submission_id, rules).await
+                match record_match(db, hunt, submission_id, rules).await {
+                    Ok(true) => {
+                        notify(db, hunt, submission_id, rules).await;
+                        Ok(())
+                    }
+                    Ok(false) => Ok(()),
+                    Err(e) => Err(e),
+                }
             }
             Outcome::BadRule(why) => {
                 warn!("live hunt {hunt} turned off: {why}");
@@ -154,20 +161,55 @@ pub async fn run_for_upload(
     }
 }
 
-/// Record a match once per hunt and upload, and count it.
+/// Record a match once per hunt and upload, and count it. True when it's new.
 pub async fn record_match(
     db: &PgPool,
     hunt: Uuid,
     submission: Uuid,
     rules: &[String],
-) -> Result<(), sqlx::Error> {
+) -> Result<bool, sqlx::Error> {
     sqlx::query(shared::live_hunts::RECORD_MATCH_SQL)
         .bind(hunt)
         .bind(submission)
         .bind(rules)
         .execute(db)
         .await
-        .map(|_| ())
+        .map(|r| r.rows_affected() == 1)
+}
+
+/// Queue `livehunt.match` for the hunt's owner.
+async fn notify(db: &PgPool, hunt: Uuid, submission: Uuid, rules: &[String]) {
+    let row: Option<(Uuid, String, Option<Uuid>)> =
+        sqlx::query_as("SELECT user_id, name, organization_id FROM live_hunts WHERE id = $1")
+            .bind(hunt)
+            .fetch_optional(db)
+            .await
+            .unwrap_or(None);
+    let Some((owner, name, team)) = row else {
+        return;
+    };
+    let target: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT original_filename, file_hash FROM submissions WHERE id = $1")
+            .bind(submission)
+            .fetch_optional(db)
+            .await
+            .unwrap_or(None);
+    let (filename, sha256) = target.unwrap_or((None, None));
+    super::webhooks::enqueue(
+        db,
+        Some(owner),
+        shared::webhooks::LIVEHUNT_MATCH,
+        serde_json::json!({
+            "huntId": hunt,
+            "huntName": name,
+            "teamId": team,
+            "submissionId": submission,
+            "rules": rules,
+            "target": filename,
+            "sha256": sha256,
+        }),
+    )
+    .await;
 }
 
 /// Turn a hunt off because its rule doesn't compile, unless it was edited in
