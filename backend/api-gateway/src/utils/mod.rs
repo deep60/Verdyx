@@ -1,6 +1,7 @@
 pub mod circuit_breaker;
 pub mod crypto;
 pub mod errors;
+pub mod outbound;
 pub mod serialization;
 pub mod validation;
 

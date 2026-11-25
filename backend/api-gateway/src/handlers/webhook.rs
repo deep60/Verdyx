@@ -110,29 +110,16 @@ pub struct WebhookEvent {
     pub category: String,
 }
 
+/// Static check run when a webhook is saved or tested. DNS is checked again
+/// at send time by the outbound client's public-only resolver.
 fn is_safe_webhook_url(raw_url: &str) -> bool {
-    let parsed = match reqwest::Url::parse(raw_url) {
-        Ok(u) => u,
-        Err(_) => return false,
-    };
-    if parsed.scheme() != "https" && parsed.scheme() != "http" {
-        return false;
-    }
-    let Some(host) = parsed.host_str() else {
-        return false;
-    };
-    let lower = host.to_lowercase();
-    let internal = lower == "localhost"
-        || lower == "0.0.0.0"
-        || lower == "::1"
-        || lower.starts_with("127.")
-        || lower.starts_with("10.")
-        || lower.starts_with("192.168.")
-        || lower.starts_with("169.254.")
-        || lower.ends_with(".internal")
-        || lower.ends_with(".local");
-    !internal
+    reqwest::Url::parse(raw_url)
+        .map(|u| crate::utils::outbound::validate_outbound_url(&u).is_ok())
+        .unwrap_or(false)
 }
+
+/// Longest response body stored and returned for a test delivery.
+const MAX_TEST_RESPONSE_BYTES: usize = 2048;
 
 // ─── Handlers ───
 
@@ -327,8 +314,12 @@ pub async fn test_webhook(
         "timestamp": chrono::Utc::now().to_rfc3339()
     }));
 
-    // Send HTTP POST to webhook URL
-    let client = reqwest::Client::new();
+    // Send HTTP POST to webhook URL. Redirects are not followed and DNS only
+    // returns public addresses, so a webhook cannot be aimed at internal services.
+    let client = crate::utils::outbound::outbound_client_builder(0)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let result = client
         .post(&webhook.url)
         .header("Content-Type", "application/json")
@@ -341,7 +332,14 @@ pub async fn test_webhook(
     let (status, status_code, response_body, error_message) = match result {
         Ok(resp) => {
             let code = resp.status().as_u16() as i16;
-            let body = resp.text().await.unwrap_or_default();
+            let mut body = resp.text().await.unwrap_or_default();
+            if body.len() > MAX_TEST_RESPONSE_BYTES {
+                let mut cut = MAX_TEST_RESPONSE_BYTES;
+                while !body.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                body.truncate(cut);
+            }
             if (200..300).contains(&code) {
                 ("success".to_string(), Some(code), Some(body), None)
             } else {
