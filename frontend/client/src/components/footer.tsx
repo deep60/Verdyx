@@ -14,7 +14,7 @@ const footerSections = [
     links: [
       { href: "/dashboard", label: "Analysis Dashboard" },
       ...(BOUNTIES_ENABLED ? [{ href: "/marketplace", label: "Bounty Marketplace" }] : []),
-      { href: "/#architecture", label: "Architecture & Pipeline" },
+      { href: "/architecture", label: "Architecture & Pipeline" },
       { href: "/pricing", label: "Pricing" },
     ],
   },
@@ -22,7 +22,7 @@ const footerSections = [
     title: "Capabilities",
     links: [
       { href: "/#capabilities", label: "File & URL Engines" },
-      { href: "/#architecture", label: "How Consensus Works" },
+      { href: "/architecture", label: "How Consensus Works" },
       { href: "/#capabilities", label: "Security Engines" },
       { href: "/#capabilities", label: "Enterprise Use Cases" },
     ],
@@ -56,7 +56,10 @@ export function Footer({ tag = "every engine · one verdict" }: FooterProps) {
               Several engines on one file. Every vote, its confidence, and its evidence stay on the case.
             </p>
 
-            <p className="font-mono text-xs text-muted-foreground">{tag}</p>
+            <p className="inline-flex items-center gap-2 font-mono text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-mark" aria-hidden />
+              {tag}
+            </p>
           </div>
 
           {/* Navigation Columns (6 cols) */}

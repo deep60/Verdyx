@@ -424,7 +424,7 @@ export function FileSubmissionForm() {
           </button>
         </div>
 
-        <Button type="submit" disabled={!ready || submitMutation.isPending} className={cn(
+        <Button type="submit" variant="mark" disabled={!ready || submitMutation.isPending} className={cn(
             "gap-2 transition-all sm:min-w-36",
             !ready && "disabled:border disabled:border-border disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-100",
           )}

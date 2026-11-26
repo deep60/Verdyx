@@ -1,5 +1,5 @@
 import { Navigation } from "@/components/navigation";
-import { ArchitectureDiagram } from "@/components/diagrams/ArchitectureDiagram";
+import { LiveFlow } from "@/components/diagrams/live-flow";
 import { CasePreview } from "@/components/case-preview";
 import { Footer } from "@/components/footer";
 import { Button } from "@/components/ui/button";
@@ -112,11 +112,12 @@ export default function Home() {
         <section className="border-b border-border">
           <div className="mx-auto grid max-w-7xl items-start gap-10 px-4 py-10 sm:px-6 sm:py-14 lg:grid-cols-12 lg:gap-12 lg:px-8 lg:py-16">
             <div className="animate-fade-up lg:col-span-5 lg:pt-2">
-              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+              <p className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                <span className="h-2 w-2 rounded-full bg-mark" aria-hidden />
                 File, link and email threat analysis
               </p>
               <h1 className="mt-4 font-display text-[2.25rem] font-medium leading-[1.02] tracking-[-0.045em] text-balance sm:text-5xl lg:text-[3.4rem]">
-                A malware verdict you can audit, engine by engine.
+                A malware verdict you can <span className="mark-highlight">audit</span>, engine by engine.
               </h1>
               <p className="mt-5 max-w-md text-[15px] leading-relaxed text-foreground/80 sm:text-base">
                 Every engine reads the same file or link. You get one verdict, plus each engine's vote,
@@ -124,7 +125,7 @@ export default function Home() {
               </p>
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
                 <Link href="/dashboard">
-                  <Button size="lg" className="w-full sm:w-auto">
+                  <Button size="lg" variant="mark" className="w-full sm:w-auto">
                     Open the console
                   </Button>
                 </Link>
@@ -162,7 +163,7 @@ export default function Home() {
                 key={step.n}
                 className="border-b border-border px-4 py-5 sm:px-6 sm:[&:nth-child(odd)]:border-r lg:border-b-0 lg:border-r lg:px-8 lg:py-6 lg:last:border-r-0"
               >
-                <div className="font-mono text-xs text-muted-foreground">{step.n}</div>
+                <div className="font-mono text-xs text-mark-ink">0{step.n}</div>
                 <h2 className="mt-2 text-lg font-medium tracking-[-0.03em]">{step.title}</h2>
                 <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{step.text}</p>
               </li>
@@ -272,16 +273,23 @@ export default function Home() {
 
         <section id="architecture" className="scroll-mt-14 border-b border-border">
           <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-            <div className="max-w-xl">
-              <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">
-                Where a submission goes
-              </h2>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                Gateway, queue, engines, then consensus. Hover a layer for what that service actually does.
-              </p>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div className="max-w-xl">
+                <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">Where a submission goes</h2>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  Gateway, queue, every engine in parallel, then consensus. Engine states are live.
+                </p>
+              </div>
+              <Link
+                href="/architecture"
+                className="inline-flex items-center gap-1.5 text-sm font-medium underline decoration-mark decoration-2 underline-offset-4 hover:decoration-foreground"
+              >
+                Full architecture
+                <span aria-hidden>→</span>
+              </Link>
             </div>
-            <div className="mt-8 overflow-x-auto">
-              <ArchitectureDiagram />
+            <div className="mt-8">
+              <LiveFlow compact />
             </div>
           </div>
         </section>
@@ -318,7 +326,7 @@ export default function Home() {
               </div>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Link href="/dashboard">
-                  <Button size="lg" className="w-full bg-background text-foreground hover:bg-background/90 sm:w-auto">
+                  <Button size="lg" variant="mark" className="w-full sm:w-auto">
                     Open the console
                   </Button>
                 </Link>

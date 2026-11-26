@@ -185,7 +185,7 @@ export function CommandPalette() {
           </CommandItem>
           <CommandItem
             value="backend-pipeline-worker-telemetry"
-            onSelect={() => runCommand(() => setLocation("/#architecture"))}
+            onSelect={() => runCommand(() => setLocation("/architecture"))}
           >
             <Cpu className="h-4 w-4" />
             <span>Backend Pipeline &amp; 9-Service Architecture</span>
