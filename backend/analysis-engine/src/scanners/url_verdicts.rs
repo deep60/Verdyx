@@ -49,22 +49,32 @@ pub fn url_detections(scan: &UrlScanResult, host_is_trusted: bool) -> Vec<Detect
                 .iter()
                 .filter(|e| e.starts_with(source))
                 .collect();
+            let own_ms = if source == URLHAUS {
+                intel.urlhaus_ms
+            } else {
+                intel.threatfox_ms
+            };
             out.push(feed_detection(
                 source,
                 &matches,
                 &errors,
                 host_is_trusted,
-                scan.base.scan_duration_ms,
+                own_ms.unwrap_or(scan.base.scan_duration_ms),
             ));
         }
     }
     if let Some(rep) = &scan.reputation {
-        let ms = scan.base.scan_duration_ms;
+        // Each lookup reports its own time. Results stored before lookups
+        // were timed fall back to the whole scan's.
+        let whole = scan.base.scan_duration_ms;
         if let Some(vt) = &rep.virustotal {
-            out.push(virustotal_detection(vt, ms));
+            out.push(virustotal_detection(vt, rep.virustotal_ms.unwrap_or(whole)));
         }
         if let Some(gsb) = &rep.safe_browsing {
-            out.push(safe_browsing_detection(gsb, ms));
+            out.push(safe_browsing_detection(
+                gsb,
+                rep.safe_browsing_ms.unwrap_or(whole),
+            ));
         }
     }
     out.push(url_checks_detection(scan));

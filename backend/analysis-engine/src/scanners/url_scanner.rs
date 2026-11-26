@@ -334,17 +334,7 @@ impl Scanner for UrlScanner {
                     .filter(|u| u.as_str() != parsed.as_str())
                     .and_then(|u| Url::parse(u).ok())
                 {
-                    let more = client.check_url(&last).await;
-                    for m in more.matches {
-                        if !report.matches.contains(&m) {
-                            report.matches.push(m);
-                        }
-                    }
-                    for e in more.errors {
-                        if !report.errors.contains(&e) {
-                            report.errors.push(e);
-                        }
-                    }
+                    report.merge(client.check_url(&last).await);
                 }
                 for m in &report.matches {
                     if let Some(finding) =

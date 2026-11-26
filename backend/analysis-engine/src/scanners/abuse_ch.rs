@@ -47,6 +47,36 @@ pub struct ThreatIntelReport {
     pub sources_checked: Vec<String>,
     pub matches: Vec<ThreatIntelMatch>,
     pub errors: Vec<String>,
+    /// How long the URLhaus lookups took. `None` on results stored before
+    /// lookups were timed.
+    #[serde(default)]
+    pub urlhaus_ms: Option<u64>,
+    /// How long the ThreatFox lookups took.
+    #[serde(default)]
+    pub threatfox_ms: Option<u64>,
+}
+
+impl ThreatIntelReport {
+    /// Fold in the lookups for a second URL (the redirect destination), which
+    /// run after the first, so their times add up.
+    pub fn merge(&mut self, more: ThreatIntelReport) {
+        for m in more.matches {
+            if !self.matches.contains(&m) {
+                self.matches.push(m);
+            }
+        }
+        for e in more.errors {
+            if !self.errors.contains(&e) {
+                self.errors.push(e);
+            }
+        }
+        let add = |a: Option<u64>, b: Option<u64>| match (a, b) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+        };
+        self.urlhaus_ms = add(self.urlhaus_ms, more.urlhaus_ms);
+        self.threatfox_ms = add(self.threatfox_ms, more.threatfox_ms);
+    }
 }
 
 pub struct AbuseChClient {
@@ -119,10 +149,14 @@ impl AbuseChClient {
                 .iter()
                 .map(|term| self.cached("threatfox", term, self.threatfox_ioc(term))),
         );
-        let (url_res, host_res, tf_res) = tokio::join!(urlhaus_url, urlhaus_host, threatfox);
+        let urlhaus = super::timed(async { tokio::join!(urlhaus_url, urlhaus_host) });
+        let (((url_res, host_res), urlhaus_ms), (tf_res, threatfox_ms)) =
+            tokio::join!(urlhaus, super::timed(threatfox));
 
         let mut report = ThreatIntelReport {
             sources_checked: vec!["URLhaus".to_string(), "ThreatFox".to_string()],
+            urlhaus_ms: Some(urlhaus_ms),
+            threatfox_ms: Some(threatfox_ms),
             ..Default::default()
         };
         let mut add = |source: &str, res: anyhow::Result<Vec<ThreatIntelMatch>>| match res {
@@ -463,6 +497,45 @@ mod tests {
             .matches
             .iter()
             .any(|m| m.source == "ThreatFox" && m.malware.as_deref() == Some("Remcos")));
+        assert!(report.urlhaus_ms.is_some() && report.threatfox_ms.is_some());
+    }
+
+    #[test]
+    fn a_redirect_lookup_adds_its_time_and_keeps_matches_unique() {
+        let hit = ThreatIntelMatch {
+            source: "URLhaus".into(),
+            match_type: "url".into(),
+            indicator: "http://c2.example/x.exe".into(),
+            threat: None,
+            malware: None,
+            status: None,
+            confidence: None,
+            tags: vec![],
+            reference: None,
+        };
+        let mut first = ThreatIntelReport {
+            matches: vec![hit.clone()],
+            urlhaus_ms: Some(120),
+            threatfox_ms: Some(80),
+            ..Default::default()
+        };
+        first.merge(ThreatIntelReport {
+            matches: vec![hit],
+            urlhaus_ms: Some(30),
+            threatfox_ms: None,
+            ..Default::default()
+        });
+        assert_eq!(first.matches.len(), 1);
+        assert_eq!(first.urlhaus_ms, Some(150));
+        assert_eq!(first.threatfox_ms, Some(80));
+    }
+
+    #[test]
+    fn results_stored_before_timing_still_load() {
+        let old: ThreatIntelReport =
+            serde_json::from_value(json!({"sources_checked": [], "matches": [], "errors": []}))
+                .unwrap();
+        assert_eq!((old.urlhaus_ms, old.threatfox_ms), (None, None));
     }
 
     #[tokio::test]

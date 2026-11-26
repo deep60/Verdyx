@@ -68,6 +68,12 @@ pub struct UrlReputationReport {
     pub virustotal: Option<VirusTotalUrl>,
     pub safe_browsing: Option<SafeBrowsing>,
     pub domain_age: Option<DomainAge>,
+    /// How long each lookup took. `None` when it wasn't made, or on results
+    /// stored before lookups were timed.
+    #[serde(default)]
+    pub virustotal_ms: Option<u64>,
+    #[serde(default)]
+    pub safe_browsing_ms: Option<u64>,
 }
 
 pub struct UrlReputationClient {
@@ -133,14 +139,20 @@ impl UrlReputationClient {
     pub async fn check(&self, url: &url::Url, check_age: bool) -> UrlReputationReport {
         let vt = async {
             match &self.vt_key {
-                Some(key) => Some(self.virustotal(url, key).await),
-                None => None,
+                Some(key) => {
+                    let (r, ms) = super::timed(self.virustotal(url, key)).await;
+                    (Some(r), Some(ms))
+                }
+                None => (None, None),
             }
         };
         let gsb = async {
             match &self.gsb_key {
-                Some(key) => Some(self.safe_browsing(url, key).await),
-                None => None,
+                Some(key) => {
+                    let (r, ms) = super::timed(self.safe_browsing(url, key)).await;
+                    (Some(r), Some(ms))
+                }
+                None => (None, None),
             }
         };
         let age = async {
@@ -149,11 +161,14 @@ impl UrlReputationClient {
                 _ => None,
             }
         };
-        let (virustotal, safe_browsing, domain_age) = tokio::join!(vt, gsb, age);
+        let ((virustotal, virustotal_ms), (safe_browsing, safe_browsing_ms), domain_age) =
+            tokio::join!(vt, gsb, age);
         UrlReputationReport {
             virustotal,
             safe_browsing,
             domain_age,
+            virustotal_ms,
+            safe_browsing_ms,
         }
     }
 
@@ -431,7 +446,11 @@ mod tests {
             )
             .route(
                 "/gsb",
-                post(|| async { Json(json!({"matches": [{"threatType": "SOCIAL_ENGINEERING"}]})) }),
+                // Slow on purpose: its time must be its own, not VirusTotal's.
+                post(|| async {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    Json(json!({"matches": [{"threatType": "SOCIAL_ENGINEERING"}]}))
+                }),
             )
             .route(
                 "/rdap/{domain}",
@@ -469,6 +488,15 @@ mod tests {
             report.safe_browsing,
             Some(SafeBrowsing::Listed(vec!["SOCIAL_ENGINEERING".into()]))
         );
+        let (vt_ms, gsb_ms) = (
+            report.virustotal_ms.unwrap(),
+            report.safe_browsing_ms.unwrap(),
+        );
+        assert!(gsb_ms >= 300, "Safe Browsing took {gsb_ms} ms");
+        assert!(
+            vt_ms < gsb_ms,
+            "VirusTotal {vt_ms} ms, Safe Browsing {gsb_ms} ms"
+        );
         let age = report.domain_age.unwrap();
         assert_eq!(age.domain, "example.com");
         assert!(age.age_days > 9000);
@@ -478,5 +506,6 @@ mod tests {
         assert!(
             none.virustotal.is_none() && none.safe_browsing.is_none() && none.domain_age.is_none()
         );
+        assert!(none.virustotal_ms.is_none() && none.safe_browsing_ms.is_none());
     }
 }
