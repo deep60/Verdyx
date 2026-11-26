@@ -19,6 +19,8 @@ pub mod vt_sandbox;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
+use std::time::Instant;
 use uuid::Uuid;
 
 /// Base configuration for all scanners
@@ -217,6 +219,14 @@ pub trait Scanner {
 
     /// Check if scanner is healthy
     fn health_check(&self) -> bool;
+}
+
+/// Run a lookup and say how long it took, so each source reports its own time
+/// instead of the whole scan's.
+pub(crate) async fn timed<F: Future>(lookup: F) -> (F::Output, u64) {
+    let start = Instant::now();
+    let out = lookup.await;
+    (out, start.elapsed().as_millis() as u64)
 }
 
 #[cfg(test)]
