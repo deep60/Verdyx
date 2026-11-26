@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LiveFlow } from "@/components/diagrams/live-flow";
-import { SCENARIOS, buildLog, buildTimeline, progress, tally, withLiveEngines } from "@/lib/flow";
+import { CasePreview } from "@/components/case-preview";
+import { SCENARIOS, buildLog, buildTimeline, findLiveEngine, progress, tally, withLiveEngines } from "@/lib/flow";
 
 describe("tally", () => {
   it("lets a hash match decide on its own", () => {
@@ -34,20 +35,70 @@ describe("tally", () => {
   });
 });
 
+// What production's /api/engines returns: UUIDs, so engines are matched by name.
+const PRODUCTION = [
+  { id: "79617261-5f65", name: "YARA Engine", status: "online" },
+  { id: "636c616d-6176", name: "ClamAV Scanner", status: "online" },
+  { id: "6d6c5f65-6e67", name: "Machine Learning Classifier", status: "advisory" },
+  { id: "70655f6d-6f64", name: "Windows Program Model (EMBER2024)", status: "online" },
+];
+
+describe("findLiveEngine", () => {
+  it("matches engines by name, not by id", () => {
+    expect(findLiveEngine("clamav", PRODUCTION)?.name).toBe("ClamAV Scanner");
+    expect(findLiveEngine("pe_model", PRODUCTION)?.name).toBe("Windows Program Model (EMBER2024)");
+    expect(findLiveEngine("ml", PRODUCTION)?.name).toBe("Machine Learning Classifier");
+    expect(findLiveEngine("hash", PRODUCTION)).toBeUndefined();
+  });
+});
+
 describe("withLiveEngines", () => {
-  it("shows an engine that is off right now as not voting", () => {
-    const s = withLiveEngines(SCENARIOS.file, [{ id: "yara", name: "YARA", status: "unavailable" }]);
-    const yara = s.engines.find((e) => e.id === "yara")!;
-    expect(yara).toMatchObject({ advisory: true, vote: "none" });
+  it("matches production: ClamAV and EMBER2024 vote, the untrained classifier advises", () => {
+    const s = withLiveEngines(SCENARIOS.file, PRODUCTION);
+    const by = (id: string) => s.engines.find((e) => e.id === id)!;
+    expect(by("clamav")).toMatchObject({ vote: "malicious" });
+    expect(by("clamav").advisory).toBeFalsy();
+    expect(by("pe_model").advisory).toBeFalsy();
+    expect(by("ml")).toMatchObject({ advisory: true, vote: "none" });
   });
 
-  it("lets ClamAV vote once it is online", () => {
-    const s = withLiveEngines(SCENARIOS.file, [{ id: "clamav", name: "ClamAV", status: "online" }]);
-    expect(s.engines.find((e) => e.id === "clamav")).toMatchObject({ advisory: false, vote: "malicious" });
+  it("shows an engine that is off right now as not voting", () => {
+    const s = withLiveEngines(SCENARIOS.file, [{ id: "x", name: "ClamAV Scanner", status: "unavailable" }]);
+    expect(s.engines.find((e) => e.id === "clamav")).toMatchObject({ advisory: true, vote: "none" });
+  });
+
+  it("lets the classifier vote once it is trained", () => {
+    const s = withLiveEngines(SCENARIOS.file, [{ id: "x", name: "Machine Learning Classifier", status: "online" }]);
+    expect(s.engines.find((e) => e.id === "ml")).toMatchObject({ advisory: false, vote: "malicious" });
   });
 
   it("leaves URL and email examples alone", () => {
-    expect(withLiveEngines(SCENARIOS.url, [{ id: "yara", name: "YARA", status: "off" }])).toBe(SCENARIOS.url);
+    expect(withLiveEngines(SCENARIOS.url, PRODUCTION)).toBe(SCENARIOS.url);
+  });
+});
+
+describe("CasePreview", () => {
+  const render = (engines?: unknown) => {
+    const client = new QueryClient();
+    if (engines) client.setQueryData(["/api/engines"], engines);
+    return renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <CasePreview />
+      </QueryClientProvider>,
+    );
+  };
+
+  it("counts ClamAV and EMBER2024, and leaves only the untrained classifier out", () => {
+    const html = render(PRODUCTION);
+    expect(html).toContain("7 of 8 · 5 malicious · 1 suspicious · 1 benign");
+    expect(html).toContain("ML advisory");
+    expect(html).not.toContain("ClamAV off");
+  });
+
+  it("shows an engine as off when production says so", () => {
+    const html = render([{ id: "x", name: "ClamAV Scanner", status: "unavailable" }]);
+    expect(html).toContain("ClamAV off");
+    expect(html).toContain("6 of 8");
   });
 });
 
