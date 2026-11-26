@@ -1,216 +1,273 @@
 import { useState } from "react";
+import { Link } from "wouter";
+import { ArrowUpRight, Check, Copy, Globe, KeyRound, Play, Terminal } from "lucide-react";
 import { Navigation } from "@/components/navigation";
 import { Footer } from "@/components/footer";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Key, Copy, Check, Play, Terminal, Globe, Webhook } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 import { SEO } from "@/components/seo";
-import { apiRequest } from "@/lib/queryClient";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
-import { useLocation } from "wouter";
+import { cn } from "@/lib/utils";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 
-const ENDPOINT_GROUPS = [
+const REPO = "https://github.com/deep60/Verdyx";
+
+type Snippet = { id: string; label: string; install?: string; code: string; doc: string };
+
+const QUICKSTART: Snippet[] = [
   {
-    category: "Submissions & Multi-Engine Scanning",
+    id: "cli",
+    label: "CLI",
+    install: "git clone https://github.com/deep60/Verdyx.git && cd Verdyx/sdk/typescript && npm link",
+    code: `export VERDYX_API_KEY=vdx_...
+
+verdyx scan suspicious.exe https://example.com/login
+
+# MALICIOUS  suspicious.exe             3/4 voting engines flagged it
+# CLEAN      https://example.com/login  0/3 voting engines flagged it
+
+# In CI: exit code 2 when a verdict reaches --fail-on
+verdyx scan --fail-on suspicious dist/*.exe`,
+    doc: `${REPO}/tree/main/sdk/typescript#the-command`,
+  },
+  {
+    id: "python",
+    label: "Python",
+    install: 'pip install "git+https://github.com/deep60/Verdyx.git#subdirectory=sdk/python"',
+    code: `from verdyx import Verdyx
+
+client = Verdyx()  # reads VERDYX_API_KEY
+
+result = client.scan("suspicious.exe")
+print(result.verdict)     # "malicious" | "suspicious" | "clean" | "unknown"
+print(result.votes)       # {"malicious": 3, "suspicious": 0, "clean": 1, "total": 4}
+print(result.report_url)  # https://verdyx.dev/analysis/...
+
+for e in result.engines:
+    print(e.name, e.verdict, e.reason)`,
+    doc: `${REPO}/tree/main/sdk/python`,
+  },
+  {
+    id: "js",
+    label: "JavaScript",
+    install: "git clone https://github.com/deep60/Verdyx.git && cd Verdyx/sdk/typescript && npm link",
+    code: `import { Verdyx } from "verdyx";
+
+const client = new Verdyx(); // reads VERDYX_API_KEY
+
+const result = await client.scan("https://example.com/login");
+console.log(result.verdict);   // "malicious" | "suspicious" | "clean" | "unknown"
+console.log(result.votes);     // { malicious: 0, suspicious: 0, clean: 3, total: 3 }
+console.log(result.reportUrl); // https://verdyx.dev/analysis/...`,
+    doc: `${REPO}/tree/main/sdk/typescript#the-sdk`,
+  },
+  {
+    id: "action",
+    label: "GitHub Action",
+    code: `# .github/workflows/scan.yml
+- uses: deep60/Verdyx/action@main
+  with:
+    api-key: \${{ secrets.VERDYX_API_KEY }}
+    paths: |
+      dist/**/*.exe
+      dist/**/*.dll
+    urls: https://downloads.example.com/latest
+    fail-on: malicious`,
+    doc: `${REPO}/tree/main/action`,
+  },
+  {
+    id: "mcp",
+    label: "AI assistants",
+    code: `# Let Claude, Cursor or any MCP client scan files and links
+claude mcp add verdyx \\
+  --env VERDYX_API_KEY=vdx_... \\
+  --env VERDYX_MCP_ROOTS="$HOME/Downloads" \\
+  -- verdyx mcp`,
+    doc: `${REPO}/tree/main/sdk/typescript#mcp-server-for-ai-assistants`,
+  },
+  {
+    id: "curl",
+    label: "curl",
+    code: `# 1. Submit a file (or -F url=https://... for a link)
+curl -s https://api.verdyx.dev/api/v1/submissions/file \\
+  -H "X-API-Key: $VERDYX_API_KEY" \\
+  -F file=@suspicious.exe -F analysisType=full
+
+# 2. Read the verdict and every engine's vote
+curl -s https://api.verdyx.dev/api/v1/submissions/$ID/consensus \\
+  -H "X-API-Key: $VERDYX_API_KEY"`,
+    doc: `${REPO}#api`,
+  },
+];
+
+type Endpoint = { method: "GET" | "POST"; path: string; description: string };
+type Group = { title: string; items: Endpoint[] };
+
+const ENDPOINTS: Group[] = [
+  {
+    title: "Scanning",
     items: [
       {
         method: "POST",
-        path: "/api/v1/submissions/file",
-        description: "Submit binary file, phishing email (.eml / MIME), or URL for multi-engine analysis",
-        methodColor: "bg-accent text-accent-foreground",
-      },
-      {
-        method: "POST",
-        path: "/api/v1/submissions/:id/start-analysis",
-        description: "Enqueue or re-trigger parallel execution across all 8 analyzer engines",
-        methodColor: "bg-accent text-accent-foreground",
+        path: "/submissions/file",
+        description: "Submit a file, an .eml message (field file) or a link (field url). Returns the scan id.",
       },
       {
         method: "GET",
-        path: "/api/v1/submissions/:id/analyses",
-        description: "Retrieve per-engine detections, PE/ELF metadata, entropy, and MIME email forensics",
-        methodColor: "bg-primary text-primary-foreground",
+        path: "/submissions/:id",
+        description: "Status of a scan: pending, analyzing, completed or failed.",
       },
       {
         method: "GET",
-        path: "/api/v1/submissions/:id/consensus",
-        description: "Get the consensus verdict and the per-engine vote breakdown",
-        methodColor: "bg-primary text-primary-foreground",
+        path: "/submissions/:id/consensus",
+        description: "The verdict, and how each voting engine voted.",
+      },
+      {
+        method: "GET",
+        path: "/submissions/:id/analyses",
+        description: "Each engine's full result: detections, file metadata, entropy, email headers.",
+      },
+      {
+        method: "GET",
+        path: "/submissions/:id/similar",
+        description: "Files that look like this one, by TLSH, ssdeep or imphash.",
       },
     ],
   },
   {
-    category: "36-Module Website OSINT Reconnaissance",
+    title: "Websites",
     items: [
       {
         method: "GET",
-        path: "/api/v1/analysis/web-intel?url=example.com",
-        description: "Run live 36+ module OSINT recon (DoH DNS, TLS, Shodan ports/CVEs, RDAP WHOIS, HSTS, DOM)",
-        methodColor: "bg-primary text-primary-foreground",
+        path: "/analysis/web-intel?url=",
+        description: "Thirty-six checks on a site: DNS, TLS, open ports, WHOIS age, headers and page content.",
       },
-      {
-        method: "GET",
-        path: "/api/v1/submissions/:id/web-intel",
-        description: "Fetch cached or live 36-module Website Intelligence for a URL submission",
-        methodColor: "bg-primary text-primary-foreground",
-      },
+      { method: "GET", path: "/submissions/:id/web-intel", description: "The same checks, saved with a link scan." },
     ],
   },
   {
-    category: "Commit-Reveal Voting, Disputes & 30-Day Grading",
+    title: "Platform",
     items: [
       {
         method: "GET",
-        path: "/api/v1/voting/bounty/:bountyId/phase",
-        description: "Check active commit/reveal voting window and sealed commitment count",
-        methodColor: "bg-primary text-primary-foreground",
+        path: "/engines",
+        description: "Every engine and whether it's voting, advisory or off right now.",
       },
-      {
-        method: "POST",
-        path: "/api/v1/voting/bounty/:bountyId/commit",
-        description: "Seal a SHA-256 salted verdict commitment without leaking vote direction",
-        methodColor: "bg-accent text-accent-foreground",
-      },
-      {
-        method: "POST",
-        path: "/api/v1/voting/bounty/:bountyId/reveal",
-        description: "Reveal plaintext verdict, confidence, and salt after the commit window closes",
-        methodColor: "bg-accent text-accent-foreground",
-      },
-      {
-        method: "POST",
-        path: "/api/v1/disputes/create",
-        description: "Open a formal challenge against a finalized consensus verdict",
-        methodColor: "bg-accent text-accent-foreground",
-      },
-      {
-        method: "GET",
-        path: "/api/v1/grades/:bountyId",
-        description: "Retrieve 30-day delayed ground-truth re-scan grade and crowd overturn status",
-        methodColor: "bg-primary text-primary-foreground",
-      },
+      { method: "POST", path: "/webhooks", description: "Get a signed POST to your endpoint when a scan finishes." },
     ],
   },
-  {
-    category: "Reputation, Wallet & Outbound Webhooks",
-    items: [
-      {
-        method: "GET",
-        path: "/api/v1/reputation/standings",
-        description: "Leaderboard rankings by historical accuracy, win streak, and staked ETH",
-        methodColor: "bg-primary text-primary-foreground",
-      },
-      {
-        method: "GET",
-        path: "/api/v1/chain/bounties?artifact=",
-        description: "On-chain bounties posted on a file hash or URL, from the server's index",
-        methodColor: "bg-primary text-primary-foreground",
-      },
-      {
-        method: "POST",
-        path: "/api/v1/webhooks",
-        description: "Register an HMAC-signed webhook endpoint with SSRF protection",
-        methodColor: "bg-accent text-accent-foreground",
-      },
-    ],
-  },
+  ...(BOUNTIES_ENABLED
+    ? [
+        {
+          title: "Analyst review (testnet)",
+          items: [
+            {
+              method: "GET" as const,
+              path: "/voting/bounty/:bountyId/phase",
+              description: "Which review phase a bounty is in.",
+            },
+            {
+              method: "POST" as const,
+              path: "/voting/bounty/:bountyId/commit",
+              description: "Submit a sealed vote.",
+            },
+            {
+              method: "POST" as const,
+              path: "/voting/bounty/:bountyId/reveal",
+              description: "Open a sealed vote once voting closes.",
+            },
+          ],
+        },
+      ]
+    : []),
 ];
 
 const PLAYGROUND_PRESETS = [
-  { label: "Gateway Health", path: "/api/health" },
-  { label: "Platform Stats", path: "/api/analysis/stats" },
-  { label: "Security Engines", path: "/api/engines" },
-  { label: "Reputation Standings", path: "/api/reputation/standings" },
-  { label: "My Submissions", path: "/api/submissions" },
-  { label: "Website OSINT (example.com)", path: "/api/analysis/web-intel?url=https://example.com" },
+  { label: "Health", path: "/api/health" },
+  { label: "Engines", path: "/api/engines" },
+  { label: "Platform stats", path: "/api/analysis/stats" },
+  { label: "My scans", path: "/api/submissions" },
+  { label: "Website checks", path: "/api/analysis/web-intel?url=https://example.com" },
 ];
 
-export default function ApiDocs() {
-  const { toast } = useToast();
-  const { isAuthenticated } = useAuth();
-  const [, setLocation] = useLocation();
-  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
+function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+      aria-label={copied ? "Copied" : label}
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-success" aria-hidden />
+      ) : (
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+      )}
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
 
-  // Interactive Playground state
-  const [playPath, setPlayPath] = useState("/api/health");
+function CodeBlock({ code, title }: { code: string; title?: string }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-background">
+      <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{title ?? ""}</span>
+        <CopyButton text={code} />
+      </div>
+      <pre className="overflow-x-auto p-4 text-[13px] leading-relaxed">
+        <code className="font-mono text-foreground">{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function MethodTag({ method }: { method: Endpoint["method"] }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex w-12 shrink-0 justify-center rounded px-1.5 py-0.5 font-mono text-[11px] font-medium",
+        method === "GET" ? "bg-muted/50 text-foreground" : "bg-foreground text-background",
+      )}
+    >
+      {method}
+    </span>
+  );
+}
+
+export default function ApiDocs() {
+  const { isAuthenticated } = useAuth();
+  const [lang, setLang] = useState(QUICKSTART[0].id);
+  const snippet = QUICKSTART.find((s) => s.id === lang) ?? QUICKSTART[0];
+
+  const [playPath, setPlayPath] = useState("/api/engines");
   const [playStatus, setPlayStatus] = useState<number | null>(null);
   const [playLatency, setPlayLatency] = useState<number | null>(null);
-  const [playOutput, setPlayOutput] = useState<string>(
-    '// Click "Send Live Request" to inspect the real JSON response from your Verdyx gateway.'
-  );
+  const [playOutput, setPlayOutput] = useState("// Pick a request and send it to see the live response.");
   const [playRunning, setPlayRunning] = useState(false);
-
-  const copyToClipboard = async (text: string, label = "Code snippet copied successfully") => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast({
-        title: "Copied to clipboard",
-        description: label,
-      });
-    } catch (_error) {
-      toast({
-        title: "Failed to copy",
-        description: "Please copy manually",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleGenerateApiKey = async () => {
-    if (!isAuthenticated) {
-      toast({
-        title: "Authentication required",
-        description: "Please sign in to generate an API key.",
-      });
-      setLocation("/login");
-      return;
-    }
-
-    setGenerating(true);
-    try {
-      const res = await apiRequest("POST", "/api/auth/api-key", {
-        name: "Developer CLI Key",
-      });
-      const data = await res.json();
-      if (data.api_key) {
-        setGeneratedKey(data.api_key);
-        toast({
-          title: "API Key generated",
-          description: "Copy and store your key securely — it is only shown once.",
-        });
-      }
-    } catch (err) {
-      toast({
-        title: "Could not generate API key",
-        description: err instanceof Error ? err.message : "Please try again",
-        variant: "destructive",
-      });
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   const runPlayground = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    const targetPath = playPath.trim();
-    if (!targetPath) return;
+    const target = playPath.trim();
+    // Same-origin API paths only: the playground is for reading Verdyx, not for fetching arbitrary URLs.
+    if (!target.startsWith("/api/")) {
+      setPlayStatus(null);
+      setPlayOutput("// Paths start with /api/, for example /api/engines");
+      return;
+    }
     setPlayRunning(true);
     const t0 = performance.now();
     try {
-      const headers: Record<string, string> = { Accept: "application/json" };
-      const res = await fetch(targetPath, {
-        method: "GET",
-        headers,
-        credentials: "include",
-      });
-      const elapsed = Math.round(performance.now() - t0);
+      const res = await fetch(target, { headers: { Accept: "application/json" }, credentials: "include" });
       setPlayStatus(res.status);
-      setPlayLatency(elapsed);
+      setPlayLatency(Math.round(performance.now() - t0));
       const raw = await res.text();
       try {
         setPlayOutput(JSON.stringify(JSON.parse(raw), null, 2));
@@ -226,264 +283,237 @@ export default function ApiDocs() {
     }
   };
 
-  const codeExample = `import hashlib, secrets, requests
-
-API_KEY = "${generatedKey || "YOUR_API_KEY"}"
-BASE = "https://api.verdyx.dev/api/v1"
-HEADERS = {"Authorization": f"Bearer {API_KEY}"}
-
-# 1. Submit a binary, .eml phishing message, or URL
-resp = requests.post(
-    f"{BASE}/submissions/file",
-    headers=HEADERS,
-    files={"file": open("suspicious_sample.exe", "rb")},
-    data={"bountyAmount": "0.1", "analysisType": "full", "priority": "true"},
-)
-submission = resp.json()
-sub_id = submission["id"]
-
-# 2. Fetch per-engine detections & the consensus
-consensus = requests.get(f"{BASE}/submissions/{sub_id}/consensus", headers=HEADERS).json()
-print("Verdict:", consensus["finalVerdict"], "Flagged by:", consensus["flaggedVotes"], "of", consensus["totalVotes"])
-
-# 3. Seal a Commit-Reveal vote on a bounty
-salt = secrets.token_hex(16)
-preimage = f"{bounty_id}:{user_id}:malicious:0.9500:{salt}".encode()
-commitment = hashlib.sha256(preimage).hexdigest()
-requests.post(f"{BASE}/voting/bounty/{bounty_id}/commit", headers=HEADERS, json={
-    "engine_id": user_id,
-    "commitment": commitment,
-})`;
+  const keyHref = isAuthenticated ? "/profile#developer" : "/login?redirect=%2Fprofile%23developer";
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
       <SEO
-        title="Developer API & Live Playground — Verdyx"
-        description="Integrate Verdyx multi-engine malware analysis, 36-module Website OSINT, bounty commit-reveal voting, and HMAC webhooks into CI/CD and SOAR pipelines."
+        title="API, CLI and SDKs — Verdyx"
+        description="Scan files and links from your terminal, your code, your CI or your AI assistant. A CLI, Python and JavaScript SDKs, a GitHub Action and a REST API."
       />
       <Navigation />
 
-      <div id="main-content" tabIndex={-1} className="relative z-10 flex-1 py-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
-          <div className="max-w-2xl">
-            <h1 className="text-3xl font-medium tracking-[-0.035em] sm:text-5xl">
-              API
-            </h1>
-            <p className="mt-3 text-base leading-relaxed text-muted-foreground">
-              Submit a file or a URL, read the engine votes, and receive the quorum. Webhooks and the websocket carry the same case when the scan finishes.
-            </p>
-          </div>
+      <main id="main-content" tabIndex={-1} className="relative z-10 flex-1 pb-20 pt-10 sm:pt-14">
+        <div className="mx-auto max-w-6xl space-y-16 px-4 sm:px-6 lg:px-8">
+          {/* Hero */}
+          <header className="grid animate-fade-up gap-8 lg:grid-cols-12 lg:items-end">
+            <div className="lg:col-span-7">
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Developers</p>
+              <h1 className="mt-3 font-display text-4xl font-medium leading-[1.02] tracking-[-0.045em] sm:text-6xl">
+                Scan from anywhere you ship.
+              </h1>
+              <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+                One command in your terminal, three lines in your code, or one step in CI. Every scan runs every engine
+                and comes back with the verdict and each engine's reason.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 lg:col-span-5 lg:justify-end">
+              <Button asChild size="lg" data-testid="button-get-api-key">
+                <Link href={keyHref}>
+                  <KeyRound className="mr-2 h-4 w-4" aria-hidden />
+                  Get an API key
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline">
+                <a href={`${REPO}/tree/main/sdk`} target="_blank" rel="noreferrer">
+                  SDKs on GitHub
+                  <ArrowUpRight className="ml-1.5 h-4 w-4" aria-hidden />
+                </a>
+              </Button>
+            </div>
+          </header>
 
-          <Tabs defaultValue="reference" className="space-y-8">
-            <TabsList className="grid w-full max-w-md mx-auto grid-cols-2">
-              <TabsTrigger value="reference">API Reference &amp; Keys</TabsTrigger>
-              <TabsTrigger value="playground" data-testid="tab-api-playground">
-                <Terminal className="h-4 w-4 mr-1.5" />
-                Live API Playground
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Tab 1: Complete Reference & SDK Snippet */}
-            <TabsContent value="reference" className="space-y-8">
-              <div className="grid lg:grid-cols-12 gap-8 items-start">
-                <div className="lg:col-span-7 space-y-6">
-                  {ENDPOINT_GROUPS.map((group) => (
-                    <Card key={group.category} className="glassmorphism border-primary/20">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-lg font-display">{group.category}</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        {group.items.map((endpoint) => (
-                          <div
-                            key={`${endpoint.method}-${endpoint.path}`}
-                            className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <Badge className={`font-mono text-xs ${endpoint.methodColor}`}>
-                                {endpoint.method}
-                              </Badge>
-                              <code className="text-xs font-mono text-primary break-all">
-                                {endpoint.path}
-                              </code>
-                            </div>
-                            <p className="text-xs text-muted-foreground">{endpoint.description}</p>
-                          </div>
-                        ))}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-
-                <div className="lg:col-span-5 space-y-6">
-                  <Card className="glassmorphism neon-border">
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg">Python SDK &amp; Commit-Reveal Example</CardTitle>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => copyToClipboard(codeExample)}
-                          data-testid="button-copy-code"
-                        >
-                          <Copy className="w-4 h-4" />
-                        </Button>
-                      </div>
-                      <CardDescription>
-                        End-to-end example covering artifact upload, consensus lookup, and SHA-256 commit-reveal sealing.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="rounded-xl bg-background border border-border/80 p-4">
-                        <pre className="text-xs font-mono text-[#141513] overflow-x-auto">
-                          <code className="whitespace-pre-wrap text-[#141513]">{codeExample}</code>
-                        </pre>
-                      </div>
-
-                      <div className="space-y-3 mt-6 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Gateway Base Path</span>
-                          <Badge variant="outline" className="font-mono">/api/v1</Badge>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Authentication</span>
-                          <Badge variant="outline" className="font-mono">Bearer JWT / API Key</Badge>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-muted-foreground">Active Engines</span>
-                          <Badge variant="outline" className="font-mono">8 Analyzers + MIME Email</Badge>
-                        </div>
-                      </div>
-
-                      {generatedKey && (
-                        <div className="mt-4 p-3 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-between gap-2">
-                          <code
-                            className="text-xs font-mono text-primary truncate"
-                            data-testid="text-generated-api-key"
-                          >
-                            {generatedKey}
-                          </code>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => copyToClipboard(generatedKey, "API key copied to clipboard")}
-                          >
-                            <Check className="w-4 h-4 mr-1" />
-                            Copy
-                          </Button>
-                        </div>
-                      )}
-
-                      <Button
-                        className="w-full mt-6"
-                        onClick={handleGenerateApiKey}
-                        disabled={generating}
-                        data-testid="button-get-api-key"
-                      >
-                        <Key className="w-4 h-4 mr-2" />
-                        {generating
-                          ? "Generating..."
-                          : generatedKey
-                            ? "Generate New API Key"
-                            : "Get API Key"}
-                      </Button>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="glassmorphism border-primary/20">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Webhook className="h-4 w-4 text-primary" />
-                        WebSocket &amp; Webhook Streams
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-xs text-muted-foreground">
-                      <p>
-                        Subscribe to live browser events over <code className="text-accent font-mono">/ws</code> or configure HMAC-SHA256 webhooks in your Profile to push <code className="font-mono text-foreground">analysis.completed</code> and <code className="font-mono text-foreground">bounty.finalized</code> payloads to your SOAR.
-                      </p>
-                    </CardContent>
-                  </Card>
-                </div>
+          {/* Quickstart */}
+          <section aria-labelledby="quickstart" className="animate-fade-up [animation-delay:120ms]">
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 id="quickstart" className="text-xl font-medium tracking-tight">
+                  Quickstart
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Create a key with the <code className="font-mono text-foreground">read</code> and{" "}
+                  <code className="font-mono text-foreground">scan</code> scopes, set{" "}
+                  <code className="font-mono text-foreground">VERDYX_API_KEY</code>, and run one of these.
+                </p>
               </div>
-            </TabsContent>
+            </div>
 
-            {/* Tab 2: Live Interactive API Playground */}
-            <TabsContent value="playground">
-              <Card className="glassmorphism neon-border">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Terminal className="h-5 w-5 text-primary" />
-                    Interactive API Explorer
-                  </CardTitle>
-                  <CardDescription>
-                    Execute live GET requests against your connected Verdyx API Gateway and inspect the status code, latency, and JSON payload.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    {PLAYGROUND_PRESETS.map((preset) => (
-                      <Button
-                        key={preset.path}
-                        type="button"
-                        size="sm"
-                        variant={playPath === preset.path ? "default" : "outline"}
-                        className="text-xs font-mono"
-                        onClick={() => setPlayPath(preset.path)}
+            <Card className="overflow-hidden">
+              <div
+                className="flex gap-1 overflow-x-auto border-b border-border px-2 [&::-webkit-scrollbar]:hidden"
+                role="tablist"
+                aria-label="Language"
+              >
+                {QUICKSTART.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={lang === s.id}
+                    onClick={() => setLang(s.id)}
+                    data-testid={`quickstart-${s.id}`}
+                    className={cn(
+                      "relative shrink-0 px-3 py-3 text-sm transition-colors",
+                      "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-foreground after:transition-transform after:duration-300 after:ease-expo-out",
+                      lang === s.id
+                        ? "text-foreground after:scale-x-100"
+                        : "text-muted-foreground after:scale-x-0 hover:text-foreground",
+                    )}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <div key={snippet.id} className="animate-fade-in space-y-4 p-4 sm:p-6">
+                {snippet.install && <CodeBlock title="Install" code={snippet.install} />}
+                <CodeBlock title={snippet.install ? "Use" : snippet.label} code={snippet.code} />
+                <a
+                  href={snippet.doc}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Full {snippet.label} guide
+                  <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
+                </a>
+              </div>
+            </Card>
+          </section>
+
+          {/* Reference */}
+          <section aria-labelledby="reference" className="grid gap-10 lg:grid-cols-12">
+            <div className="lg:col-span-4">
+              <h2 id="reference" className="text-xl font-medium tracking-tight">
+                REST API
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                The clients above wrap these. Send your key in the{" "}
+                <code className="font-mono text-foreground">X-API-Key</code> header.
+              </p>
+              <dl className="mt-6 divide-y divide-border rounded-lg border border-border text-sm">
+                {[
+                  ["Base URL", "https://api.verdyx.dev/api/v1"],
+                  ["Auth", "X-API-Key header"],
+                  ["Format", "JSON · multipart for uploads"],
+                  ["Live updates", "Webhooks or /ws"],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex items-baseline justify-between gap-4 px-4 py-2.5">
+                    <dt className="shrink-0 text-muted-foreground">{k}</dt>
+                    <dd className="min-w-0 break-all text-right font-mono text-xs">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                Webhooks are signed with HMAC-SHA256. Set them up under{" "}
+                <Link href="/profile#developer" className="text-foreground underline-offset-2 hover:underline">
+                  API and webhooks
+                </Link>{" "}
+                on your profile. Reads retry safely on 429; uploads don't, so a lost response never makes a second scan.
+              </p>
+            </div>
+
+            <div className="space-y-8 lg:col-span-8">
+              {ENDPOINTS.map((group) => (
+                <div key={group.title}>
+                  <h3 className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                    {group.title}
+                  </h3>
+                  <Card className="divide-y divide-border overflow-hidden">
+                    {group.items.map((e) => (
+                      <div
+                        key={`${e.method}-${e.path}`}
+                        className="flex flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-muted/20 sm:flex-row sm:items-baseline sm:gap-4"
                       >
-                        {preset.label}
-                      </Button>
+                        <div className="flex min-w-0 items-center gap-3 sm:w-[46%] sm:shrink-0">
+                          <MethodTag method={e.method} />
+                          <code className="truncate font-mono text-[13px]">{e.path}</code>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{e.description}</p>
+                      </div>
                     ))}
-                  </div>
+                  </Card>
+                </div>
+              ))}
+            </div>
+          </section>
 
-                  <form onSubmit={runPlayground} className="flex flex-col sm:flex-row gap-2">
-                    <div className="flex items-center gap-2 flex-1">
-                      <Badge className="bg-primary text-primary-foreground font-mono">GET</Badge>
-                      <Input
-                        value={playPath}
-                        onChange={(e) => setPlayPath(e.target.value)}
-                        className="font-mono text-xs"
-                        placeholder="/api/health"
-                        data-testid="input-playground-path"
-                      />
-                    </div>
-                    <Button type="submit" disabled={playRunning} data-testid="button-run-playground">
-                      <Play className="h-4 w-4 mr-1.5" />
-                      {playRunning ? "Running..." : "Send Live Request"}
-                    </Button>
-                  </form>
-
-                  <div className="rounded-xl bg-background border border-border/80 p-4 space-y-3">
-                    <div className="flex items-center justify-between border-b border-border/50 pb-2 text-xs font-mono text-[#141513]">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-3.5 w-3.5 text-[#141513]" />
-                        <span className="font-semibold text-[#141513]">Response Payload</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {playStatus !== null && (
-                          <Badge
-                            variant={playStatus >= 200 && playStatus < 300 ? "default" : "destructive"}
-                          >
-                            {playStatus === 0 ? "NETWORK ERROR" : `HTTP ${playStatus}`}
-                          </Badge>
+          {/* Playground */}
+          <section aria-labelledby="playground">
+            <div className="mb-5">
+              <h2 id="playground" className="flex items-center gap-2 text-xl font-medium tracking-tight">
+                <Terminal className="h-5 w-5" aria-hidden />
+                Try it live
+              </h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Read-only requests against Verdyx, sent with your browser session.
+              </p>
+            </div>
+            <Card className="space-y-4 p-4 sm:p-6">
+              <div className="flex flex-wrap gap-2">
+                {PLAYGROUND_PRESETS.map((p) => (
+                  <button
+                    key={p.path}
+                    type="button"
+                    onClick={() => setPlayPath(p.path)}
+                    className={cn(
+                      "rounded-md border px-2.5 py-1 text-xs transition-colors",
+                      playPath === p.path
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <form onSubmit={runPlayground} className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-1 items-center gap-2 rounded-md border border-input bg-background pl-2 focus-within:ring-2 focus-within:ring-ring">
+                  <MethodTag method="GET" />
+                  <Input
+                    value={playPath}
+                    onChange={(e) => setPlayPath(e.target.value)}
+                    className="border-0 font-mono text-xs shadow-none focus-visible:ring-0"
+                    placeholder="/api/engines"
+                    aria-label="Request path"
+                    data-testid="input-playground-path"
+                  />
+                </div>
+                <Button type="submit" disabled={playRunning} data-testid="button-run-playground">
+                  <Play className="mr-1.5 h-4 w-4" aria-hidden />
+                  {playRunning ? "Sending…" : "Send"}
+                </Button>
+              </form>
+              <div className="overflow-hidden rounded-lg border border-border bg-background">
+                <div className="flex items-center justify-between border-b border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Globe className="h-3.5 w-3.5" aria-hidden />
+                    Response
+                  </span>
+                  <span className="flex items-center gap-3">
+                    {playStatus !== null && (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5",
+                          playStatus >= 200 && playStatus < 300 ? "text-success" : "text-destructive",
                         )}
-                        {playLatency !== null && (
-                          <Badge variant="outline" className="text-[#141513]">
-                            {playLatency} ms
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <pre className="text-xs font-mono font-medium text-[#141513] max-h-[420px] overflow-auto whitespace-pre-wrap">
-                      <code className="text-[#141513]">{playOutput}</code>
-                    </pre>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
+                        {playStatus === 0 ? "Network error" : `HTTP ${playStatus}`}
+                      </span>
+                    )}
+                    {playLatency !== null && <span>{playLatency} ms</span>}
+                  </span>
+                </div>
+                <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap p-4 text-xs leading-relaxed">
+                  <code className="font-mono text-foreground">{playOutput}</code>
+                </pre>
+              </div>
+            </Card>
+          </section>
         </div>
-      </div>
+      </main>
 
-      <Footer tag="api-v1" />
+      <Footer tag="api · v1" />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -195,22 +196,26 @@ export function CommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="PLATFORM & ACCOUNT">
-          <CommandItem
-            value="bounty-marketplace-reputation-leaderboard"
-            onSelect={() => runCommand(() => setLocation("/marketplace"))}
-          >
-            <Award className="h-4 w-4" />
-            <span>Bounty Marketplace &amp; Reputation Standings</span>
-            <CommandShortcut>BOUNTY</CommandShortcut>
-          </CommandItem>
-          <CommandItem
-            value="wallet-balance-stakes-withdrawals-marketplace"
-            onSelect={() => runCommand(() => setLocation("/marketplace"))}
-          >
-            <Wallet className="h-4 w-4" />
-            <span>Your Wallet, Stakes &amp; Withdrawals</span>
-            <CommandShortcut>WALLET</CommandShortcut>
-          </CommandItem>
+          {BOUNTIES_ENABLED && (
+            <>
+            <CommandItem
+              value="bounty-marketplace-reputation-leaderboard"
+              onSelect={() => runCommand(() => setLocation("/marketplace"))}
+            >
+              <Award className="h-4 w-4" />
+              <span>Bounty Marketplace &amp; Reputation Standings</span>
+              <CommandShortcut>BOUNTY</CommandShortcut>
+            </CommandItem>
+            <CommandItem
+              value="wallet-balance-stakes-withdrawals-marketplace"
+              onSelect={() => runCommand(() => setLocation("/marketplace"))}
+            >
+              <Wallet className="h-4 w-4" />
+              <span>Your Wallet, Stakes &amp; Withdrawals</span>
+              <CommandShortcut>WALLET</CommandShortcut>
+            </CommandItem>
+            </>
+          )}
           <CommandItem
             value="webhooks-hmac-delivery-logs"
             onSelect={() => runCommand(() => setLocation("/profile"))}

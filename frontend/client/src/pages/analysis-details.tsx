@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExportReport } from "@/components/export-report";
 import { PostBountyPanel } from "@/components/post-bounty-panel";
 import { CommitRevealPanel } from "@/components/commit-reveal-panel";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 import { WebsiteIntelligencePanel } from "@/components/website-intelligence-panel";
 import { EmailForensicsPanel } from "@/components/email-forensics-panel";
 import { OfficeForensicsPanel, hasOfficeAnalysis } from "@/components/office-forensics-panel";
@@ -560,6 +561,7 @@ export default function AnalysisDetails() {
           </TabsContent>
         </Tabs>
 
+        {BOUNTIES_ENABLED && (
         <section className="mt-10 border border-border bg-card/50 p-6" aria-labelledby="bounty-heading">
           <h2 id="bounty-heading" className="mb-1 text-lg font-medium text-foreground">
             Bounty
@@ -578,9 +580,10 @@ export default function AnalysisDetails() {
             }}
           />
         </section>
+        )}
 
         {/* Analyst review exists only for scans posted with a bounty. */}
-        {submission.bountyId && consensus && (
+        {BOUNTIES_ENABLED && submission.bountyId && consensus && (
           <section className="mt-10 border border-border bg-card/50 p-6" aria-labelledby="review-heading">
             <h2 id="review-heading" className="mb-4 text-lg font-medium text-foreground">
               Analyst review

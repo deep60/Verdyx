@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { useAuth } from "@/contexts/auth-context";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 import { Navigation } from "@/components/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,12 +33,13 @@ interface MyStats {
 }
 
 const TABS = ["overview", "submissions", "rewards", "developer", "account"] as const;
+const HIDDEN_TABS: readonly string[] = BOUNTIES_ENABLED ? [] : ["rewards"];
 type Tab = (typeof TABS)[number];
 
 function tabFromHash(): Tab {
   if (typeof window === "undefined") return "overview";
   const h = window.location.hash.replace("#", "");
-  return (TABS as readonly string[]).includes(h) ? (h as Tab) : "overview";
+  return (TABS as readonly string[]).includes(h) && !HIDDEN_TABS.includes(h) ? (h as Tab) : "overview";
 }
 
 export default function Profile() {
@@ -65,7 +67,7 @@ export default function Profile() {
   });
   const { data: standings } = useQuery<{ analysts?: Standing[] }>({
     queryKey: ["/api/reputation/standings"],
-    enabled: !!user,
+    enabled: !!user && BOUNTIES_ENABLED,
   });
   const { data: stats } = useQuery<MyStats>({
     queryKey: ["/api/users/me/stats"],
@@ -89,7 +91,7 @@ export default function Profile() {
     <div className="min-h-screen bg-background text-foreground">
       <SEO
         title="Analyst profile — Verdyx"
-        description="Your Verdyx analyst profile: scans, threats caught, reputation, rewards, API keys and webhooks."
+        description="Your Verdyx profile: scans, threats caught, API keys and webhooks."
       />
       <Navigation />
 
@@ -112,7 +114,9 @@ export default function Profile() {
                 {counts.total}
               </span>
             </TabsTrigger>
-            <TabsTrigger value="rewards" data-testid="tab-profile-wallet">Rewards</TabsTrigger>
+            {BOUNTIES_ENABLED && (
+              <TabsTrigger value="rewards" data-testid="tab-profile-wallet">Rewards</TabsTrigger>
+            )}
             <TabsTrigger value="developer" data-testid="tab-profile-api-keys">API and webhooks</TabsTrigger>
             <TabsTrigger value="account">Account</TabsTrigger>
           </TabsList>

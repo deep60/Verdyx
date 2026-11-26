@@ -21,11 +21,26 @@ const FALLBACK_ENGINES: ApiEngine[] = [
   { id: "ml", name: "Machine Learning Classifier", description: "Advisory only until it's trained on real data" },
 ];
 
-const STATE_STYLE = {
-  voting: "border-[#9CBFAE]/60 text-foreground",
-  advisory: "border-[#E4C27A]/70 text-foreground",
-  off: "border-border text-muted-foreground",
+const STATE_DOT = {
+  voting: "bg-success",
+  advisory: "bg-warning",
+  off: "bg-muted-foreground/50",
 } as const;
+
+const DEV_SNIPPET = `$ verdyx scan invoice.exe https://paypa1.com/login
+
+MALICIOUS  invoice.exe               4/5 engines flagged it
+MALICIOUS  https://paypa1.com/login  3/3 engines flagged it
+
+$ echo $?
+2    # a failing exit code stops the build`;
+
+const DEV_SURFACES = [
+  { name: "CLI", detail: "verdyx scan, with CI exit codes" },
+  { name: "Python and JavaScript", detail: "One call returns the verdict and every vote" },
+  { name: "GitHub Action", detail: "Scan build artifacts on every push" },
+  { name: "AI assistants", detail: "An MCP server for Claude, Cursor and others" },
+];
 
 const RECON: { name: string; detail: string }[] = [
   { name: "Network and host", detail: "IP, ASN, open ports, co-hosted names, redirect chain." },
@@ -96,15 +111,16 @@ export default function Home() {
       <main id="main-content" tabIndex={-1}>
         <section className="border-b border-border">
           <div className="mx-auto grid max-w-7xl items-start gap-10 px-4 py-10 sm:px-6 sm:py-14 lg:grid-cols-12 lg:gap-12 lg:px-8 lg:py-16">
-            <div className="lg:col-span-5 lg:pt-2">
-              <p className="text-sm text-muted-foreground">File and URL threat analysis</p>
-              <h1 className="mt-3 text-[2rem] font-medium leading-[1.08] tracking-[-0.035em] text-balance sm:text-5xl lg:text-[3.15rem]">
+            <div className="animate-fade-up lg:col-span-5 lg:pt-2">
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                File, link and email threat analysis
+              </p>
+              <h1 className="mt-4 font-display text-[2.25rem] font-medium leading-[1.02] tracking-[-0.045em] text-balance sm:text-5xl lg:text-[3.4rem]">
                 A malware verdict you can audit, engine by engine.
               </h1>
               <p className="mt-5 max-w-md text-[15px] leading-relaxed text-foreground/80 sm:text-base">
-                Static parsing, YARA-Forge rules, hash reputation, heuristics, and signatures read the same file.
-                Every engine's verdict, confidence, and evidence stays on the case, and an engine that can't
-                give a verdict is named instead of counted.
+                Every engine reads the same file or link. You get one verdict, plus each engine's vote,
+                confidence and evidence, and an engine that can't answer is named instead of counted as clean.
               </p>
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
                 <Link href="/dashboard">
@@ -114,7 +130,7 @@ export default function Home() {
                 </Link>
                 <Link href="/api">
                   <Button size="lg" variant="outline" className="w-full bg-transparent sm:w-auto">
-                    API reference
+                    CLI and API
                   </Button>
                 </Link>
               </div>
@@ -133,7 +149,7 @@ export default function Home() {
                 </div>
               </dl>
             </div>
-            <div className="lg:col-span-7">
+            <div className="animate-fade-up [animation-delay:150ms] lg:col-span-7">
               <CasePreview />
             </div>
           </div>
@@ -159,25 +175,33 @@ export default function Home() {
             <div>
               <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">File engines</h2>
               <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
-                Live status from the analysis engine. Only engines marked Votes count toward the verdict.
+                Live from the analysis engine. A green dot votes on the verdict; advisory engines are shown but
+                don't count.
               </p>
-              <ul className="mt-6 border-t border-border">
+              <ul className="mt-6 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
                 {(engines ?? FALLBACK_ENGINES).map((engine) => {
                   const state = engines ? engineState(engine) : null;
                   return (
                     <li
                       key={engine.id}
-                      className="grid gap-1 border-b border-border py-3 sm:grid-cols-[12rem_minmax(0,1fr)_auto] sm:items-baseline sm:gap-4"
+                      className="bg-background p-4 transition-colors hover:bg-muted/20 sm:last:odd:col-span-2"
+                      title={engine.description ?? undefined}
                     >
-                      <span className="text-sm font-medium">{engine.name}</span>
-                      <span className="text-sm text-muted-foreground">{engine.description}</span>
-                      {state && (
+                      <div className="flex items-center gap-2">
                         <span
-                          className={`w-fit border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] ${STATE_STYLE[state]}`}
-                        >
-                          {ENGINE_STATE_LABEL[state]}
-                        </span>
-                      )}
+                          className={`h-2 w-2 shrink-0 rounded-full ${state ? STATE_DOT[state] : "bg-muted-foreground/30"}`}
+                          aria-hidden
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{engine.name}</span>
+                        {state && state !== "voting" && (
+                          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+                            {ENGINE_STATE_LABEL[state]}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                        {engine.description}
+                      </p>
                     </li>
                   );
                 })}
@@ -198,10 +222,50 @@ export default function Home() {
               </ul>
               <Link
                 href="/dashboard"
-                className="mt-5 inline-block text-sm underline decoration-[#141513] underline-offset-4"
+                className="mt-5 inline-block text-sm underline decoration-foreground/40 underline-offset-4 hover:decoration-foreground"
               >
                 Run a URL in the console
               </Link>
+            </div>
+          </div>
+        </section>
+
+        <section id="developers" className="scroll-mt-14 border-b border-border" aria-labelledby="dev-heading">
+          <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-14 sm:px-6 lg:grid-cols-12 lg:gap-16 lg:px-8 lg:py-20">
+            <div className="lg:col-span-5">
+              <h2 id="dev-heading" className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">
+                Scan from wherever you ship.
+              </h2>
+              <p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+                The same verdict and evidence, from your terminal, your code, your pipeline or your AI assistant.
+              </p>
+              <ul className="mt-6 border-t border-border">
+                {DEV_SURFACES.map((d) => (
+                  <li key={d.name} className="grid gap-0.5 border-b border-border py-3 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-4">
+                    <span className="text-sm font-medium">{d.name}</span>
+                    <span className="text-sm text-muted-foreground">{d.detail}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/api"
+                className="mt-5 inline-block text-sm underline decoration-foreground/40 underline-offset-4 hover:decoration-foreground"
+              >
+                Read the quickstart
+              </Link>
+            </div>
+            <div className="lg:col-span-7">
+              <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+                <div className="flex items-center gap-1.5 border-b border-border px-4 py-2.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/25" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/25" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/25" />
+                  <span className="ml-2 font-mono text-[11px] text-muted-foreground">terminal</span>
+                </div>
+                <pre className="overflow-x-auto p-5 text-[12.5px] leading-relaxed sm:text-[13px]">
+                  <code className="font-mono text-foreground">{DEV_SNIPPET}</code>
+                </pre>
+              </div>
             </div>
           </div>
         </section>
@@ -243,18 +307,18 @@ export default function Home() {
 
         <section>
           <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-16">
-            <div className="flex flex-col gap-6 border border-[#32342C] bg-[#141513] px-5 py-8 text-[#F3F1EA] sm:px-8 sm:py-10 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col gap-6 rounded-lg bg-foreground px-5 py-8 text-background sm:px-8 sm:py-10 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-xl">
                 <h2 className="text-2xl font-medium tracking-[-0.03em] sm:text-3xl">
                   Open a file or a URL.
                 </h2>
-                <p className="mt-2 text-sm leading-relaxed text-[#F3F1EA]/70">
+                <p className="mt-2 text-sm leading-relaxed text-background/70">
                   The console keeps the engine votes, the site report, and the export. The API takes the same submission.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row">
                 <Link href="/dashboard">
-                  <Button size="lg" className="w-full bg-[#F3F1EA] text-[#141513] hover:bg-[#F3F1EA]/90 sm:w-auto">
+                  <Button size="lg" className="w-full bg-background text-foreground hover:bg-background/90 sm:w-auto">
                     Open the console
                   </Button>
                 </Link>
@@ -262,7 +326,7 @@ export default function Home() {
                   <Button
                     size="lg"
                     variant="outline"
-                    className="w-full border-[#32342C] bg-transparent text-[#F3F1EA] hover:bg-[#23251F] hover:text-[#F3F1EA] sm:w-auto"
+                    className="w-full border-background/25 bg-transparent text-background hover:bg-background/10 hover:text-background sm:w-auto"
                   >
                     Pricing
                   </Button>

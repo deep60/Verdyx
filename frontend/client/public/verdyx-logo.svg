@@ -78,5 +78,5 @@
 
   <!-- Wordmark: VERDYX -->
   <text x="256" y="396" text-anchor="middle" fill="#F3F1EA" font-family="'Host Grotesk', -apple-system, BlinkMacSystemFont, sans-serif" font-size="56" font-weight="600" letter-spacing="8">VERDYX</text>
-  <text x="256" y="424" text-anchor="middle" fill="#F3F1EA" opacity="0.82" font-family="'Commit Mono', ui-monospace, monospace" font-size="13.5" font-weight="500" letter-spacing="3.2">DECENTRALIZED THREAT INTELLIGENCE</text>
+  <text x="256" y="424" text-anchor="middle" fill="#F3F1EA" opacity="0.82" font-family="'Commit Mono', ui-monospace, monospace" font-size="13.5" font-weight="500" letter-spacing="3.2">MULTI-ENGINE THREAT ANALYSIS</text>
 </svg>

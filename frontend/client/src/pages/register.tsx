@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SEO } from "@/components/seo";
 import { OAuthButtons } from "@/components/oauth-buttons";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 import { passwordPolicyError } from "@/lib/password-policy";
 
 export default function Register() {
@@ -81,7 +82,7 @@ export default function Register() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4 aurora-bg">
-      <SEO title="Create Account" description="Join the decentralized threat intelligence network." />
+      <SEO title="Create Account" description="Create a free Verdyx account and scan files, links and emails with every engine." />
 
       <Card className="w-full max-w-md glassmorphism border-primary/20 relative z-10 animate-fade-up">
         <CardHeader className="space-y-1">
@@ -90,7 +91,7 @@ export default function Register() {
           </Link>
           <CardTitle className="text-2xl text-center font-display tracking-tight">Create an account</CardTitle>
           <CardDescription className="text-center">
-            Join the decentralized threat intelligence network
+            Scan files, links and emails with every engine. Free during the beta.
           </CardDescription>
         </CardHeader>
 
@@ -203,26 +204,19 @@ export default function Register() {
             </Button>
           </form>
 
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
-            </div>
-          </div>
-
           <OAuthButtons />
 
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full border-primary/20 hover:border-primary/40"
-            onClick={handleWalletConnect}
-          >
-            <Wallet className="mr-2 h-4 w-4" />
-            Connect Wallet (MetaMask)
-          </Button>
+          {BOUNTIES_ENABLED && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full text-muted-foreground"
+              onClick={handleWalletConnect}
+            >
+              <Wallet className="mr-2 h-4 w-4" />
+              Use a wallet instead
+            </Button>
+          )}
         </CardContent>
 
         <CardFooter className="flex flex-col space-y-4">
