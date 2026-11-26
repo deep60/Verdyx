@@ -39,6 +39,7 @@ CLEAN      https://example.com/login  0/3 voting engines flagged it  https://ver
 |---|---|
 | `verdyx scan <file-or-url>...` | Submit, wait, print the verdicts |
 | `verdyx result <scan-id>...` | Show the result of earlier scans |
+| `verdyx similar <scan-id>` | Files similar to a scanned file, by fuzzy hash (needs a key) |
 | `verdyx engines` | List the engines and whether each is online |
 
 | Option | |
@@ -67,6 +68,7 @@ verdyx scan --fail-on suspicious dist/*.exe || exit 1
 | `scan_url` | Scan a URL and return the verdict, each engine's result and the report link |
 | `scan_file` | Upload a local file and return the same |
 | `get_scan_result` | Check an earlier scan by id |
+| `find_similar_files` | Files similar to an earlier file scan, by TLSH, ssdeep or imphash |
 | `list_engines` | Which engines are online |
 
 Each result comes back as readable text for the model, plus the same data as structured JSON.

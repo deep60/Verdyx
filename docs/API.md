@@ -15,6 +15,7 @@ Rather than calling the routes by hand, you can use:
 - **The Python SDK**: [`sdk/python`](../sdk/python)
 - **The GitHub Action**: [`action`](../action)
 - **Webhooks**, to have results pushed to you: [webhooks.md](api/webhooks.md)
+- **Similarity search**, to find variants of a file by fuzzy hash: [similarity.md](api/similarity.md)
 
 They all scan the same way:
 1. `POST /submissions/file`, a multipart form with `file`, or `url` for a URL, plus optional `description`, `organizationId` and `priority`.

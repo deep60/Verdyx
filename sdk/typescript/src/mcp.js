@@ -81,6 +81,19 @@ const TOOLS = [
     annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   },
   {
+    name: "find_similar_files",
+    title: "Find similar files",
+    description:
+      "Find files similar to an earlier Verdyx file scan, by fuzzy hash (TLSH, ssdeep) or a shared imphash, among the uploads this API key may read. Useful for spotting variants of known malware. Needs VERDYX_API_KEY.",
+    inputSchema: {
+      type: "object",
+      properties: { scan_id: { type: "string", description: "The id of a finished file scan." } },
+      required: ["scan_id"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
+  },
+  {
     name: "list_engines",
     title: "List Verdyx engines",
     description: "List Verdyx's detection engines and whether each is online, so you know what a verdict was based on.",
@@ -255,6 +268,12 @@ export class McpServer {
         const text = engines.map((e) => `- ${e.name}: ${e.status ?? (e.isActive ? "online" : "offline")}`).join("\n");
         return { content: [{ type: "text", text }], structuredContent: { engines } };
       }
+      if (name === "find_similar_files") {
+        const id = String(args.scan_id ?? "");
+        if (!id) throw new VerdyxError("scan_id is required");
+        const r = await this.client.findSimilar(id);
+        return { content: [{ type: "text", text: summariseSimilar(r) }], structuredContent: r };
+      }
       let id;
       if (name === "scan_url") {
         id = (await this.client.submitUrl(String(args.url ?? ""))).id;
@@ -280,6 +299,21 @@ export class McpServer {
       return { content: [{ type: "text", text: `Error: ${e?.message ?? e}` }], isError: true };
     }
   }
+}
+
+function summariseSimilar(r) {
+  if (r.status !== "ready") return `No similarity results: ${r.status.replace(/_/g, " ")}.`;
+  if (!r.similar.length) return `Nothing similar among ${r.compared} files compared.`;
+  const lines = r.similar.map((f) => {
+    const m = f.match;
+    const why = [
+      m.tlshDistance != null ? `TLSH ${m.tlshDistance}` : null,
+      m.ssdeepScore != null ? `ssdeep ${m.ssdeepScore}%` : null,
+      m.sameImphash ? "same imphash" : null,
+    ].filter(Boolean).join(", ");
+    return `- ${m.closeness.replace(/_/g, " ")}: ${f.filename || f.sha256 || f.submissionId} (verdict: ${f.verdict ?? "unknown"}; ${why}) ${f.reportUrl}`;
+  });
+  return `${r.similar.length} similar files among ${r.compared} compared:\n${lines.join("\n")}`;
 }
 
 function clampWait(v, dflt) {

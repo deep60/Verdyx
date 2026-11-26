@@ -120,6 +120,18 @@ test("errors are short and exit 1", async () => {
   assert.match((await run(["frobnicate"])).stderr, /unknown command/);
 });
 
+test("similar lists close files with why they match", async () => {
+  const first = (await run(["scan", "--no-wait", join(dir, "eicar.com")])).stdout.trim().split(/\s+/)[0];
+  await run(["scan", "--no-wait", join(dir, "clean.txt")]);
+  const r = await run(["similar", first]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /similar files? among \d+ compared/);
+  assert.match(r.stdout, /^similar\s+CLEAN\s+clean\.txt\s+TLSH 42, ssdeep 61%, same imphash\s+https:\/\/verdyx\.dev\/analysis\//m);
+  const json = JSON.parse((await run(["similar", "--json", first])).stdout);
+  assert.equal(json.status, "ready");
+  assert.match((await run(["similar"])).stderr, /give one scan id/);
+});
+
 test("engines, --help and --version", async () => {
   const e = await run(["engines"]);
   assert.match(e.stdout, /ClamAV Scanner\s+online/);

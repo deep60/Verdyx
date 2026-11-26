@@ -141,6 +141,18 @@ test("gives up after maxRetries", async () => {
   assert.equal(calls, 2);
 });
 
+test("finds similar files", async () => {
+  const a = await client.submitFile(new TextEncoder().encode("first sample"), { filename: "a.bin" });
+  await client.submitFile(new TextEncoder().encode("second sample"), { filename: "b.bin" });
+  const r = await client.findSimilar(a.id);
+  assert.equal(r.status, "ready");
+  assert.ok(r.similar.some((f) => f.filename === "b.bin" && f.match.closeness === "similar"));
+  assert.ok(r.similar.every((f) => f.submissionId !== a.id), "never lists the file itself");
+  const log = srv.log.at(-1);
+  assert.equal(log.path, `/api/v1/submissions/${a.id}/similar`);
+  assert.equal((await client.findSimilar((await client.submitUrl("https://example.com/")).id)).status, "not_a_file");
+});
+
 test("lists engines", async () => {
   const engines = await client.listEngines();
   assert.equal(engines.length, 3);

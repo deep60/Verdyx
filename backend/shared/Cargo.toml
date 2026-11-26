@@ -61,8 +61,14 @@ base64 = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 
+# Fuzzy hashes for similarity search (feature `similarity`)
+tlsh2 = { version = "1.1", optional = true, features = ["diff"] }
+fuzzyhash = { version = "0.2", optional = true }
+
 [features]
 default = []
+# TLSH and ssdeep, for finding files that are similar but not identical
+similarity = ["dep:tlsh2", "dep:fuzzyhash"]
 # Enables `shared::metrics_mw` — a tower middleware that increments
 # `verdyx_http_requests_total` / `verdyx_http_errors_total` on the
 # `MetricsRegistry` per request. Requires axum 0.7.

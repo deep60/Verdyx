@@ -12,6 +12,7 @@ const HELP = `verdyx ${VERSION}: scan files and URLs with Verdyx
 Usage:
   verdyx scan <file-or-url>...   Submit and wait for the verdicts
   verdyx result <scan-id>...     Show the result of earlier scans
+  verdyx similar <scan-id>       Find files similar to a scanned file (needs a key)
   verdyx engines                 List the engines and whether they're online
   verdyx mcp                     Run as an MCP server (stdio) for AI assistants
 
@@ -103,6 +104,23 @@ async function main(argv) {
     return 0;
   }
 
+  if (command === "similar") {
+    if (positionals.length !== 1) throw new VerdyxError("give one scan id");
+    const r = await client.findSimilar(positionals[0]);
+    if (values.json) {
+      console.log(JSON.stringify(r, null, 2));
+      return 0;
+    }
+    console.log(similarSummary(r));
+    for (const f of r.similar ?? []) {
+      const name = f.filename || f.sha256 || f.submissionId;
+      const label = (CLOSENESS[f.match?.closeness] ?? f.match?.closeness ?? "").padEnd(13);
+      const verdict = String(f.verdict ?? "unknown").toUpperCase().padEnd(10);
+      console.log(`${label}  ${paint(VERDICT_STYLE[f.verdict] ?? "2", verdict)}  ${name}  ${paint("2", evidence(f.match ?? {}))}  ${f.reportUrl}`);
+    }
+    return 0;
+  }
+
   if (command !== "scan" && command !== "result") {
     throw new VerdyxError(`unknown command "${command}"; run "verdyx --help"`);
   }
@@ -170,6 +188,31 @@ async function main(argv) {
     return 2;
   }
   return errors.length > 0 || failed.length > 0 ? 1 : 0;
+}
+
+const CLOSENESS = {
+  identical: "identical",
+  very_similar: "very similar",
+  similar: "similar",
+  related: "related",
+  same_imports: "same imports",
+};
+
+function similarSummary(r) {
+  if (r.status === "pending") return "The scan is still running; try again when it finishes.";
+  if (r.status === "not_a_file") return "Similarity search works on files, not URLs.";
+  if (r.status === "unavailable") return "This file has no fuzzy hashes (too small or uniform, or deleted before they were computed).";
+  const n = r.similar?.length ?? 0;
+  return `${n} similar ${n === 1 ? "file" : "files"} among ${r.compared} compared.`;
+}
+
+function evidence(m) {
+  if (m.closeness === "identical") return "same SHA-256";
+  const parts = [];
+  if (m.tlshDistance != null && m.tlshDistance <= 100) parts.push(`TLSH ${m.tlshDistance}`);
+  if (m.ssdeepScore != null && m.ssdeepScore >= 40) parts.push(`ssdeep ${m.ssdeepScore}%`);
+  if (m.sameImphash) parts.push("same imphash");
+  return parts.join(", ");
 }
 
 function describeVotes(r) {

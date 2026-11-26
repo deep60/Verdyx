@@ -178,6 +178,14 @@ export class Verdyx {
   }
 
   /** The engines and whether each is online. */
+  /**
+   * Files similar to an uploaded file by fuzzy hash (TLSH, ssdeep) or with
+   * the same imphash, among the uploads this key may read. Needs a key.
+   */
+  async findSimilar(id) {
+    return this.request("GET", `/submissions/${encodeURIComponent(id)}/similar`);
+  }
+
   async listEngines() {
     const data = await this.request("GET", "/engines");
     return Array.isArray(data) ? data : (data?.engines ?? data?.data ?? []);

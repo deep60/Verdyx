@@ -35,6 +35,8 @@ pub mod idempotency;
 pub mod live_hunts;
 #[cfg(feature = "axum-mw")]
 pub mod metrics_mw;
+#[cfg(feature = "similarity")]
+pub mod similarity;
 #[cfg(feature = "validation")]
 pub mod validation;
 pub mod webhooks;

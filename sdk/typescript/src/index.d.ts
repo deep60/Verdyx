@@ -103,6 +103,30 @@ export declare function meetsThreshold(
   threshold: "malicious" | "suspicious" | "never" | (string & {}),
 ): boolean;
 
+export type Closeness = "identical" | "very_similar" | "similar" | "related" | "same_imports";
+
+export interface SimilarFile {
+  submissionId: string;
+  sha256: string | null;
+  filename: string | null;
+  fileSize: number | null;
+  createdAt: string;
+  verdict: string | null;
+  reportUrl: string;
+  match: { closeness: Closeness; tlshDistance: number | null; ssdeepScore: number | null; sameImphash: boolean };
+}
+
+export interface SimilarFiles {
+  submissionId: string;
+  /** ready, pending (still scanning), not_a_file (a URL scan), unavailable (no fuzzy hashes). */
+  status: "ready" | "pending" | "not_a_file" | "unavailable";
+  hashes: { tlsh: string | null; ssdeep: string | null; imphash: string | null } | null;
+  /** Closest first, at most 25. */
+  similar: SimilarFile[];
+  /** How many files were compared. */
+  compared: number;
+}
+
 export declare class Verdyx {
   readonly apiUrl: string;
   readonly webUrl: string;
@@ -115,6 +139,8 @@ export declare class Verdyx {
   getSubmission(id: string): Promise<Record<string, unknown>>;
   getConsensus(id: string): Promise<Record<string, unknown>>;
   getAnalyses(id: string): Promise<Record<string, unknown>[]>;
+  /** Files similar to an uploaded file, among the uploads this key may read. Needs an API key. */
+  findSimilar(id: string): Promise<SimilarFiles>;
   listEngines(): Promise<Array<{ name: string; status?: string; description?: string | null } & Record<string, unknown>>>;
   /** Poll until the scan finishes. Throws ScanTimeoutError on timeout. */
   waitForResult(id: string, options?: WaitOptions): Promise<ScanResult>;
