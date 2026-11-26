@@ -19,7 +19,7 @@ import { BOUNTIES_ENABLED } from "@/lib/features";
 
 const navItems = [
   { href: "/", label: "Overview" },
-  { href: "/#architecture", label: "Architecture" },
+  { href: "/architecture", label: "Architecture" },
   { href: "/dashboard", label: "Dashboard" },
   ...(BOUNTIES_ENABLED ? [{ href: "/marketplace", label: "Marketplace" }] : []),
   { href: "/pricing", label: "Pricing" },
@@ -174,7 +174,7 @@ export function Navigation() {
                 <Link href="/register">
                   <Button
                     size="sm"
-                    className="bg-[#F3F1EA] text-[#141513] hover:bg-[#F3F1EA]/90"
+                    variant="mark"
                     data-testid="button-register"
                   >
                     Get Started

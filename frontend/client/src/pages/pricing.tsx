@@ -61,7 +61,10 @@ export default function Pricing() {
       <main id="main-content" tabIndex={-1} className="pb-20 pt-12 sm:pt-16">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
           <div className="mb-12 max-w-xl animate-fade-up">
-            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Pricing</p>
+            <p className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+              <span className="h-2 w-2 rounded-full bg-mark" aria-hidden />
+              Pricing
+            </p>
             <h1 className="mt-3 font-display text-4xl font-medium leading-[1.02] tracking-[-0.045em] text-foreground sm:text-6xl">
               Free during the beta
             </h1>
@@ -94,7 +97,7 @@ export default function Pricing() {
               </ul>
 
               <Link href="/register">
-                <Button className="mt-8 h-11 w-full">Create a free account</Button>
+                <Button variant="mark" className="mt-8 h-11 w-full">Create a free account</Button>
               </Link>
             </section>
 

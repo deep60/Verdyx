@@ -23,6 +23,7 @@ const Dashboard = lazy(() => import("@/pages/dashboard"));
 const Marketplace = lazy(() => import("@/pages/marketplace"));
 const OnChainBounty = lazy(() => import("@/pages/onchain-bounty"));
 const ApiDocs = lazy(() => import("@/pages/api-docs"));
+const Architecture = lazy(() => import("@/pages/architecture"));
 const Login = lazy(() => import("@/pages/login"));
 const Register = lazy(() => import("@/pages/register"));
 const Profile = lazy(() => import("@/pages/profile"));
@@ -50,10 +51,11 @@ function Router() {
       <Switch>
         <Route path="/" component={Home} />
         {/* Retired marketing pages. Home now carries the architecture, engines, and OSINT story. */}
-        <Route path="/how-it-works">{<Redirect to="/#architecture" replace />}</Route>
+        <Route path="/architecture" component={Architecture} />
+        <Route path="/how-it-works">{<Redirect to="/architecture" replace />}</Route>
         <Route path="/features">{<Redirect to="/#capabilities" replace />}</Route>
         <Route path="/features/engines">{<Redirect to="/#capabilities" replace />}</Route>
-        <Route path="/features/consensus">{<Redirect to="/#architecture" replace />}</Route>
+        <Route path="/features/consensus">{<Redirect to="/architecture" replace />}</Route>
         <Route path="/use-cases">{<Redirect to="/#capabilities" replace />}</Route>
         <Route path="/pricing" component={Pricing} />
         <Route path="/privacy" component={Privacy} />

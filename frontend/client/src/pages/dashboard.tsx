@@ -148,7 +148,7 @@ export default function Dashboard() {
                 data-testid={`dashboard-tab-${value}`}
                 className={cn(
                   "relative inline-flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm transition-colors duration-200",
-                  "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:origin-center after:rounded-full after:bg-foreground after:transition-transform after:duration-300 after:ease-expo-out",
+                  "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:origin-center after:rounded-full after:bg-mark after:transition-transform after:duration-300 after:ease-expo-out",
                   tab === value
                     ? "text-foreground after:scale-x-100"
                     : "text-muted-foreground after:scale-x-0 hover:text-foreground",

@@ -298,7 +298,10 @@ export default function ApiDocs() {
           {/* Hero */}
           <header className="grid animate-fade-up gap-8 lg:grid-cols-12 lg:items-end">
             <div className="lg:col-span-7">
-              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Developers</p>
+              <p className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+                <span className="h-2 w-2 rounded-full bg-mark" aria-hidden />
+                Developers
+              </p>
               <h1 className="mt-3 font-display text-4xl font-medium leading-[1.02] tracking-[-0.045em] sm:text-6xl">
                 Scan from anywhere you ship.
               </h1>
@@ -308,7 +311,7 @@ export default function ApiDocs() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2 lg:col-span-5 lg:justify-end">
-              <Button asChild size="lg" data-testid="button-get-api-key">
+              <Button asChild size="lg" variant="mark" data-testid="button-get-api-key">
                 <Link href={keyHref}>
                   <KeyRound className="mr-2 h-4 w-4" aria-hidden />
                   Get an API key
