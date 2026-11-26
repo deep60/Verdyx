@@ -75,6 +75,35 @@ export function startMockServer({ port = 0, apiKey = process.env.MOCK_API_KEY, r
       });
     }
 
+    const sim = p.match(/^\/submissions\/([^/]+)\/similar$/);
+    if (req.method === "GET" && sim) {
+      const scan = scans.get(sim[1]);
+      if (!scan) return send(404, { message: "not found" });
+      if (scan.isUrl) return send(200, { submissionId: scan.id, status: "not_a_file", hashes: null, similar: [], compared: 0 });
+      // Every other file scan counts as similar, so tests can check the shape.
+      const similar = [...scans.values()]
+        .filter((s) => s.id !== scan.id && !s.isUrl)
+        .map((s) => ({
+          submissionId: s.id,
+          sha256: s.hash,
+          filename: s.target,
+          fileSize: null,
+          createdAt: new Date().toISOString(),
+          verdict: s.verdict,
+          reportUrl: `https://verdyx.dev/analysis/${s.id}`,
+          match: s.hash === scan.hash
+            ? { closeness: "identical", tlshDistance: 0, ssdeepScore: 100, sameImphash: false }
+            : { closeness: "similar", tlshDistance: 42, ssdeepScore: 61, sameImphash: true },
+        }));
+      return send(200, {
+        submissionId: scan.id,
+        status: "ready",
+        hashes: { tlsh: "T1" + "A".repeat(70), ssdeep: "3:abc:def", imphash: null },
+        similar,
+        compared: similar.length,
+      });
+    }
+
     const m = p.match(/^\/submissions\/([^/]+)(\/consensus|\/analyses)?$/);
     if (req.method === "GET" && m) {
       const scan = scans.get(m[1]);

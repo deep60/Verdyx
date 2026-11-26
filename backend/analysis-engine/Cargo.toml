@@ -24,7 +24,7 @@ native-engines = ["yara-engine", "clamav", "ml-engine"]
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
-shared = { path = "../shared", features = ["axum-mw", "error-reporting"] }
+shared = { path = "../shared", features = ["axum-mw", "error-reporting", "similarity"] }
 tower = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -86,7 +86,7 @@ test("initialize negotiates the protocol and advertises tools", async () => {
 
 test("tools/list", async () => {
   const r = await rpc("tools/list", {});
-  assert.deepEqual(r.result.tools.map((t) => t.name), ["scan_url", "scan_file", "get_scan_result", "list_engines"]);
+  assert.deepEqual(r.result.tools.map((t) => t.name), ["scan_url", "scan_file", "get_scan_result", "find_similar_files", "list_engines"]);
   for (const t of r.result.tools) {
     assert.equal(t.inputSchema.type, "object");
     assert.ok(t.description.length > 20);
@@ -140,6 +140,16 @@ test("scan_file refuses anything outside the allowed folder", async () => {
     assert.match(r.content[0].text, why, path);
   }
   assert.equal(srv.log.filter((l) => l.method === "POST").length, uploadsBefore, "nothing was uploaded");
+});
+
+test("find_similar_files", async () => {
+  const scan = await call("scan_url", { url: "https://example.com/", wait_seconds: 5 });
+  const id = scan.structuredContent.id;
+  const r = await call("find_similar_files", { scan_id: id });
+  assert.equal(r.isError, undefined);
+  assert.match(r.content[0].text, /not a file/);
+  const missing = await call("find_similar_files", {});
+  assert.equal(missing.isError, true);
 });
 
 test("list_engines", async () => {

@@ -22,6 +22,7 @@ pub mod oauth;
 pub mod organization;
 pub mod reputation;
 pub mod retrohunt;
+pub mod similarity;
 pub mod submission;
 pub mod threat_feed;
 pub mod user;

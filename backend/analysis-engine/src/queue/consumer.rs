@@ -93,6 +93,12 @@ pub async fn start_analysis_worker(
         });
     }
 
+    // Fuzzy hashes for uploads from before similarity search, in the background.
+    tokio::spawn(super::similarity::backfill(
+        db_pool.clone(),
+        s3_client.clone(),
+    ));
+
     loop {
         // Reliable pop: the id stays on the processing list until ack.
         let popped = match pop_from_queue(&redis_client).await {
@@ -448,6 +454,8 @@ async fn process_submission(
                 data,
             )
             .await;
+            // Step 3c: fuzzy hashes, so similar files can be found later.
+            super::similarity::record(db_pool, submission_id, data).await;
         }
     }
 
@@ -762,7 +770,7 @@ fn note_unreachable_page(result: &mut crate::models::analysis_result::AnalysisRe
 /// Load the bytes the gateway stored. An absolute path that exists on disk
 /// is read directly. Otherwise `file_path` is a storage key for S3 or the
 /// local upload directory.
-async fn load_artifact(s3_client: &S3Client, file_path: &str) -> Result<Vec<u8>> {
+pub(crate) async fn load_artifact(s3_client: &S3Client, file_path: &str) -> Result<Vec<u8>> {
     let path = std::path::Path::new(file_path);
     if path.is_file() {
         return tokio::fs::read(path)

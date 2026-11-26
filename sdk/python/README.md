@@ -39,6 +39,13 @@ result = client.wait_for_result(sub.id, timeout=120, on_status=print)
 
 Files can also be bytes: `client.submit_file(data, filename="invoice.pdf")`.
 
+Variants of a file, by fuzzy hash (TLSH, ssdeep) or a shared imphash, among the uploads your key may read:
+
+```python
+for f in client.find_similar(result.id)["similar"]:
+    print(f["match"]["closeness"], f["verdict"], f["filename"], f["reportUrl"])
+```
+
 Errors are `VerdyxError`, with `status` (the HTTP status), `body` and `retry_after`. A scan that doesn't finish in time raises `ScanTimeoutError`; the scan keeps running on the server. Reads are retried on network errors, 429 and 502–504, honouring `Retry-After`. Uploads aren't retried, so a lost response can't create a second scan.
 
 | Argument | Default |

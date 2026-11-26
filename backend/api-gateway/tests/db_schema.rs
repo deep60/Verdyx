@@ -238,3 +238,164 @@ async fn live_hunts_only_see_their_owners_or_teams_uploads() {
 
     tx.rollback().await.expect("rollback");
 }
+
+#[tokio::test]
+async fn similar_files_only_come_from_uploads_the_caller_may_read() {
+    let Some(database_url) = test_database_url() else {
+        eprintln!("skipping api-gateway schema test; API_GATEWAY_DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await
+        .expect("connect to test database");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations apply cleanly");
+
+    let mut tx = pool.begin().await.expect("begin tx");
+    let (alice, bob, mallory) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let team = Uuid::new_v4();
+    sqlx::query("INSERT INTO organizations (id, name, created_by) VALUES ($1, 'SOC', $2)")
+        .bind(team)
+        .bind(alice)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    for user in [alice, bob] {
+        sqlx::query(
+            "INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1, $2, 'member')",
+        )
+        .bind(team)
+        .bind(user)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+
+    // (submitter, team) for each upload; every one gets the same imphash.
+    let anonymous = Uuid::nil();
+    let uploads = [
+        ("target", alice, None),
+        ("alice_own", alice, None),
+        ("bob_private", bob, None),
+        ("bob_team", bob, Some(team)),
+        ("mallory_private", mallory, None),
+        ("mallory_bounty", mallory, None),
+        ("anonymous", anonymous, None),
+    ];
+    let mut ids = std::collections::HashMap::new();
+    for (name, submitter, org) in uploads {
+        let id = Uuid::new_v4();
+        ids.insert(name, id);
+        sqlx::query(
+            "INSERT INTO submissions (id, submitter_id, original_filename, file_hash, file_size, \
+             submission_type, analysis_status, organization_id, metadata, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, 4, 'file', 'completed', $5, '{}'::jsonb, NOW(), NOW())",
+        )
+        .bind(id)
+        .bind(submitter)
+        .bind(name)
+        .bind(format!("{:064x}", id.as_u128()))
+        .bind(org)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(shared::similarity::UPSERT_SQL)
+            .bind(id)
+            .bind("T1AAAA")
+            .bind(None::<String>)
+            .bind("0123456789abcdef0123456789abcdef")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO bounties (creator_id, submission_id, title, reward_amount) VALUES ($1, $2, 'b', 1)",
+    )
+    .bind(mallory)
+    .bind(ids["mallory_bounty"])
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+
+    let names = |rows: Vec<shared::similarity::Candidate>| {
+        let mut v: Vec<String> = rows
+            .into_iter()
+            .map(|c| c.original_filename.unwrap())
+            .collect();
+        v.sort();
+        v
+    };
+    let target = ids["target"];
+    let imphash = "0123456789abcdef0123456789abcdef";
+
+    // alice: her own, her team's and the bounty, never the target itself.
+    let recent = shared::similarity::recent_candidates_sql();
+    let by_imphash = shared::similarity::imphash_candidates_sql();
+    for sql in [&recent, &by_imphash] {
+        let mut q = sqlx::query_as(sql)
+            .bind(alice)
+            .bind(None::<Uuid>)
+            .bind(false)
+            .bind(target);
+        if sql == &by_imphash {
+            q = q.bind(imphash);
+        }
+        let rows = q.fetch_all(&mut *tx).await.unwrap();
+        assert_eq!(
+            names(rows),
+            ["alice_own", "bob_team", "mallory_bounty"],
+            "{sql}"
+        );
+    }
+
+    // A team key sees only the team's uploads.
+    let rows = sqlx::query_as(&recent)
+        .bind(alice)
+        .bind(Some(team))
+        .bind(false)
+        .bind(target)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(names(rows), ["bob_team"]);
+
+    // An admin sees everything but signed-out uploads.
+    let rows = sqlx::query_as(&recent)
+        .bind(mallory)
+        .bind(None::<Uuid>)
+        .bind(true)
+        .bind(target)
+        .fetch_all(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        names(rows),
+        [
+            "alice_own",
+            "bob_private",
+            "bob_team",
+            "mallory_bounty",
+            "mallory_private"
+        ]
+    );
+
+    // Deleting a scan deletes its hashes.
+    sqlx::query("DELETE FROM submissions WHERE id = $1")
+        .bind(ids["alice_own"])
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let left: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM file_similarity WHERE submission_id = $1")
+            .bind(ids["alice_own"])
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
+
+    tx.rollback().await.expect("rollback");
+}

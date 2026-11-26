@@ -224,6 +224,15 @@ class Verdyx:
         data = self.request("GET", f"/submissions/{quote(submission_id, safe='')}/analyses")
         return _as_list(data, "analyses")
 
+    def find_similar(self, submission_id: str) -> Dict[str, Any]:
+        """Files similar to an uploaded file, among the uploads this key may read.
+
+        Matches by fuzzy hash (TLSH, ssdeep) or a shared imphash, closest first.
+        The result has ``status`` (ready, pending, not_a_file or unavailable),
+        ``hashes``, ``similar`` and ``compared``. Needs an API key.
+        """
+        return self.request("GET", f"/submissions/{quote(submission_id, safe='')}/similar")
+
     def list_engines(self) -> List[Dict[str, Any]]:
         """The engines and whether each is online."""
         return _as_list(self.request("GET", "/engines"), "engines")

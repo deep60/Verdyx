@@ -239,6 +239,10 @@ fn submission_routes(state: AppState) -> Router<AppState> {
             "/{submission_id}/consensus",
             get(submission::get_submission_consensus),
         )
+        .route(
+            "/{submission_id}/similar",
+            get(crate::handlers::similarity::get_similar),
+        )
         .route("/my-submissions", get(submission::get_my_submissions))
 }
 

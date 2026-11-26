@@ -81,6 +81,15 @@ class MockApi:
                                                 "originalFilename": scan["target"], "fileHash": scan["hash"],
                                                 "url": scan["target"] if scan["url"] else None,
                                                 **({"failureReason": "could not fetch"} if status == "failed" else {})})
+                    if parts[2] == "similar":
+                        others = [o for o in api.scans.values() if o["id"] != scan["id"] and not o["url"]]
+                        return self._send(200, {
+                            "submissionId": scan["id"], "status": "not_a_file" if scan["url"] else "ready",
+                            "hashes": None, "compared": len(others),
+                            "similar": [] if scan["url"] else [
+                                {"submissionId": o["id"], "filename": o["target"], "verdict": o["verdict"],
+                                 "match": {"closeness": "similar", "tlshDistance": 40, "ssdeepScore": None,
+                                           "sameImphash": False}} for o in others]})
                     flagged = scan["verdict"] != "clean"
                     if parts[2] == "consensus":
                         return self._send(200, {"finalVerdict": scan["verdict"], "explanation": "x",
@@ -237,6 +246,15 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(VerdyxError) as ctx:
             c.list_engines()
         self.assertIn("could not reach", str(ctx.exception))
+
+    def test_find_similar(self):
+        a = self.client.submit_file(b"first sample", filename="a.bin")
+        self.client.submit_file(b"second sample", filename="b.bin")
+        r = self.client.find_similar(a.id)
+        self.assertEqual(r["status"], "ready")
+        self.assertIn("b.bin", [f["filename"] for f in r["similar"]])
+        self.assertNotIn(a.id, [f["submissionId"] for f in r["similar"]])
+        self.assertEqual(self.api.requests[-1][1], f"/api/v1/submissions/{a.id}/similar")
 
     def test_repr_hides_the_key(self):
         self.assertNotIn(KEY, repr(self.client))

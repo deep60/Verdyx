@@ -17,6 +17,7 @@ import { ApkForensicsPanel, hasApkAnalysis } from "@/components/apk-forensics-pa
 import { PdfForensicsPanel, hasPdfAnalysis } from "@/components/pdf-forensics-panel";
 import { AttackMatrix } from "@/components/attack-matrix";
 import { IocGraph } from "@/components/ioc-graph";
+import { SimilarFilesPanel } from "@/components/similar-files-panel";
 import { mapAttackTechniques } from "@/lib/attack-mapping";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { apiRequest } from "@/lib/queryClient";
@@ -488,6 +489,11 @@ export default function AnalysisDetails() {
               </TabsTrigger>
             )}
             {!isUrlTarget && <TabsTrigger value="attack">ATT&amp;CK ({attackTechniques.length})</TabsTrigger>}
+            {!isUrlTarget && (
+              <TabsTrigger value="similar" data-testid="tab-similar">
+                Similar files
+              </TabsTrigger>
+            )}
             <TabsTrigger value="infrastructure">Infrastructure</TabsTrigger>
             <TabsTrigger value="details">Details</TabsTrigger>
           </TabsList>
@@ -520,6 +526,11 @@ export default function AnalysisDetails() {
           {!isUrlTarget && (
             <TabsContent value="attack">
               <AttackMatrix techniques={attackTechniques} />
+            </TabsContent>
+          )}
+          {!isUrlTarget && (
+            <TabsContent value="similar">
+              <SimilarFilesPanel submissionId={submission.id} signedIn={!!user} />
             </TabsContent>
           )}
           <TabsContent value="infrastructure">
