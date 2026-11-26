@@ -12,6 +12,7 @@ import {
   VOTE_LABEL,
   buildLog,
   buildTimeline,
+  findLiveEngine,
   progress,
   tally,
   withLiveEngines,
@@ -408,7 +409,6 @@ export function LiveFlow({ compact = false }: { compact?: boolean }) {
   ];
 
   const visibleLog = log.filter((l) => l.at <= t).slice(compact ? -3 : -7);
-  const liveById = new Map((live ?? []).map((e) => [e.id, e]));
   const voting = live ? live.filter((e) => engineState(e) === "voting").length : null;
   const select = (id: string) => setPicked((p) => (p === id ? null : id));
 
@@ -661,7 +661,7 @@ export function LiveFlow({ compact = false }: { compact?: boolean }) {
             const step = tl.engines[i];
             const state = stateAt(t, [step.arrive, step.done]);
             const work = state === "active" ? (t - step.arrive) / (step.done - step.arrive) : state === "done" ? 1 : 0;
-            const liveEngine = liveById.get(e.id);
+            const liveEngine = findLiveEngine(e.id, live);
             return (
               <g key={e.id} className="animate-fade-in">
                 <rect

@@ -55,20 +55,20 @@ export const SCENARIOS: Record<FlowMode, FlowScenario> = {
         work: 900,
         note: "Keylogger and clipboard API imports",
       },
+      { id: "clamav", name: "ClamAV", vote: "malicious", work: 420, note: "Signature Win.Trojan.Agent" },
       {
-        id: "clamav",
-        name: "ClamAV",
-        vote: "none",
-        work: 260,
-        note: "Not connected, so named on the case",
-        advisory: true,
+        id: "pe_model",
+        name: "EMBER2024 model",
+        vote: "malicious",
+        work: 540,
+        note: "Trained on EMBER2024 features, scores it 0.97",
       },
       {
         id: "ml",
-        name: "ML model",
+        name: "ML classifier",
         vote: "none",
-        work: 480,
-        note: "Predicts malicious (0.91), not counted",
+        work: 380,
+        note: "Not trained yet, so shown but not counted",
         advisory: true,
       },
     ],
@@ -127,14 +127,35 @@ export const SCENARIOS: Record<FlowMode, FlowScenario> = {
 
 export const FLOW_MODES: FlowMode[] = ["file", "url", "email"];
 
+/**
+ * How to find each example engine in the live list. The API gives engines
+ * UUIDs, so they are matched by name.
+ */
+const LIVE_NAME: Record<string, RegExp> = {
+  hash: /hash/i,
+  static: /static/i,
+  signature: /signature/i,
+  yara: /yara/i,
+  heuristic: /heuristic/i,
+  clamav: /clamav/i,
+  pe_model: /ember|windows program model/i,
+  ml: /machine learning|^ml\b/i,
+};
+
+/** The live engine an example engine stands for, if the API lists it. */
+export function findLiveEngine(id: string, live: ApiEngine[] | undefined): ApiEngine | undefined {
+  const pattern = LIVE_NAME[id];
+  if (!pattern || !live) return undefined;
+  return live.find((e) => pattern.test(e.name ?? ""));
+}
+
 /** Apply the live engine states to a scenario's file engines. */
 export function withLiveEngines(scenario: FlowScenario, live: ApiEngine[] | undefined): FlowScenario {
   if (!live || live.length === 0 || scenario.mode !== "file") return scenario;
-  const byId = new Map(live.map((e) => [e.id, e]));
   return {
     ...scenario,
     engines: scenario.engines.map((step) => {
-      const engine = byId.get(step.id);
+      const engine = findLiveEngine(step.id, live);
       if (!engine) return step;
       const state = engineState(engine);
       if (state === "off") {
@@ -148,9 +169,8 @@ export function withLiveEngines(scenario: FlowScenario, live: ApiEngine[] | unde
           note: step.advisory ? step.note : `${step.note}, advisory only`,
         };
       }
-      // Voting. ClamAV and the model only vote once they're connected or trained.
-      if (step.id === "clamav") return { ...step, advisory: false, vote: "malicious", note: "Win.Trojan.Agent" };
-      if (step.id === "ml") return { ...step, advisory: false, vote: "malicious", note: "Predicts malicious (0.91)" };
+      // Voting. The untrained classifier only votes once it has been trained.
+      if (step.advisory) return { ...step, advisory: false, vote: "malicious", note: "Predicts malicious (0.91)" };
       return step;
     }),
   };
