@@ -271,6 +271,31 @@ fn meta_flag(detection: &DetectionResult, key: &str) -> bool {
     detection.metadata.get(key).and_then(|v| v.as_bool()) == Some(true)
 }
 
+/// "62 of 66 security vendors on VirusTotal flag it", for a detection that
+/// counts vendor votes rather than matching a curated list. Reads the file
+/// lookup's `malicious_count`/`total_engines` and the URL lookup's
+/// `malicious`/`suspicious`/`harmless`/`undetected`.
+fn vendor_agreement(detection: &DetectionResult) -> Option<String> {
+    let n = |key: &str| detection.metadata.get(key).and_then(|v| v.as_u64());
+    let (flagged, total) = match (n("malicious_count"), n("total_engines")) {
+        (Some(flagged), Some(total)) => (flagged, total),
+        _ => {
+            let flagged = n("malicious")?;
+            let rest: u64 = ["suspicious", "harmless", "undetected"]
+                .iter()
+                .filter_map(|k| n(k))
+                .sum();
+            (flagged, flagged + rest)
+        }
+    };
+    (total > 0).then(|| {
+        format!(
+            "{flagged} of {total} security vendors on {} flag it",
+            detection.engine_name
+        )
+    })
+}
+
 impl DetectionResult {
     /// True for roll-up rows that must not vote or be shown as an engine.
     pub fn is_aggregate(&self) -> bool {
@@ -424,6 +449,10 @@ impl AnalysisResult {
         let mut unavailable = Vec::new();
         let mut flagged_by = Vec::new();
         let mut confirmed_by = Vec::new();
+        // The confirmations, split by kind for the explanation: curated
+        // malware lists, and broad agreement among antivirus vendors.
+        let mut listed_by = Vec::new();
+        let mut agreed = Vec::new();
         let mut strong_by = Vec::new();
         let mut inside_by = Vec::new();
 
@@ -447,6 +476,10 @@ impl AnalysisResult {
                     flagged_by.push(detection.engine_name.clone());
                     if meta_flag(detection, AUTHORITATIVE_KEY) {
                         confirmed_by.push(detection.engine_name.clone());
+                        match vendor_agreement(detection) {
+                            Some(agreement) => agreed.push(agreement),
+                            None => listed_by.push(detection.engine_name.clone()),
+                        }
                     } else if meta_flag(detection, INNER_FILE_KEY) {
                         inside_by.push(detection.engine_name.clone());
                     } else if meta_flag(detection, STRONG_SIGNAL_KEY) {
@@ -554,10 +587,20 @@ impl AnalysisResult {
             } else if confirmed_by.is_empty() {
                 format!("{flagged}{not_voting_note}")
             } else {
-                format!(
-                    "Known malicious: listed by {}. A match in a curated malware list decides the verdict. {flagged}{not_voting_note}",
-                    confirmed_by.join(", ")
-                )
+                let listed = format!("listed by {}", listed_by.join(", "));
+                let agreement = agreed.join("; ");
+                let (what, why) = match (listed_by.is_empty(), agreed.is_empty()) {
+                    (false, true) => (
+                        listed,
+                        "A match in a curated malware list decides the verdict.",
+                    ),
+                    (true, false) => (agreement, "That many vendors agreeing decides the verdict."),
+                    _ => (
+                        format!("{listed}, and {agreement}"),
+                        "Either decides the verdict.",
+                    ),
+                };
+                format!("Known malicious: {what}. {why} {flagged}{not_voting_note}")
             };
         }
 
@@ -729,6 +772,59 @@ mod consensus_tests {
         assert!(r
             .consensus_explanation
             .starts_with("Known malicious: listed by MalwareBazaar"));
+    }
+
+    #[test]
+    fn vendor_agreement_is_explained_as_vendors_not_a_list() {
+        let vt_file = || {
+            det(
+                "VirusTotal",
+                ThreatVerdict::Malicious,
+                &[
+                    (AUTHORITATIVE_KEY, true.into()),
+                    ("malicious_count", 62.into()),
+                    ("total_engines", 66.into()),
+                ],
+            )
+        };
+        let r = result_of(vec![vt_file(), det("Static", ThreatVerdict::Benign, &[])]);
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Malicious);
+        assert!(
+            r.consensus_explanation.starts_with(
+                "Known malicious: 62 of 66 security vendors on VirusTotal flag it. That many vendors agreeing decides the verdict."
+            ),
+            "{}",
+            r.consensus_explanation
+        );
+
+        // The URL lookup counts votes under different keys.
+        let r = result_of(vec![det(
+            "VirusTotal",
+            ThreatVerdict::Malicious,
+            &[
+                (AUTHORITATIVE_KEY, true.into()),
+                ("malicious", 12.into()),
+                ("suspicious", 1.into()),
+                ("harmless", 60.into()),
+                ("undetected", 20.into()),
+            ],
+        )]);
+        assert!(r
+            .consensus_explanation
+            .starts_with("Known malicious: 12 of 93 security vendors on VirusTotal flag it."));
+
+        // Both kinds together.
+        let r = result_of(vec![
+            det(
+                "MalwareBazaar",
+                ThreatVerdict::Malicious,
+                &[(AUTHORITATIVE_KEY, true.into())],
+            ),
+            vt_file(),
+        ]);
+        assert!(r.consensus_explanation.starts_with(
+            "Known malicious: listed by MalwareBazaar, and 62 of 66 security vendors on VirusTotal flag it. Either decides the verdict."
+        ));
     }
 
     #[test]
