@@ -42,6 +42,7 @@ import {
   type TeamSummary,
 } from "@/lib/teams";
 import { Copy, FileSearch, History, KeyRound, LogOut, Mail, Plus, Trash2, Users } from "lucide-react";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 
 const TEAMS = "/api/orgs";
 const MY_INVITES = "/api/invitations";
@@ -514,7 +515,7 @@ function TeamSettings({ team, onGone }: { team: TeamDetail; onGone: () => void }
           <p className="text-sm">{retentionLabel(team.scanRetentionDays)}</p>
         )}
         <p className="text-xs text-muted-foreground">
-          Older scans and their results are deleted every day. Scans that carry a bounty are kept.
+          Older scans and their results are deleted every day.{BOUNTIES_ENABLED && " Scans that carry a bounty are kept."}
         </p>
       </div>
       {canManage(team.role) && (

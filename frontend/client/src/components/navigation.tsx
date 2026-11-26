@@ -15,12 +15,13 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Menu, User, Users, LogOut, Wallet, Search } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 
 const navItems = [
   { href: "/", label: "Overview" },
   { href: "/#architecture", label: "Architecture" },
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/marketplace", label: "Marketplace" },
+  ...(BOUNTIES_ENABLED ? [{ href: "/marketplace", label: "Marketplace" }] : []),
   { href: "/pricing", label: "Pricing" },
   { href: "/api", label: "API" },
 ];
@@ -145,7 +146,7 @@ export function Navigation() {
                       <span>Teams</span>
                     </Link>
                   </DropdownMenuItem>
-                  {!user.walletAddress && (
+                  {BOUNTIES_ENABLED && !user.walletAddress && (
                     <DropdownMenuItem onClick={connectWallet}>
                       <Wallet className="mr-2 h-4 w-4" />
                       <span>Connect Web3 Wallet</span>
@@ -232,7 +233,7 @@ export function Navigation() {
                             Teams
                           </Button>
                         </Link>
-                        {!user.walletAddress && (
+                        {BOUNTIES_ENABLED && !user.walletAddress && (
                           <Button
                             variant="outline"
                             className="w-full justify-start border-[#32342C] text-[#F3F1EA]"

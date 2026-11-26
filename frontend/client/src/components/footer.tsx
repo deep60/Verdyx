@@ -2,6 +2,7 @@ import { VerdyxLogo } from "@/components/verdyx-logo";
 import { Link } from "wouter";
 import { ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 
 interface FooterProps {
   tag?: string;
@@ -12,7 +13,7 @@ const footerSections = [
     title: "Platform",
     links: [
       { href: "/dashboard", label: "Analysis Dashboard" },
-      { href: "/marketplace", label: "Bounty Marketplace" },
+      ...(BOUNTIES_ENABLED ? [{ href: "/marketplace", label: "Bounty Marketplace" }] : []),
       { href: "/#architecture", label: "Architecture & Pipeline" },
       { href: "/pricing", label: "Pricing" },
     ],
@@ -22,7 +23,7 @@ const footerSections = [
     links: [
       { href: "/#capabilities", label: "File & URL Engines" },
       { href: "/#architecture", label: "How Consensus Works" },
-      { href: "/marketplace", label: "Security Engines" },
+      { href: "/#capabilities", label: "Security Engines" },
       { href: "/#capabilities", label: "Enterprise Use Cases" },
     ],
   },
@@ -37,7 +38,7 @@ const footerSections = [
   },
 ];
 
-export function Footer({ tag = "commit · reveal" }: FooterProps) {
+export function Footer({ tag = "every engine · one verdict" }: FooterProps) {
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };

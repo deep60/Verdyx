@@ -11,6 +11,7 @@ import { Wallet, Mail, Lock, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { SEO } from "@/components/seo";
 import { OAuthButtons } from "@/components/oauth-buttons";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 import { oauthErrorFromUrl } from "@/lib/oauth-errors";
 
 export default function Login() {
@@ -123,26 +124,19 @@ export default function Login() {
             </Button>
           </form>
 
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
-            </div>
-          </div>
-
           <OAuthButtons />
 
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full border-primary/20 hover:border-primary/40"
-            onClick={handleWalletConnect}
-          >
-            <Wallet className="mr-2 h-4 w-4" />
-            Connect Wallet (MetaMask)
-          </Button>
+          {BOUNTIES_ENABLED && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full text-muted-foreground"
+              onClick={handleWalletConnect}
+            >
+              <Wallet className="mr-2 h-4 w-4" />
+              Use a wallet instead
+            </Button>
+          )}
         </CardContent>
 
         <CardFooter className="flex flex-col space-y-4">

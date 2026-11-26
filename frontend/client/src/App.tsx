@@ -11,6 +11,7 @@ import { NotificationProvider } from "@/components/notification-provider";
 import { ProtectedRoute } from "@/components/protected-route";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { initCsrfToken } from "@/lib/csrf";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 
 // Eagerly load the landing page for a fast first paint; lazy-load the rest so
 // heavy dependencies (charts, pdf/xlsx export) stay out of the initial bundle.
@@ -66,13 +67,22 @@ function Router() {
             <Dashboard />
           </ProtectedRoute>
         </Route>
-        {/* Read from the chain; nothing private, so it's shareable without signing in. */}
-        <Route path="/marketplace/bounties/:id" component={OnChainBounty} />
-        <Route path="/marketplace">
-          <ProtectedRoute>
-            <Marketplace />
-          </ProtectedRoute>
-        </Route>
+        {BOUNTIES_ENABLED ? (
+          <>
+            {/* Read from the chain; nothing private, so it's shareable without signing in. */}
+            <Route path="/marketplace/bounties/:id" component={OnChainBounty} />
+            <Route path="/marketplace">
+              <ProtectedRoute>
+                <Marketplace />
+              </ProtectedRoute>
+            </Route>
+          </>
+        ) : (
+          <>
+            <Route path="/marketplace">{<Redirect to="/dashboard" replace />}</Route>
+            <Route path="/marketplace/*">{<Redirect to="/dashboard" replace />}</Route>
+          </>
+        )}
         <Route path="/analysis/:id" component={AnalysisDetails} />
         <Route path="/api" component={ApiDocs} />
         <Route path="/teams">

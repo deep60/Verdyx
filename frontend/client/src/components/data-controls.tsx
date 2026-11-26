@@ -17,6 +17,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { serverMessage } from "@/lib/teams";
 import { Database, Download, Trash2 } from "lucide-react";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 
 export interface RetentionPolicy {
   scanRetentionDays: number | null;
@@ -75,7 +76,7 @@ export function policySentence(p?: Pick<RetentionPolicy, "sampleRetentionDays" |
   if (p?.guestScanRetentionDays) {
     parts.push(`Scans made while signed out are deleted after ${p.guestScanRetentionDays} days.`);
   }
-  parts.push("Scans that carry a bounty are kept.");
+  if (BOUNTIES_ENABLED) parts.push("Scans that carry a bounty are kept.");
   return parts.join(" ");
 }
 

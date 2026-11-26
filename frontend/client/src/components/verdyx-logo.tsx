@@ -82,7 +82,7 @@ export function VerdyxLogo({
         </span>
         {showSubtitle && (
           <span className="mt-1 font-mono text-[9px] uppercase tracking-[0.16em] opacity-70">
-            Decentralized Threat Intelligence
+            Multi-engine threat analysis
           </span>
         )}
       </span>

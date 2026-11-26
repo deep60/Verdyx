@@ -13,11 +13,10 @@ describe("retention choices", () => {
 
   it("describe what Verdyx deletes by itself", () => {
     expect(policySentence({ sampleRetentionDays: 30, guestScanRetentionDays: 90 })).toBe(
-      "Uploaded files are deleted 30 days after a scan; its results stay. Scans made while signed out are deleted after 90 days. Scans that carry a bounty are kept.",
+      "Uploaded files are deleted 30 days after a scan; its results stay. Scans made while signed out are deleted after 90 days.",
     );
-    expect(policySentence({ sampleRetentionDays: null, guestScanRetentionDays: null })).toBe(
-      "Scans that carry a bounty are kept.",
-    );
+    // Bounty scans are only mentioned when the bounty features are switched on.
+    expect(policySentence({ sampleRetentionDays: null, guestScanRetentionDays: null })).toBe("");
   });
 });
 

@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowUpRight,
   Award,
+  CheckCircle2,
   ChevronRight,
   Copy,
   FileArchive,
@@ -11,6 +12,7 @@ import {
   Flame,
   Globe,
   Mail,
+  Percent,
   Radar,
   ShieldAlert,
   Trophy,
@@ -20,6 +22,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { BOUNTIES_ENABLED } from "@/lib/features";
 import type { ApiSubmission } from "@/lib/api-types";
 import {
   OUTCOME_LABEL,
@@ -149,7 +152,7 @@ export function ProfileHero({ username, email, createdAt, walletAddress, rank, o
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span title="Shown in full under Account">{maskEmail(email)}</span>
             {sinceText && <span>Member since {sinceText}</span>}
-            {rank ? (
+            {!BOUNTIES_ENABLED ? null : rank ? (
               <Link
                 href="/marketplace#leaderboard"
                 className="inline-flex items-center gap-1 text-foreground hover:underline"
@@ -174,7 +177,7 @@ export function ProfileHero({ username, email, createdAt, walletAddress, rank, o
               New scan
             </Link>
           </Button>
-          {walletAddress ? (
+          {!BOUNTIES_ENABLED ? null : walletAddress ? (
             <button
               type="button"
               onClick={() => {
@@ -286,26 +289,49 @@ export function ProfileStats({
         loading={loading}
         testId="stat-threats"
       />
-      <Tile
-        label="Reputation"
-        value={reputation}
-        hint={
-          rank
-            ? `Rank #${rank.rank} of ${rank.of}${accuracy !== null ? ` · ${accuracy.toFixed(0)}% accurate` : ""}`
-            : "Earned by verdicts that match consensus"
-        }
-        icon={Award}
-        testId="stat-reputation"
-      />
-      <Tile
-        label="Rewards earned"
-        value={rewards === null ? "—" : rewards.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-        hint={
-          bountiesJoined ? `From ${bountiesJoined} ${bountiesJoined === 1 ? "bounty" : "bounties"}` : "Win bounties in the marketplace"
-        }
-        icon={Trophy}
-        testId="stat-rewards"
-      />
+      {BOUNTIES_ENABLED ? (
+        <>
+          <Tile
+            label="Reputation"
+            value={reputation}
+            hint={
+              rank
+                ? `Rank #${rank.rank} of ${rank.of}${accuracy !== null ? ` · ${accuracy.toFixed(0)}% accurate` : ""}`
+                : "Earned by verdicts that match consensus"
+            }
+            icon={Award}
+            testId="stat-reputation"
+          />
+          <Tile
+            label="Rewards earned"
+            value={rewards === null ? "—" : rewards.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+            hint={
+              bountiesJoined ? `From ${bountiesJoined} ${bountiesJoined === 1 ? "bounty" : "bounties"}` : "Win bounties in the marketplace"
+            }
+            icon={Trophy}
+            testId="stat-rewards"
+          />
+        </>
+      ) : (
+        <>
+          <Tile
+            label="Came back clean"
+            value={counts.clean}
+            hint={counts.clean > 0 ? "No engine flagged them" : "No clean verdicts yet"}
+            icon={CheckCircle2}
+            loading={loading}
+            testId="stat-clean"
+          />
+          <Tile
+            label="Threat rate"
+            value={counts.total > 0 ? `${Math.round((threats / counts.total) * 100)}%` : "—"}
+            hint={counts.total > 0 ? `${threats} of ${counts.total} scans` : "After your first scan"}
+            icon={Percent}
+            loading={loading}
+            testId="stat-threat-rate"
+          />
+        </>
+      )}
     </div>
   );
 }
