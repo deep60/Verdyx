@@ -270,10 +270,10 @@ export function FileSubmissionForm() {
               inputMode="url"
               autoComplete="off"
               spellCheck={false}
-              placeholder="paypa1-secure-login.com/verify"
+              placeholder="Paste a link, like example.com/login"
               value={targetUrl}
               onChange={(e) => setTargetUrl(e.target.value)}
-              className="h-12 pl-9 font-mono text-sm"
+              className="h-12 pl-9 text-sm placeholder:text-muted-foreground/60 [&:not(:placeholder-shown)]:font-mono"
               data-testid="input-url"
             />
           </div>
@@ -424,7 +424,11 @@ export function FileSubmissionForm() {
           </button>
         </div>
 
-        <Button type="submit" disabled={!ready || submitMutation.isPending} className="gap-2 sm:min-w-36" data-testid="button-submit-analysis">
+        <Button type="submit" disabled={!ready || submitMutation.isPending} className={cn(
+            "gap-2 transition-all sm:min-w-36",
+            !ready && "disabled:border disabled:border-border disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-100",
+          )}
+          data-testid="button-submit-analysis">
           {submitMutation.isPending ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
