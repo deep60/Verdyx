@@ -19,9 +19,11 @@ Rather than calling the routes by hand, you can use:
 - **Similarity search**, to find variants of a file by fuzzy hash: [similarity.md](api/similarity.md)
 - **Privacy**, where files go and who can open a report: [privacy.md](privacy.md)
 - **Single sign-on and provisioning** with Okta, Microsoft Entra ID and other identity providers: [sso.md](integrations/sso.md)
+- **Email scanning**, of attachments and links, including a phishing-report mailbox: [email.md](integrations/email.md)
+- **Cloud storage scanning** of Amazon S3, Cloudflare R2 and Google Cloud Storage buckets: [cloud-storage.md](integrations/cloud-storage.md)
 
 They all scan the same way:
-1. `POST /submissions/file`, a multipart form with `file`, or `url` for a URL, plus optional `description`, `organizationId` and `priority`.
+1. `POST /submissions/file`, a multipart form with `file`, or `url` for a URL, plus optional `description`, `organizationId` and `priority`. An email can also be sent raw, as the body of `POST /submissions/email`.
 2. Poll `GET /submissions/{id}` until `analysisStatus` is `completed` or `failed`.
 3. Read the verdict from `GET /submissions/{id}/consensus` and each engine's result from `GET /submissions/{id}/analyses`.
 

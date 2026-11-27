@@ -114,6 +114,11 @@ const ENDPOINTS: Group[] = [
         description: "Submit a file, an .eml message (field file) or a link (field url). Returns the scan id.",
       },
       {
+        method: "POST",
+        path: "/submissions/email",
+        description: "Submit a raw email as the body (message/rfc822). Its attachments are scanned and its links looked up.",
+      },
+      {
         method: "GET",
         path: "/submissions/:id",
         description: "Status of a scan: pending, analyzing, completed or failed.",

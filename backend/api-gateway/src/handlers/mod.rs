@@ -26,6 +26,7 @@ pub mod retrohunt;
 pub mod scim;
 pub mod similarity;
 pub mod sso;
+pub mod storage;
 pub mod submission;
 pub mod threat_feed;
 pub mod user;

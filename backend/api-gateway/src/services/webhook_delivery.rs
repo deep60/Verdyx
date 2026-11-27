@@ -177,11 +177,16 @@ impl Resolve for PublicOnly {
 /// The HTTP client for webhooks. `allow_private` is only for tests that send
 /// to a local server.
 pub fn client(allow_private: bool) -> reqwest::Client {
+    client_with_timeout(allow_private, REQUEST_TIMEOUT)
+}
+
+/// The same client with a longer limit per request, for downloads.
+pub fn client_with_timeout(allow_private: bool, timeout: Duration) -> reqwest::Client {
     reqwest::Client::builder()
         .dns_resolver(Arc::new(PublicOnly { allow_private }))
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(timeout)
         .connect_timeout(CONNECT_TIMEOUT)
         .user_agent(USER_AGENT)
         .build()

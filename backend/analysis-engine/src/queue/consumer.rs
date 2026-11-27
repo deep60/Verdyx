@@ -9,7 +9,10 @@ use uuid::Uuid;
 use crate::analyzers::{AnalysisEngine, AnalysisMode, AnalysisOptions, FileAnalysisRequest};
 use crate::models::analysis_result::without_nul;
 use crate::scanners::url_scanner::UrlScanner;
-use crate::scanners::url_verdicts::{url_detections, URL_CHECKS};
+use crate::scanners::url_verdicts::{
+    email_links_detection, pick_email_links, url_detections, EMAIL_LINKS, EMAIL_LINKS_CHECKED,
+    URL_CHECKS,
+};
 use crate::scanners::vt_sandbox::{
     sandbox_detection, SandboxClient, SandboxOutcome, MAX_UPLOAD_BYTES, POLL_ATTEMPTS,
     POLL_INTERVAL, SANDBOX,
@@ -462,6 +465,12 @@ async fn process_submission(
         }
     }
 
+    // Step 3d: an email's links are looked up in the URL engines.
+    let email_links = match (submission.submission_type.as_str(), file_data.as_deref()) {
+        ("email", Some(data)) => email_link_check(url_scanner, data).await,
+        _ => None,
+    };
+
     // Behavioral scans of files keep what the sandbox step needs: the hash
     // and, when the file may be uploaded, the bytes.
     let is_file = submission.submission_type != "url";
@@ -514,6 +523,9 @@ async fn process_submission(
 
     for vote in url_votes {
         analysis_result.add_detection(vote);
+    }
+    if let Some(links) = email_links {
+        analysis_result.add_detection(links);
     }
     if let Some(err) = page_error {
         note_unreachable_page(&mut analysis_result, &err);
@@ -908,6 +920,49 @@ async fn url_engine_votes(
                 e.to_string(),
             )]
         }
+    }
+}
+
+/// How long an email's link lookups may take together.
+const EMAIL_LINK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// Looks an email's links up in the URL engines (URLhaus, ThreatFox, Safe
+/// Browsing and VirusTotal when configured, and Verdyx's URL checks). The
+/// pages themselves aren't opened. `None` when the email has no links.
+async fn email_link_check(
+    url_scanner: &UrlScanner,
+    data: &[u8],
+) -> Option<crate::models::analysis_result::DetectionResult> {
+    let links = crate::scanners::unpack::email_links(data, 200);
+    if links.is_empty() {
+        return None;
+    }
+    let picked = pick_email_links(
+        &links,
+        |host| url_scanner.is_trusted_domain(host),
+        EMAIL_LINKS_CHECKED,
+    );
+    let started = std::time::Instant::now();
+    let lookups = futures::future::join_all(
+        picked
+            .iter()
+            .map(|link| url_engine_votes(url_scanner, link)),
+    );
+    match tokio::time::timeout(EMAIL_LINK_TIMEOUT, lookups).await {
+        Ok(votes) => {
+            let checked: Vec<_> = picked.into_iter().zip(votes).collect();
+            Some(email_links_detection(
+                links.len(),
+                &checked,
+                started.elapsed().as_millis() as u64,
+            ))
+        }
+        Err(_) => Some(AnalysisEngine::create_unavailable_detection(
+            EMAIL_LINKS,
+            "live",
+            crate::models::analysis_result::EngineType::ThreatIntel,
+            "The link lookups took too long".to_string(),
+        )),
     }
 }
 

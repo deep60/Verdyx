@@ -190,6 +190,24 @@ export function engineFacts(a: ApiAnalysis): Fact[] {
       });
     }
   }
+  // Email links: each looked up in the URL engines.
+  const links = arr(m.links);
+  for (const l of [...links]
+    .sort((x, y) => verdictWeight(str(y.verdict)) - verdictWeight(str(x.verdict)))
+    .slice(0, 5)) {
+    const verdict = str(l.verdict) ?? "Unknown";
+    const engines = strs(l.engines);
+    facts.push({
+      label: "Link",
+      value: `${str(l.url) ?? "link"}: ${verdictWeight(verdict) >= 2 ? `${verdictText(verdict)} by ${engines.join(", ")}` : "not flagged"}`,
+      tone: verdict === "Malicious" ? "danger" : verdict === "Suspicious" ? "warning" : "muted",
+    });
+  }
+  const linksFound = typeof m.linksFound === "number" ? m.linksFound : 0;
+  if (links.length > 0 && linksFound > links.length) {
+    facts.push({ label: "Link", value: `and ${linksFound - links.length} more not looked up`, tone: "muted" });
+  }
+
   const password = str(m.password_used);
   if (password) facts.push({ label: "Opened with password", value: password });
   const skipped = Array.isArray(m.skipped) ? m.skipped.length : 0;

@@ -121,6 +121,14 @@ export function describe(e: AuditEvent, viewerId?: string): string {
       return "Made a new provisioning token";
     case "team.scim_token_revoked":
       return "Revoked the provisioning token";
+    case "team.storage_added":
+      return `Connected the bucket ${text(d.bucket)}${d.name ? ` as ${quoted(d.name)}` : ""}`;
+    case "team.storage_changed":
+      return `Changed the storage connection ${quoted(d.name)}${d.changed ? `: ${text(d.changed)}` : ""}`.trim();
+    case "team.storage_removed":
+      return `Disconnected the bucket ${text(d.bucket)}`;
+    case "team.storage_scan_requested":
+      return `Asked for a scan of ${quoted(d.name)}`.trim();
     case "scan.created":
       return `Submitted a ${text(d.type) || "new"} scan`;
     default:

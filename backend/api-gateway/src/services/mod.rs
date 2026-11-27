@@ -10,5 +10,7 @@ pub mod oidc;
 pub mod proxy_service;
 pub mod redis;
 pub mod retention;
+pub mod s3;
 pub mod siem;
+pub mod storage_scan;
 pub mod webhook_delivery;

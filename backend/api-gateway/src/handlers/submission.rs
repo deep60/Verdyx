@@ -1029,33 +1029,12 @@ pub async fn create_file_submission(
         if let Some(data) = file_bytes.filter(|b| !b.is_empty()) {
             let fname = filename.unwrap_or_else(|| "upload.bin".to_string());
             let hash = calculate_file_hash(&data);
-            let upload_root = std::env::var("UPLOAD_DIR")
-                .unwrap_or_else(|_| state.config.services.upload_path.clone());
-            let fpath = format!("{upload_root}/{submission_id}");
-            if let Some(parent) = std::path::Path::new(&fpath).parent() {
-                fs::create_dir_all(parent)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            }
-            let mut file = fs::File::create(&fpath)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            file.write_all(&data)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let mtype = if fname.to_ascii_lowercase().ends_with(".eml")
-                || fname.to_ascii_lowercase().ends_with(".mime")
-                || submission_type_override.as_deref() == Some("email")
-            {
-                "message/rfc822".to_string()
-            } else {
-                detect_file_type(&data, &fname)
-            };
-            let stype = match submission_type_override.as_deref() {
-                Some("email") => "email".to_string(),
-                _ if mtype == "message/rfc822" => "email".to_string(),
-                _ => "file".to_string(),
-            };
+            let fpath = write_upload(&state, submission_id, &data).await?;
+            let (stype, mtype) = kind_of_upload(
+                &fname,
+                &data,
+                submission_type_override.as_deref() == Some("email"),
+            );
             (
                 stype,
                 fname,
@@ -1095,58 +1074,42 @@ pub async fn create_file_submission(
         crate::handlers::privacy::may_upload_file(state.db.pool(), submitter_id, organization_id)
             .await;
 
-    let response = sqlx::query_as::<_, (Uuid,)>(
-        r#"
-        INSERT INTO submissions (
-            id, submitter_id, original_filename, file_hash, url, file_size,
-            mime_type, file_path, submission_type, analysis_status,
-            metadata, created_at, updated_at, organization_id, may_upload_file
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11, $12, $13)
-        RETURNING id
-        "#,
-    )
-    .bind(submission_id)
-    .bind(submitter_id)
-    .bind(&final_filename)
-    .bind(&file_hash)
-    .bind(&url_col)
-    .bind(file_size)
-    .bind(&mime_type)
-    .bind(&file_path)
-    .bind(&submission_type)
-    .bind(&metadata)
-    .bind(now)
-    .bind(organization_id)
-    .bind(may_upload_file)
-    .fetch_one(state.db.pool())
-    .await
-    .map(|row: (Uuid,)| {
-        let actual_id = row.0;
-        let redis = state.redis.clone();
-        let prio = if priority { 2 } else { 1 };
-        tokio::spawn(async move {
-            if let Err(e) = redis.queue_for_analysis(actual_id, prio).await {
-                tracing::error!("Failed to enqueue submission {}: {}", actual_id, e);
-            }
-        });
-        Json(FileSubmissionResponse {
-            id: actual_id,
+    insert_and_queue(
+        &state,
+        ScanRow {
+            id: submission_id,
             submitter_id,
-            original_filename: Some(final_filename),
-            file_hash: Some(file_hash),
-            file_size: Some(file_size),
-            submission_type,
-            analysis_status: "pending".to_string(),
-            description,
-            organization_id,
+            filename: &final_filename,
+            file_hash: &file_hash,
+            url: url_col.as_deref(),
+            file_size,
+            mime_type: &mime_type,
+            file_path: file_path.as_deref(),
+            submission_type: &submission_type,
+            metadata: &metadata,
             created_at: now,
-        })
-    })
+            organization_id,
+            may_upload_file,
+            priority,
+        },
+    )
+    .await
     .map_err(|e| {
         tracing::error!("Failed to insert submission: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+    let response = Json(FileSubmissionResponse {
+        id: submission_id,
+        submitter_id,
+        original_filename: Some(final_filename),
+        file_hash: Some(file_hash),
+        file_size: Some(file_size),
+        submission_type,
+        analysis_status: "pending".to_string(),
+        description,
+        organization_id,
+        created_at: now,
+    });
 
     // Signed-out scans have nobody to show the event to.
     if let Some(claims) = claims.as_ref() {
@@ -1159,6 +1122,286 @@ pub async fn create_file_submission(
         event.record(state.db.pool()).await;
     }
     Ok(response)
+}
+
+/// Where uploads are kept: `UPLOAD_DIR`, or the configured upload path. The
+/// analysis engine reads them from there.
+fn upload_root(state: &AppState) -> String {
+    std::env::var("UPLOAD_DIR").unwrap_or_else(|_| state.config.services.upload_path.clone())
+}
+
+/// Writes an upload where the analysis engine reads it; returns its path.
+pub(crate) async fn write_upload(
+    state: &AppState,
+    submission_id: Uuid,
+    data: &[u8],
+) -> Result<String, StatusCode> {
+    let fpath = format!("{}/{submission_id}", upload_root(state));
+    if let Some(parent) = std::path::Path::new(&fpath).parent() {
+        fs::create_dir_all(parent)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    let mut file = fs::File::create(&fpath)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    file.write_all(data)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(fpath)
+}
+
+/// The submission type ("email" or "file") and MIME type of an upload. A
+/// `.eml` or `.mime` name, or being sent as an email, makes it an email.
+pub(crate) fn kind_of_upload(filename: &str, data: &[u8], sent_as_email: bool) -> (String, String) {
+    let lower = filename.to_ascii_lowercase();
+    if sent_as_email || lower.ends_with(".eml") || lower.ends_with(".mime") {
+        return ("email".to_string(), "message/rfc822".to_string());
+    }
+    let mtype = detect_file_type(data, filename);
+    let stype = if mtype == "message/rfc822" {
+        "email"
+    } else {
+        "file"
+    };
+    (stype.to_string(), mtype)
+}
+
+/// One `submissions` row, as every upload path writes it.
+pub(crate) struct ScanRow<'a> {
+    pub id: Uuid,
+    pub submitter_id: Uuid,
+    pub filename: &'a str,
+    pub file_hash: &'a str,
+    pub url: Option<&'a str>,
+    pub file_size: i64,
+    pub mime_type: &'a str,
+    pub file_path: Option<&'a str>,
+    pub submission_type: &'a str,
+    pub metadata: &'a serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub organization_id: Option<Uuid>,
+    pub may_upload_file: bool,
+    pub priority: bool,
+}
+
+/// Saves the scan and puts it on the analysis queue.
+pub(crate) async fn insert_and_queue(
+    state: &AppState,
+    row: ScanRow<'_>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO submissions (
+            id, submitter_id, original_filename, file_hash, url, file_size,
+            mime_type, file_path, submission_type, analysis_status,
+            metadata, created_at, updated_at, organization_id, may_upload_file
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11, $12, $13)
+        "#,
+    )
+    .bind(row.id)
+    .bind(row.submitter_id)
+    .bind(row.filename)
+    .bind(row.file_hash)
+    .bind(row.url)
+    .bind(row.file_size)
+    .bind(row.mime_type)
+    .bind(row.file_path)
+    .bind(row.submission_type)
+    .bind(row.metadata)
+    .bind(row.created_at)
+    .bind(row.organization_id)
+    .bind(row.may_upload_file)
+    .execute(state.db.pool())
+    .await?;
+    let redis = state.redis.clone();
+    let id = row.id;
+    let prio = if row.priority { 2 } else { 1 };
+    tokio::spawn(async move {
+        if let Err(e) = redis.queue_for_analysis(id, prio).await {
+            tracing::error!("Failed to enqueue submission {}: {}", id, e);
+        }
+    });
+    Ok(())
+}
+
+/// Largest email `POST /submissions/email` takes, like most mail servers.
+pub const MAX_EMAIL_BYTES: usize = 40 * 1024 * 1024;
+
+#[derive(Debug, Deserialize)]
+pub struct EmailScanQuery {
+    #[serde(rename = "organizationId", alias = "organization_id")]
+    pub organization_id: Option<String>,
+    #[serde(rename = "analysisType", alias = "analysis_type")]
+    pub analysis_type: Option<String>,
+    pub description: Option<String>,
+}
+
+/// A name for an email scan from its Subject, or `message.eml`. Encoded
+/// subjects (`=?utf-8?…`) aren't decoded here; the report shows the
+/// decoded headers.
+pub(crate) fn email_filename(raw: &[u8]) -> String {
+    let head = &raw[..raw.len().min(64 * 1024)];
+    let text = String::from_utf8_lossy(head);
+    let headers = text.split("\r\n\r\n").next().unwrap_or_default();
+    let headers = headers.split("\n\n").next().unwrap_or_default();
+    let mut subject: Option<String> = None;
+    let mut lines = headers.lines().peekable();
+    while let Some(line) = lines.next() {
+        if line.len() >= 8 && line[..8].eq_ignore_ascii_case("subject:") {
+            let mut value = line[8..].trim().to_string();
+            // Folded onto the next lines.
+            while let Some(next) = lines.peek() {
+                if next.starts_with([' ', '\t']) {
+                    value.push(' ');
+                    value.push_str(next.trim());
+                    lines.next();
+                } else {
+                    break;
+                }
+            }
+            subject = Some(value);
+            break;
+        }
+    }
+    let clean: String = subject
+        .filter(|s| !s.contains("=?"))
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !matches!(c, '/' | '\\' | '"' | '<' | '>' | '|' | ':' | '*' | '?')
+        })
+        .take(80)
+        .collect();
+    let clean = clean.trim();
+    if clean.is_empty() {
+        "message.eml".to_string()
+    } else {
+        format!("{clean}.eml")
+    }
+}
+
+/// Scan an email sent as the raw message.
+///
+/// POST /api/v1/submissions/email
+///
+/// The body is the message as received (`message/rfc822`, what a mail
+/// server, a Cloudflare Email Worker or Outlook's "Save as" hands over).
+/// Query: `organizationId`, `analysisType` and `description`, as on the file
+/// upload. Its attachments are scanned by every engine and its links are
+/// looked up.
+pub async fn create_email_submission(
+    State(state): State<AppState>,
+    claims: Option<crate::middleware::auth::Claims>,
+    Query(query): Query<EmailScanQuery>,
+    body: axum::body::Bytes,
+) -> Result<Json<FileSubmissionResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let fail = |status: StatusCode, message: &str| {
+        (
+            status,
+            Json(serde_json::json!({ "error": message, "status": status.as_u16() })),
+        )
+    };
+    if body.is_empty() {
+        return Err(fail(
+            StatusCode::BAD_REQUEST,
+            "send the email as the request body (Content-Type: message/rfc822)",
+        ));
+    }
+    if body.len() > MAX_EMAIL_BYTES {
+        return Err(fail(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "the email is larger than 40 MB",
+        ));
+    }
+    let analysis_type = match query.analysis_type.as_deref().map(str::trim) {
+        None | Some("") => "full".to_string(),
+        Some(t @ ("quick" | "full" | "deep" | "behavioral")) => t.to_string(),
+        Some(_) => {
+            return Err(fail(
+                StatusCode::BAD_REQUEST,
+                "analysisType must be quick, full, deep or behavioral",
+            ))
+        }
+    };
+    let submitter_id = claims.as_ref().map(|c| c.sub).unwrap_or_else(Uuid::nil);
+    let team_key = claims.as_ref().and_then(|c| c.org_id);
+    let organization_id = resolve_team(&state, claims.as_ref(), team_key, query.organization_id)
+        .await
+        .map_err(|status| {
+            let message = match status {
+                StatusCode::FORBIDDEN => "you can't save scans to that team",
+                StatusCode::UNAUTHORIZED => "sign in to save scans to a team",
+                StatusCode::BAD_REQUEST => "organizationId isn't a team id",
+                _ => "something went wrong",
+            };
+            fail(status, message)
+        })?;
+
+    let id = Uuid::new_v4();
+    let now = Utc::now();
+    let data = body.to_vec();
+    let filename = email_filename(&data);
+    let hash = calculate_file_hash(&data);
+    let path = write_upload(&state, id, &data)
+        .await
+        .map_err(|s| fail(s, "couldn't store the email"))?;
+    let description = query.description.filter(|d| !d.trim().is_empty());
+    let metadata = serde_json::json!({
+        "analysisType": analysis_type,
+        "priority": false,
+        "description": description,
+        "source": { "kind": "email" },
+    });
+    let may_upload_file =
+        crate::handlers::privacy::may_upload_file(state.db.pool(), submitter_id, organization_id)
+            .await;
+    insert_and_queue(
+        &state,
+        ScanRow {
+            id,
+            submitter_id,
+            filename: &filename,
+            file_hash: &hash,
+            url: None,
+            file_size: data.len() as i64,
+            mime_type: "message/rfc822",
+            file_path: Some(&path),
+            submission_type: "email",
+            metadata: &metadata,
+            created_at: now,
+            organization_id,
+            may_upload_file,
+            priority: false,
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to insert email submission: {e}");
+        fail(StatusCode::INTERNAL_SERVER_ERROR, "something went wrong")
+    })?;
+    if let Some(claims) = claims.as_ref() {
+        let mut event = crate::services::audit::Event::by(claims, "scan.created")
+            .target("submission", id)
+            .detail("type", "email");
+        if let Some(team) = organization_id {
+            event = event.team(team);
+        }
+        event.record(state.db.pool()).await;
+    }
+    Ok(Json(FileSubmissionResponse {
+        id,
+        submitter_id,
+        original_filename: Some(filename),
+        file_hash: Some(hash),
+        file_size: Some(data.len() as i64),
+        submission_type: "email".to_string(),
+        analysis_status: "pending".to_string(),
+        description,
+        organization_id,
+        created_at: now,
+    }))
 }
 
 // Router setup
@@ -1872,6 +2115,29 @@ fn consensus_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_email_scan_is_named_after_its_subject() {
+        let raw = b"From: a@example.com\r\nSubject: Invoice 4471:\r\n overdue\r\nTo: b@example.com\r\n\r\nSubject: not this\r\n";
+        assert_eq!(email_filename(raw), "Invoice 4471 overdue.eml");
+        assert_eq!(
+            email_filename(b"Subject: =?utf-8?B?SGk=?=\r\n\r\nx"),
+            "message.eml"
+        );
+        assert_eq!(
+            email_filename(b"From: a@example.com\n\nbody"),
+            "message.eml"
+        );
+        let long = format!("Subject: {}\r\n\r\n", "a/b".repeat(60));
+        assert_eq!(email_filename(long.as_bytes()).len(), 80 + 4);
+    }
+
+    #[test]
+    fn eml_names_and_email_uploads_are_emails() {
+        assert_eq!(kind_of_upload("Report.EML", b"x", false).0, "email");
+        assert_eq!(kind_of_upload("x.bin", b"x", true).1, "message/rfc822");
+        assert_eq!(kind_of_upload("tool.exe", b"MZ\x90\x00", false).0, "file");
+    }
     use crate::middleware::auth::Claims;
 
     #[test]
