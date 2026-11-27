@@ -60,10 +60,13 @@ export function describe(e: AuditEvent, viewerId?: string): string {
       return "Created the account";
     case "auth.login": {
       const method = text(d.method);
+      if (method === "sso") return "Signed in with single sign-on";
       return method && method !== "password" ? `Signed in with ${method[0].toUpperCase()}${method.slice(1)}` : "Signed in";
     }
     case "auth.login_failed":
-      return "Failed sign-in: wrong password";
+      return d.reason === "sso_required"
+        ? "Password sign-in refused: the team requires single sign-on"
+        : "Failed sign-in: wrong password";
     case "auth.password_reset_requested":
       return "Password reset link requested";
     case "account.updated": {
@@ -100,6 +103,24 @@ export function describe(e: AuditEvent, viewerId?: string): string {
       return `Created team key ${quoted(d.name)}`.trim();
     case "team.api_key.revoked":
       return "Revoked a team key";
+    case "team.member.joined_sso":
+      return `Joined the team through single sign-on as ${text(d.role)}`;
+    case "team.member.provisioned":
+      return `${subject === "you" ? "You were" : `${subject} was`} added by the identity provider`;
+    case "team.member.deprovisioned":
+      return `${subject === "you" ? "You were" : `${subject} was`} removed by the identity provider`;
+    case "team.sso_changed":
+      return d.enabled ? `Turned single sign-on on${d.required ? ", and required it" : ""}` : "Turned single sign-on off";
+    case "team.domain_added":
+      return `Added the domain ${text(d.domain)}`;
+    case "team.domain_verified":
+      return `Verified the domain ${text(d.domain)}`;
+    case "team.domain_removed":
+      return `Removed the domain ${text(d.domain)}`;
+    case "team.scim_token_created":
+      return "Made a new provisioning token";
+    case "team.scim_token_revoked":
+      return "Revoked the provisioning token";
     case "scan.created":
       return `Submitted a ${text(d.type) || "new"} scan`;
     default:

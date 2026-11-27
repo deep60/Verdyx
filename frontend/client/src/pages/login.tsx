@@ -7,19 +7,22 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Wallet, Mail, Lock, AlertCircle } from "lucide-react";
+import { Wallet, Mail, Lock, AlertCircle, Building2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { SEO } from "@/components/seo";
 import { OAuthButtons } from "@/components/oauth-buttons";
 import { BOUNTIES_ENABLED } from "@/lib/features";
 import { oauthErrorFromUrl } from "@/lib/oauth-errors";
+import { SsoSignIn } from "@/components/sso-sign-in";
+import { isSsoRequired, ssoErrorFromUrl, ssoRequestedInUrl } from "@/lib/sso";
 
 export default function Login() {
   const [, setLocation] = useLocation();
   const { login, connectWallet } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(oauthErrorFromUrl);
+  const [error, setError] = useState(() => oauthErrorFromUrl() || ssoErrorFromUrl());
+  const [ssoMode, setSsoMode] = useState(ssoRequestedInUrl);
   const [isLoading, setIsLoading] = useState(false);
 
   // Return the user to where they were headed before being redirected to login.
@@ -37,8 +40,14 @@ export default function Login() {
     try {
       await login(identifier, password);
       setLocation(getRedirectTarget());
-    } catch (_err) {
-      setError("Invalid credentials. Please try again.");
+    } catch (err) {
+      if (isSsoRequired(err)) {
+        // The team requires its identity provider: switch to that.
+        setError((err as Error).message);
+        setSsoMode(true);
+      } else {
+        setError("Invalid credentials. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -76,55 +85,88 @@ export default function Login() {
             </Alert>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="identifier">Email or Username</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="identifier"
-                  type="text"
-                  placeholder="you@example.com or username"
-                  value={identifier}
-                  onChange={(e) => setIdentifier(e.target.value)}
-                  className="pl-10"
-                  required
+          {ssoMode ? (
+            <>
+              <SsoSignIn initialEmail={identifier.includes("@") ? identifier : ""} onError={setError} />
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full text-muted-foreground"
+                onClick={() => {
+                  setSsoMode(false);
+                  setError("");
+                }}
+              >
+                Sign in another way
+              </Button>
+            </>
+          ) : (
+            <>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="identifier">Email or Username</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="identifier"
+                      type="text"
+                      placeholder="you@example.com or username"
+                      value={identifier}
+                      onChange={(e) => setIdentifier(e.target.value)}
+                      className="pl-10"
+                      required
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    <a href="/forgot-password" className="text-sm text-primary hover:underline">
+                      Forgot password?
+                    </a>
+                  </div>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <PasswordInput
+                      id="password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="pl-10"
+                      required
+                      disabled={isLoading}
+                    />
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full glow-effect"
                   disabled={isLoading}
-                />
-              </div>
-            </div>
+                >
+                  {isLoading ? "Signing in..." : "Sign in"}
+                </Button>
+              </form>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <a href="/forgot-password" className="text-sm text-primary hover:underline">
-                  Forgot password?
-                </a>
-              </div>
-              <div className="relative">
-                <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <PasswordInput
-                  id="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
+              <OAuthButtons />
 
-            <Button
-              type="submit"
-              className="w-full glow-effect"
-              disabled={isLoading}
-            >
-              {isLoading ? "Signing in..." : "Sign in"}
-            </Button>
-          </form>
-
-          <OAuthButtons />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setSsoMode(true);
+                  setError("");
+                }}
+                data-testid="button-sso"
+              >
+                <Building2 className="mr-2 h-4 w-4" />
+                Sign in with SSO
+              </Button>
+            </>
+          )}
 
           {BOUNTIES_ENABLED && (
             <Button

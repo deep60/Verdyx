@@ -114,6 +114,39 @@ pub async fn oauth_callback(
     Ok(Json(response))
 }
 
+/// The gateway's grant, from the `X-Verdyx-Grant` header.
+fn sso_grant(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<crate::auth::SsoGrant, AppError> {
+    let token = headers
+        .get("x-verdyx-grant")
+        .and_then(|v| v.to_str().ok())
+        .ok_or(AppError::UserError(UserError::InvalidToken))?;
+    Ok(state.user_service.auth().validate_sso_grant(token)?)
+}
+
+/// `POST /api/v1/internal/sso/user`: the account for a person a team
+/// provisions, made if needed. Only the gateway can call it.
+pub async fn sso_user(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<UserPublic>, AppError> {
+    let grant = sso_grant(&state, &headers)?;
+    let user = state.user_service.sso_user(&grant).await?;
+    Ok(Json(user.into()))
+}
+
+/// `POST /api/v1/internal/sso/session`: sign in someone a team's identity
+/// provider vouches for. Only the gateway can call it.
+pub async fn sso_session(
+    State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<AuthResponse>, AppError> {
+    let grant = sso_grant(&state, &headers)?;
+    Ok(Json(state.user_service.sso_login(&grant).await?))
+}
+
 /// Return the authenticated user's public identity.
 ///
 /// Used by the API gateway's `/api/v1/auth/verify` proxy to resolve the

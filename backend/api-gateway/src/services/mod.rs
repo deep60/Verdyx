@@ -6,6 +6,7 @@ pub mod chain_indexer;
 pub mod consensus_client;
 pub mod database;
 pub mod event_bus;
+pub mod oidc;
 pub mod proxy_service;
 pub mod redis;
 pub mod retention;

@@ -23,6 +23,29 @@ pub struct Claims {
     pub token_type: String, // "access" or "refresh"
 }
 
+/// What the gateway vouches for when someone signs in through a team's
+/// identity provider, or a team provisions them. Signed by the gateway with
+/// the shared JWT key, for this audience only, and valid for a minute. It has
+/// no `sub` or `token_type`, so it can never pass as a session token, and a
+/// session token has no `aud`, so it can't pass as a grant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SsoGrant {
+    pub iss: String,
+    pub aud: String,
+    pub exp: i64,
+    pub iat: i64,
+    /// The team whose identity provider (or provisioning) this is.
+    pub team: Uuid,
+    /// The identity provider's stable id for the person.
+    pub subject: String,
+    pub email: String,
+    #[serde(default)]
+    pub name_hint: Option<String>,
+}
+
+pub const SSO_GRANT_ISSUER: &str = "verdyx-api-gateway";
+pub const SSO_GRANT_AUDIENCE: &str = "verdyx-sso-grant";
+
 pub struct AuthService {
     jwt_config: JwtConfig,
     encoding_key: EncodingKey,
@@ -125,6 +148,23 @@ impl AuthService {
         decode::<Claims>(token, &self.decoding_key, &validation)
             .map(|data| data.claims)
             .map_err(|_e| UserError::InvalidToken)
+    }
+
+    /// Check a grant from the gateway (see [`SsoGrant`]).
+    pub fn validate_sso_grant(&self, token: &str) -> UserResult<SsoGrant> {
+        let mut validation = Validation::default();
+        validation.set_audience(&[SSO_GRANT_AUDIENCE]);
+        validation.set_issuer(&[SSO_GRANT_ISSUER]);
+        validation.set_required_spec_claims(&["exp", "aud", "iss"]);
+        validation.leeway = 5;
+        let grant = decode::<SsoGrant>(token, &self.decoding_key, &validation)
+            .map(|data| data.claims)
+            .map_err(|_| UserError::InvalidToken)?;
+        // A minute at most, however far ahead the gateway set `exp`.
+        if grant.exp - grant.iat > 120 {
+            return Err(UserError::InvalidToken);
+        }
+        Ok(grant)
     }
 
     /// Verify Ethereum wallet signature
@@ -366,6 +406,70 @@ mod tests {
         let token = sign(&valid_claims(), "another_secret_key_of_the_same_size");
         assert!(AuthService::new(get_test_jwt_config())
             .validate_token(&token)
+            .is_err());
+    }
+
+    fn grant(iss: &str, aud: &str, lifetime: i64, key: &str) -> String {
+        let now = Utc::now().timestamp();
+        encode(
+            &Header::default(),
+            &serde_json::json!({
+                "iss": iss, "aud": aud, "iat": now, "exp": now + lifetime,
+                "team": Uuid::nil(), "subject": "00u1", "email": "ada@acme.com", "name_hint": "Ada"
+            }),
+            &EncodingKey::from_secret(key.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn only_a_short_grant_from_the_gateway_is_accepted() {
+        let auth = AuthService::new(get_test_jwt_config());
+        let key = "test_secret_key_for_testing_only";
+        let g = auth
+            .validate_sso_grant(&grant(SSO_GRANT_ISSUER, SSO_GRANT_AUDIENCE, 60, key))
+            .unwrap();
+        assert_eq!(g.email, "ada@acme.com");
+        assert_eq!(g.subject, "00u1");
+
+        assert!(
+            auth.validate_sso_grant(&grant(SSO_GRANT_ISSUER, "other", 60, key))
+                .is_err(),
+            "audience"
+        );
+        assert!(
+            auth.validate_sso_grant(&grant("someone", SSO_GRANT_AUDIENCE, 60, key))
+                .is_err(),
+            "issuer"
+        );
+        assert!(
+            auth.validate_sso_grant(&grant(SSO_GRANT_ISSUER, SSO_GRANT_AUDIENCE, 3600, key))
+                .is_err(),
+            "too long"
+        );
+        assert!(
+            auth.validate_sso_grant(&grant(SSO_GRANT_ISSUER, SSO_GRANT_AUDIENCE, -60, key))
+                .is_err(),
+            "expired"
+        );
+        assert!(
+            auth.validate_sso_grant(&grant(
+                SSO_GRANT_ISSUER,
+                SSO_GRANT_AUDIENCE,
+                60,
+                "another key"
+            ))
+            .is_err(),
+            "key"
+        );
+
+        // A session token is not a grant, and a grant is not a session token.
+        let access = auth
+            .generate_access_token(Uuid::new_v4(), "a@b.com", "a", false)
+            .unwrap();
+        assert!(auth.validate_sso_grant(&access).is_err());
+        assert!(auth
+            .validate_token(&grant(SSO_GRANT_ISSUER, SSO_GRANT_AUDIENCE, 60, key))
             .is_err());
     }
 }

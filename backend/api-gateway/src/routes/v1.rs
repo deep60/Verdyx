@@ -91,6 +91,8 @@ fn auth_routes(state: AppState) -> Router<AppState> {
         .route("/forgot-password", post(auth::forgot_password))
         .route("/reset-password", post(auth::reset_password))
         .route("/oauth/{provider}", get(oauth::start))
+        .route("/sso/start", get(crate::handlers::sso::start))
+        .route("/sso/check", get(crate::handlers::sso::check))
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limiter::auth_rate_limit_middleware,
@@ -108,6 +110,7 @@ fn auth_routes(state: AppState) -> Router<AppState> {
         .route("/wallet/disconnect", post(auth::disconnect_wallet))
         .route("/oauth/providers", get(oauth::providers))
         .route("/oauth/{provider}/callback", get(oauth::callback))
+        .route("/sso/callback", get(crate::handlers::sso::callback))
 }
 
 // ─── Mixed route groups (optional auth) ─────────────────────────
@@ -287,6 +290,27 @@ fn team_routes() -> Router<AppState> {
         .route(
             "/{org_id}/privacy",
             put(crate::handlers::privacy::set_team_privacy),
+        )
+        .route(
+            "/{org_id}/sso",
+            get(crate::handlers::sso::get_settings).put(crate::handlers::sso::put_settings),
+        )
+        .route(
+            "/{org_id}/sso/domains",
+            post(crate::handlers::sso::add_domain),
+        )
+        .route(
+            "/{org_id}/sso/domains/{domain}",
+            delete(crate::handlers::sso::remove_domain),
+        )
+        .route(
+            "/{org_id}/sso/domains/{domain}/verify",
+            post(crate::handlers::sso::verify_domain),
+        )
+        .route(
+            "/{org_id}/sso/scim-token",
+            post(crate::handlers::sso::new_scim_token)
+                .delete(crate::handlers::sso::revoke_scim_token),
         )
 }
 

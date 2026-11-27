@@ -45,6 +45,10 @@ impl UserService {
         })
     }
 
+    pub fn auth(&self) -> &AuthService {
+        &self.auth_service
+    }
+
     pub fn oauth(&self) -> &OAuthConfig {
         &self.oauth
     }
@@ -316,7 +320,7 @@ impl UserService {
     /// an account with the same (provider-verified) email, else a new account.
     pub async fn oauth_login(&self, provider: Provider, code: &str) -> UserResult<AuthResponse> {
         let identity = self.oauth.fetch_identity(provider, code).await?;
-        let user = self.oauth_user(provider, &identity).await?;
+        let user = self.link_identity(provider.as_str(), &identity).await?;
 
         if !user.is_active {
             return Err(UserError::Unauthorized("Account is suspended".to_string()));
@@ -332,11 +336,43 @@ impl UserService {
         self.issue_session(&user).await
     }
 
-    async fn oauth_user(
-        &self,
-        provider: Provider,
-        identity: &ProviderIdentity,
-    ) -> UserResult<User> {
+    // ============= Team single sign-on =============
+
+    /// The account for someone a team's identity provider vouches for. The
+    /// gateway has already checked the provider's ID token, and that the
+    /// email is in a domain the team has proven it owns.
+    pub async fn sso_user(&self, grant: &crate::auth::SsoGrant) -> UserResult<User> {
+        let identity = ProviderIdentity {
+            provider_user_id: format!("{}:{}", grant.team, grant.subject),
+            email: grant.email.trim().to_lowercase(),
+            name_hint: grant.name_hint.clone(),
+        };
+        if identity.email.is_empty() || grant.subject.is_empty() || grant.subject.len() > 200 {
+            return Err(UserError::ValidationError(
+                "the sign-in had no usable identity".to_string(),
+            ));
+        }
+        self.link_identity("sso", &identity).await
+    }
+
+    /// Sign in through a team's identity provider.
+    pub async fn sso_login(&self, grant: &crate::auth::SsoGrant) -> UserResult<AuthResponse> {
+        let user = self.sso_user(grant).await?;
+        if !user.is_active {
+            return Err(UserError::Unauthorized("Account is suspended".to_string()));
+        }
+        if user.two_factor_enabled {
+            return Err(UserError::AuthenticationError(
+                "This account uses two-factor authentication. Sign in with your password and code."
+                    .to_string(),
+            ));
+        }
+        self.issue_session(&user).await
+    }
+
+    /// Find or create the account for an identity a provider vouches for.
+    /// `provider` is "google", "github", or "sso" for a team's own sign-in.
+    async fn link_identity(&self, provider: &str, identity: &ProviderIdentity) -> UserResult<User> {
         let db = |e: sqlx::Error| UserError::DatabaseError(e.to_string());
 
         let linked = sqlx::query_as::<_, User>(
@@ -347,7 +383,7 @@ impl UserService {
             RETURNING u.*
             "#,
         )
-        .bind(provider.as_str())
+        .bind(provider)
         .bind(&identity.provider_user_id)
         .bind(&identity.email)
         .fetch_optional(&self.db_pool)
@@ -418,7 +454,7 @@ impl UserService {
             VALUES ($1, $2, $3, $4)
             "#,
         )
-        .bind(provider.as_str())
+        .bind(provider)
         .bind(&identity.provider_user_id)
         .bind(user.id)
         .bind(&identity.email)
@@ -434,7 +470,7 @@ impl UserService {
             } else {
                 "account.linked_oauth"
             },
-            serde_json::json!({ "provider": provider.as_str() }),
+            serde_json::json!({ "provider": provider }),
         )
         .await?;
         if created {

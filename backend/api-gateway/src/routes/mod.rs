@@ -20,6 +20,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/metrics", get(root_metrics))
         .with_state(state.clone())
         .merge(taxii_routes(state.clone()))
+        .nest("/scim/v2", scim_routes(state.clone()))
         .nest("/api/v1", v1::create_routes(state.clone()))
         .nest("/api", v1::create_routes(state))
 }
@@ -42,6 +43,27 @@ fn taxii_routes(state: AppState) -> Router {
         .route("/taxii2", get(t::discovery))
         .route("/taxii2/api/", get(t::api_root))
         .merge(collections)
+        .with_state(state)
+}
+
+/// SCIM 2.0 provisioning. Each request carries the team's provisioning
+/// token, checked by the handlers, not a session.
+fn scim_routes(state: AppState) -> Router {
+    use crate::handlers::scim as s;
+    Router::new()
+        .route("/Users", get(s::list_users).post(s::create_user))
+        .route(
+            "/Users/{id}",
+            get(s::get_user)
+                .put(s::replace_user)
+                .patch(s::patch_user)
+                .delete(s::delete_user),
+        )
+        .route("/Groups", get(s::list_groups))
+        .route("/ServiceProviderConfig", get(s::service_provider_config))
+        .route("/ResourceTypes", get(s::resource_types))
+        .route("/Schemas", get(s::schemas))
+        .fallback(s::not_supported)
         .with_state(state)
 }
 

@@ -7,6 +7,8 @@ const OAUTH_ERRORS: Record<string, string> = {
   suspended: "This account is suspended.",
   no_email:
     "That account has no verified email address. Verify one with the provider and try again.",
+  sso_required:
+    "Your team signs in with single sign-on. Use \"Sign in with SSO\" and your work email.",
   unavailable: "That sign-in option isn't available right now.",
   failed: "Sign-in didn't work. Please try again.",
 };

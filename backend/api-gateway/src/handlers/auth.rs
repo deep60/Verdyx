@@ -2,7 +2,7 @@ use alloy::primitives::{Address, Signature};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
-    response::Json,
+    response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
 };
@@ -111,7 +111,7 @@ pub async fn register(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequest>,
-) -> AuthResult {
+) -> ApiResult<Response> {
     // Validate input
     if payload.username.is_empty() || payload.email.is_empty() {
         return Err(ApiError::Validation(
@@ -142,6 +142,13 @@ pub async fn register(
         ));
     }
 
+    // A team that requires single sign-on owns this address.
+    if let Some(team) =
+        crate::handlers::sso::required_for(state.db.pool(), Uuid::nil(), &payload.email).await
+    {
+        return Ok(sso_required(&team));
+    }
+
     // Auth is owned by user-service. The gateway validates input shape, then
     // forwards to user-service and adapts the response to its public
     // (camelCase) contract so the frontend is unaffected.
@@ -151,14 +158,30 @@ pub async fn register(
         "password": payload.password,
         "ethereum_address": payload.wallet_address,
     });
-    forward_auth(&state, &headers, "/api/v1/auth/register", body).await
+    forward_auth(&state, &headers, "/api/v1/auth/register", body)
+        .await
+        .map(IntoResponse::into_response)
+}
+
+/// 403 for someone whose team requires single sign-on. The site switches to
+/// "Sign in with SSO" when it sees `sso: true`.
+fn sso_required(team: &str) -> Response {
+    (
+        axum::http::StatusCode::FORBIDDEN,
+        Json(serde_json::json!({
+            "error": crate::handlers::sso::required_message(team),
+            "sso": true,
+            "status": 403,
+        })),
+    )
+        .into_response()
 }
 
 pub async fn login(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
-) -> AuthResult {
+) -> ApiResult<Response> {
     // user-service accepts an email or a username in its `email` field
     // (no '@' => username lookup), so pass the identifier straight through.
     let body = serde_json::json!({
@@ -166,6 +189,21 @@ pub async fn login(
         "password": payload.password,
     });
     let result = forward_auth(&state, &headers, "/api/v1/auth/login", body).await;
+    if let Ok((_, Json(resp))) = &result {
+        if let Some(user) = resp.data.as_ref().map(|d| &d.user) {
+            if let Some(team) =
+                crate::handlers::sso::required_for(state.db.pool(), user.id, &user.email).await
+            {
+                // The tokens user-service just made are dropped, not sent.
+                audit::Event::anonymous("auth.login_failed")
+                    .subject(user.id)
+                    .detail("reason", "sso_required")
+                    .record(state.db.pool())
+                    .await;
+                return Ok(sso_required(&team));
+            }
+        }
+    }
     if matches!(result, Err(ApiError::Unauthorized)) {
         // Shown to the account's owner; unknown identifiers aren't recorded.
         if let Some(owner) = audit::user_for_identifier(state.db.pool(), &payload.identifier).await
@@ -176,7 +214,7 @@ pub async fn login(
                 .await;
         }
     }
-    result
+    result.map(IntoResponse::into_response)
 }
 
 pub async fn logout(
