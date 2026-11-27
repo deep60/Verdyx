@@ -11,8 +11,8 @@ with any storage that speaks the S3 API:
   storage
 
 Team owners and admins set it up on the team's **Storage** tab, at
-[verdyx.dev/teams](https://verdyx.dev/teams). A team can connect up to five
-buckets.
+[verdyx.dev/teams](https://verdyx.dev/teams). A team can connect as many
+buckets as its [plan](../plans.md) allows: five on Free.
 
 ## How it works
 

@@ -42,10 +42,8 @@ use crate::AppState;
 pub const ROLES: [&str; 4] = ["owner", "admin", "member", "viewer"];
 /// Teams one person may own.
 pub const MAX_OWNED_TEAMS: i64 = 5;
-/// Members plus open invitations in one team.
-pub const MAX_SEATS: i64 = 50;
-/// Active keys one team may hold.
-pub const MAX_TEAM_KEYS: i64 = 10;
+// Seats (members plus open invitations) and active team keys come from the
+// team's plan: see `crate::services::plans`.
 pub const INVITE_DAYS: i64 = 7;
 
 type ApiError = (StatusCode, Json<Value>);
@@ -634,6 +632,11 @@ pub async fn invite(
         return Err(err(StatusCode::CONFLICT, "they're already in this team"));
     }
 
+    let max_seats = crate::services::plans::team_plan(state.db.pool(), org_id)
+        .await
+        .map_err(db_err)?
+        .limits
+        .seats;
     let mut tx = state.db.pool().begin().await.map_err(db_err)?;
     lock_team(&mut tx, org_id).await.map_err(db_err)?;
     sqlx::query(
@@ -653,10 +656,12 @@ pub async fn invite(
     .fetch_one(&mut *tx)
     .await
     .map_err(db_err)?;
-    if seats >= MAX_SEATS {
+    if seats >= max_seats {
         return Err(err(
             StatusCode::CONFLICT,
-            "a team can have 50 members and open invitations",
+            &format!(
+                "this team's plan allows {max_seats} members and open invitations; ask Verdyx about a larger plan"
+            ),
         ));
     }
     let id = Uuid::new_v4();
@@ -969,10 +974,15 @@ pub async fn create_team_key(
     .fetch_one(state.db.pool())
     .await
     .map_err(db_err)?;
-    if active >= MAX_TEAM_KEYS {
+    let max_keys = crate::services::plans::team_plan(state.db.pool(), org_id)
+        .await
+        .map_err(db_err)?
+        .limits
+        .team_keys;
+    if active >= max_keys {
         return Err(err(
             StatusCode::CONFLICT,
-            "this team already has 10 active keys; revoke one first",
+            &format!("this team's plan allows {max_keys} active keys; revoke one first"),
         ));
     }
     let raw_key = api_key::generate();

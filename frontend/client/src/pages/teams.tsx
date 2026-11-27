@@ -8,6 +8,7 @@ import { AuditLog } from "@/components/audit-log";
 import { ThreatFeedCard } from "@/components/threat-feed-card";
 import { TeamSso } from "@/components/team-sso";
 import { TeamStorage } from "@/components/team-storage";
+import { TeamPlan } from "@/components/team-plan";
 import { RetentionSelect, retentionLabel } from "@/components/data-controls";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -627,6 +628,7 @@ export function TeamPanel({ teamId, onGone }: { teamId: string; onGone: () => vo
                   revoke: (id) => `${TEAMS}/${team.id}/api-keys/${id}`,
                 }}
                 listTitle="Team keys"
+                limitNote="The team's plan sets how many keys can be active (see Settings)."
                 intro={
                   <>
                     Scans made with a team key are saved to {team.name}, and it can only read the team&apos;s scans
@@ -654,7 +656,8 @@ export function TeamPanel({ teamId, onGone }: { teamId: string; onGone: () => vo
               <AuditLog endpoint={`${TEAMS}/${team.id}/audit`} viewerId={team.members.find((m) => m.isYou)?.userId} />
             </TabsContent>
           )}
-          <TabsContent value="settings" className="pt-4">
+          <TabsContent value="settings" className="space-y-8 pt-4">
+            <TeamPlan teamId={team.id} />
             <TeamSettings team={team} onGone={onGone} />
           </TabsContent>
         </Tabs>

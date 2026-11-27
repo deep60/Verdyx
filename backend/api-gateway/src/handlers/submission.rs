@@ -964,6 +964,46 @@ async fn resolve_team(
     }
 }
 
+/// Why a scan wasn't made: a bare status, or the team's monthly quota.
+#[derive(Debug)]
+pub enum ScanRefusal {
+    Status(StatusCode),
+    Quota(crate::services::plans::QuotaReached),
+}
+
+impl From<StatusCode> for ScanRefusal {
+    fn from(s: StatusCode) -> Self {
+        ScanRefusal::Status(s)
+    }
+}
+
+impl axum::response::IntoResponse for ScanRefusal {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ScanRefusal::Status(s) => s.into_response(),
+            ScanRefusal::Quota(q) => q.response().into_response(),
+        }
+    }
+}
+
+/// Refuses a scan into a team that has used its monthly scans. A lookup that
+/// fails lets the scan through: the quota isn't worth losing a scan over.
+pub(crate) async fn team_quota_left(
+    state: &AppState,
+    organization_id: Option<Uuid>,
+) -> Result<(), crate::services::plans::QuotaReached> {
+    let Some(team) = organization_id else {
+        return Ok(());
+    };
+    match crate::services::plans::check_team_quota(state.db.pool(), team).await {
+        Ok(result) => result,
+        Err(e) => {
+            tracing::warn!("couldn't check the team's quota: {e}");
+            Ok(())
+        }
+    }
+}
+
 /// User-facing file submission handler.
 ///
 /// POST /api/v1/submissions/file
@@ -976,7 +1016,7 @@ pub async fn create_file_submission(
     State(state): State<AppState>,
     claims: Option<crate::middleware::auth::Claims>,
     mut multipart: Multipart,
-) -> Result<Json<FileSubmissionResponse>, StatusCode> {
+) -> Result<Json<FileSubmissionResponse>, ScanRefusal> {
     let submitter_id = claims.as_ref().map(|c| c.sub).unwrap_or_else(Uuid::nil);
     let team_key = claims.as_ref().and_then(|c| c.org_id);
     let mut requested_team: Option<String> = None;
@@ -1021,6 +1061,9 @@ pub async fn create_file_submission(
     }
 
     let organization_id = resolve_team(&state, claims.as_ref(), team_key, requested_team).await?;
+    team_quota_left(&state, organization_id)
+        .await
+        .map_err(ScanRefusal::Quota)?;
 
     let submission_id = Uuid::new_v4();
     let now = Utc::now();
@@ -1059,7 +1102,7 @@ pub async fn create_file_submission(
                 Some(clean_url),
             )
         } else {
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(StatusCode::BAD_REQUEST.into());
         };
 
     let metadata = serde_json::json!({
@@ -1338,6 +1381,9 @@ pub async fn create_email_submission(
             };
             fail(status, message)
         })?;
+    team_quota_left(&state, organization_id)
+        .await
+        .map_err(|q| q.response())?;
 
     let id = Uuid::new_v4();
     let now = Utc::now();

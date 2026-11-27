@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { apiRequest } from "@/lib/queryClient";
+import { serverMessage } from "@/lib/teams";
 import { useToast } from "@/hooks/use-toast";
 import { Copy, KeyRound, Plus, Trash2 } from "lucide-react";
 
@@ -71,9 +72,16 @@ interface ApiKeysManagerProps {
   /** Replaces the explanation under "Create an API key". */
   intro?: ReactNode;
   listTitle?: string;
+  /** How many active keys there may be, shown above the list. */
+  limitNote?: string;
 }
 
-export function ApiKeysManager({ endpoints = PERSONAL_KEYS, intro, listTitle = "Your keys" }: ApiKeysManagerProps = {}) {
+export function ApiKeysManager({
+  endpoints = PERSONAL_KEYS,
+  intro,
+  listTitle = "Your keys",
+  limitNote = "Up to 10 active keys.",
+}: ApiKeysManagerProps = {}) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -104,7 +112,7 @@ export function ApiKeysManager({ endpoints = PERSONAL_KEYS, intro, listTitle = "
       toast({
         title: "Could not create the key",
         description: msg.startsWith("409")
-          ? "There are already 10 active keys. Revoke one first."
+          ? serverMessage(err, "There are already as many active keys as allowed. Revoke one first.")
           : "Please try again.",
         variant: "destructive",
       });
@@ -233,7 +241,7 @@ export function ApiKeysManager({ endpoints = PERSONAL_KEYS, intro, listTitle = "
       <Card className="glassmorphism">
         <CardHeader>
           <CardTitle>{listTitle}</CardTitle>
-          <CardDescription>Up to 10 active keys. Revoking takes effect immediately.</CardDescription>
+          <CardDescription>{limitNote} Revoking takes effect immediately.</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (

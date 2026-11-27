@@ -60,6 +60,7 @@ pub fn create_routes(state: AppState) -> Router {
         .nest("/invitations", invitation_routes())
         .nest("/retrohunts", retrohunt_routes())
         .nest("/livehunts", livehunt_routes())
+        .nest("/admin", admin_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_mw::auth_middleware,
@@ -192,6 +193,7 @@ fn user_routes() -> Router<AppState> {
             get(crate::handlers::privacy::get_my_privacy)
                 .put(crate::handlers::privacy::set_my_privacy),
         )
+        .route("/me/usage", get(crate::handlers::plans::my_usage))
         .route("/me/api-keys", get(user::list_api_keys))
         .route("/me/api-keys/{key_id}", delete(user::revoke_api_key))
 }
@@ -313,6 +315,7 @@ fn team_routes() -> Router<AppState> {
             post(crate::handlers::sso::new_scim_token)
                 .delete(crate::handlers::sso::revoke_scim_token),
         )
+        .route("/{org_id}/usage", get(crate::handlers::plans::team_usage))
         .route(
             "/{org_id}/storage",
             get(crate::handlers::storage::list).post(crate::handlers::storage::create),
@@ -328,6 +331,16 @@ fn team_routes() -> Router<AppState> {
         .route(
             "/{org_id}/storage/{connection_id}/objects",
             get(crate::handlers::storage::objects),
+        )
+}
+
+fn admin_routes() -> Router<AppState> {
+    use crate::handlers::plans as p;
+    Router::new()
+        .route("/teams", get(p::admin_list_teams))
+        .route(
+            "/teams/{org_id}/plan",
+            get(p::admin_get_plan).put(p::admin_set_plan),
         )
 }
 

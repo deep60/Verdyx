@@ -21,6 +21,7 @@ Rather than calling the routes by hand, you can use:
 - **Single sign-on and provisioning** with Okta, Microsoft Entra ID and other identity providers: [sso.md](integrations/sso.md)
 - **Email scanning**, of attachments and links, including a phishing-report mailbox: [email.md](integrations/email.md)
 - **Cloud storage scanning** of Amazon S3, Cloudflare R2 and Google Cloud Storage buckets: [cloud-storage.md](integrations/cloud-storage.md)
+- **Plans and quotas**, the limits per plan and how to see usage: [plans.md](plans.md)
 
 They all scan the same way:
 1. `POST /submissions/file`, a multipart form with `file`, or `url` for a URL, plus optional `description`, `organizationId` and `priority`. An email can also be sent raw, as the body of `POST /submissions/email`.
@@ -124,7 +125,7 @@ A team shares scans and API keys between people. Each member has one role:
 | `member` | ✓ | ✓ | | |
 | `viewer` | ✓ | | | |
 
-A team always keeps an owner: its last owner can't leave or step down. Someone can own up to 5 teams, and a team holds up to 50 members and open invitations. A team you aren't in answers `404`.
+A team always keeps an owner: its last owner can't leave or step down. Someone can own up to 5 teams, and a team holds as many members and open invitations as its plan allows (50 on Free; see [plans.md](plans.md)). A team you aren't in answers `404`.
 
 | Request | Who | What |
 |---|---|---|
@@ -140,7 +141,7 @@ A team always keeps an owner: its last owner can't leave or step down. Someone c
 | `GET /invitations` | anyone | Open invitations to your address |
 | `POST /invitations/accept` `{"code"}` or `{"id"}` | the invitee | Join. Only works signed in with the invited address; accepting by `id` also needs a verified address |
 | `DELETE /invitations/{invitation_id}` | the invitee | Decline |
-| `GET`, `POST /orgs/{id}/api-keys`, `DELETE /orgs/{id}/api-keys/{key_id}` | owner, admin | Team keys (same body as personal keys; 10 active per team) |
+| `GET`, `POST /orgs/{id}/api-keys`, `DELETE /orgs/{id}/api-keys/{key_id}` | owner, admin | Team keys (same body as personal keys; as many active as the team's plan allows, 10 on Free) |
 
 **Team scans.** Add the form field `organizationId=<team id>` to `POST /submissions/file` to save a scan to a team (owners, admins and members). Everyone in the team can then read it and its results. `GET /submissions?organization=<team id>` lists the team's scans.
 
