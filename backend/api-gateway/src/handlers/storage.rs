@@ -26,8 +26,7 @@ use crate::services::s3::{self, Bucket, Keys};
 use crate::services::{audit, siem::CredentialKey};
 use crate::AppState;
 
-/// Connections one team may have.
-pub const MAX_CONNECTIONS: i64 = 5;
+// How many connections a team may have comes from its plan.
 pub const INTERVALS: [i32; 5] = [15, 60, 180, 360, 1440];
 
 type ApiError = (StatusCode, Json<Value>);
@@ -380,9 +379,14 @@ pub async fn list(
     for r in &rows {
         out.push(to_json(pool, r).await.map_err(db_err)?);
     }
+    let limit = crate::services::plans::team_plan(pool, org_id)
+        .await
+        .map_err(db_err)?
+        .limits
+        .storage_connections;
     Ok(Json(json!({
         "connections": out,
-        "limit": MAX_CONNECTIONS,
+        "limit": limit,
         "maxObjectMb": state.config.services.max_file_size_mb.min(100),
     })))
 }
@@ -402,10 +406,15 @@ pub async fn create(
             .fetch_one(pool)
             .await
             .map_err(db_err)?;
-    if count >= MAX_CONNECTIONS {
+    let limit = crate::services::plans::team_plan(pool, org_id)
+        .await
+        .map_err(db_err)?
+        .limits
+        .storage_connections;
+    if count >= limit {
         return Err(err(
             StatusCode::CONFLICT,
-            &format!("a team can have up to {MAX_CONNECTIONS} storage connections"),
+            &format!("this team's plan allows {limit} storage connections"),
         ));
     }
     let max_mb = state.config.services.max_file_size_mb as i32;

@@ -349,6 +349,15 @@ pub async fn run(
             let noted = if object.size as u64 > max_bytes {
                 record(db, due.id, object, "too_large", None, None).await
             } else {
+                // A team out of monthly scans waits for next month (or a
+                // bigger plan); the file is left unseen so it's scanned then.
+                if let Err(q) =
+                    crate::handlers::submission::team_quota_left(state, Some(due.organization_id))
+                        .await
+                {
+                    out.error = Some(q.message());
+                    return out;
+                }
                 match bucket.download(http, &keys, &object.key, max_bytes).await {
                     Ok(data) => match make_scan(state, due, object, data).await {
                         Ok(id) => {

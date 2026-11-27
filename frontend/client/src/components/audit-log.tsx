@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { planName } from "@/lib/plans";
 import { Link } from "wouter";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -121,6 +122,8 @@ export function describe(e: AuditEvent, viewerId?: string): string {
       return "Made a new provisioning token";
     case "team.scim_token_revoked":
       return "Revoked the provisioning token";
+    case "team.plan_changed":
+      return `Moved the team to the ${planName(text(d.plan))} plan${d.custom ? ", with custom limits" : ""}`;
     case "team.storage_added":
       return `Connected the bucket ${text(d.bucket)}${d.name ? ` as ${quoted(d.name)}` : ""}`;
     case "team.storage_changed":

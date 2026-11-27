@@ -149,6 +149,9 @@ pub fn allows(
     if p.starts_with("/orgs") || p.starts_with("/invitations") {
         return Err("API keys can't manage teams; use your account");
     }
+    if p.starts_with("/admin") {
+        return Err("API keys can't use administrator routes; use your account");
+    }
     if team_key
         && !(p.starts_with("/submissions")
             || p.starts_with("/engines")

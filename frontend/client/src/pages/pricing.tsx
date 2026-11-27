@@ -4,6 +4,7 @@ import { Check, Minus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { SEO } from "@/components/seo";
+import { COMPARISON, PLANS } from "@/lib/plans";
 
 const GITHUB_ISSUES = "https://github.com/deep60/Verdyx/issues/new";
 
@@ -18,7 +19,7 @@ const INCLUDED = [
   "Private results: your scans are tied to your account",
 ];
 
-/** Limits the gateway enforces today. Fair-use: heavy automated use may be throttled. */
+/** Limits the gateway enforces today on the Free plan. Fair-use: heavy automated use may be throttled. */
 const LIMITS = [
   ["File and URL scans", "10/min, 100/day"],
   ["Website inspections", "30/min, 300/day"],
@@ -28,7 +29,6 @@ const LIMITS = [
 
 /** On the roadmap, not available yet. Listed so nobody pays for a promise. */
 const NOT_YET = [
-  "Paid plans and higher limits",
   "ClamAV signatures (being set up on a dedicated server)",
   "A trained ML model (today's model is advisory only)",
   "Sandbox (run-the-file) analysis",
@@ -37,7 +37,7 @@ const NOT_YET = [
 const FAQ = [
   {
     q: "What happens when the beta ends?",
-    a: "Paid plans will add higher limits and team features. They'll be announced on this page before anything changes for your account.",
+    a: "Free stays, with the limits above. Anything that changes for your account will be announced on this page first. Teams that need more can move to Team or Enterprise now.",
   },
   {
     q: "Who can see my scans?",
@@ -147,6 +147,56 @@ export default function Pricing() {
               </section>
             </div>
           </div>
+
+          <section className="mt-16 border-t border-border pt-12" aria-labelledby="plans-heading">
+            <h2 id="plans-heading" className="text-2xl font-medium tracking-[-0.03em] text-foreground">
+              Plans for teams
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed">
+              Every team starts on Free. Team and Enterprise raise the limits for a whole team, and each member gets the
+              plan's per-person limits for all their scans. There's no checkout yet: ask us and we'll move your team over.
+            </p>
+            <div className="mt-6 overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left text-sm" data-testid="plan-table">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="py-3 pr-4 font-normal" scope="col">
+                      <span className="sr-only">Limit</span>
+                    </th>
+                    {PLANS.map((p) => (
+                      <th key={p.id} scope="col" className="py-3 pr-4 align-bottom">
+                        <span className="block text-base font-medium text-foreground">{p.name}</span>
+                        <span className="block font-mono text-xs">{p.price}</span>
+                        <span className="mt-1 block text-xs font-normal">{p.blurb}</span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {COMPARISON.map((row) => (
+                    <tr key={row.label} className="border-b border-border">
+                      <th scope="row" className="py-2.5 pr-4 font-normal">
+                        {row.label}
+                      </th>
+                      {PLANS.map((p) => (
+                        <td key={p.id} className="py-2.5 pr-4 font-mono text-foreground">
+                          {row.value(p.limits)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs leading-relaxed">
+              Enterprise limits can be set to fit your organisation. A team over its monthly scans gets HTTP 429 until the
+              1st of the next month (UTC).{" "}
+              <a href={GITHUB_ISSUES} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">
+                Ask about Team or Enterprise
+              </a>
+              .
+            </p>
+          </section>
 
           <section className="mt-16 grid gap-8 border-t border-border pt-12 lg:grid-cols-3" aria-label="Questions">
             {FAQ.map((f) => (

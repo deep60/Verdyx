@@ -119,6 +119,13 @@ impl RateLimiter {
 
     /// Check if request is allowed
     pub async fn check_rate_limit(&self, identifier: &str) -> RateLimitResult {
+        self.check_with_limit(identifier, self.config.requests_per_window)
+            .await
+    }
+
+    /// Like [`Self::check_rate_limit`], with `limit` in place of the
+    /// configured number of requests per window (a plan's own limit).
+    pub async fn check_with_limit(&self, identifier: &str, limit: u32) -> RateLimitResult {
         let mut entries = self.entries.write().await;
         let entry = entries
             .entry(identifier.to_string())
@@ -130,7 +137,7 @@ impl RateLimiter {
         }
 
         // Check if limit exceeded
-        if entry.count >= self.config.requests_per_window {
+        if entry.count >= limit {
             let retry_after = self
                 .config
                 .window_duration
@@ -139,7 +146,7 @@ impl RateLimiter {
 
             return RateLimitResult::Limited {
                 retry_after_secs: retry_after.as_secs(),
-                limit: self.config.requests_per_window,
+                limit,
                 remaining: 0,
                 reset_at: entry.window_start + self.config.window_duration,
             };
@@ -149,10 +156,10 @@ impl RateLimiter {
         entry.count += 1;
         entry.last_request = Instant::now();
 
-        let remaining = self.config.requests_per_window.saturating_sub(entry.count);
+        let remaining = limit.saturating_sub(entry.count);
 
         RateLimitResult::Allowed {
-            limit: self.config.requests_per_window,
+            limit,
             remaining,
             reset_at: entry.window_start + self.config.window_duration,
         }
@@ -416,13 +423,24 @@ impl UsageLimit {
     }
 
     /// Counts one request. A request turned away by the minute window doesn't
-    /// use up the daily quota.
-    async fn check(&self, key: &str) -> Result<RateLimitResult, (Window, RateLimitResult)> {
-        let minute = self.per_minute.check_rate_limit(key).await;
+    /// use up the daily quota. `limits` (a minute, a day) replace the
+    /// configured ones, for a plan with its own.
+    async fn check(
+        &self,
+        key: &str,
+        limits: Option<(u32, u32)>,
+    ) -> Result<RateLimitResult, (Window, RateLimitResult)> {
+        let minute = match limits {
+            Some((m, _)) => self.per_minute.check_with_limit(key, m).await,
+            None => self.per_minute.check_rate_limit(key).await,
+        };
         if !minute.is_allowed() {
             return Err((Window::Minute, minute));
         }
-        let day = self.per_day.check_rate_limit(key).await;
+        let day = match limits {
+            Some((_, d)) => self.per_day.check_with_limit(key, d).await,
+            None => self.per_day.check_rate_limit(key).await,
+        };
         if !day.is_allowed() {
             return Err((Window::Day, day));
         }
@@ -474,11 +492,12 @@ pub async fn auth_rate_limit_middleware(
 
 async fn enforce_usage_limit(
     limit: &UsageLimit,
+    plan_limits: Option<(u32, u32)>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, Response> {
     let key = limit.key(&request);
-    match limit.check(&key).await {
+    match limit.check(&key, plan_limits).await {
         Ok(RateLimitResult::Allowed {
             limit: daily,
             remaining,
@@ -512,7 +531,7 @@ async fn enforce_usage_limit(
                     retry_after_secs.max(1)
                 ),
                 Window::Day => format!(
-                    "Daily limit reached: {max} {} per 24 hours during the beta. Try again in {}.",
+                    "Daily limit reached: {max} {} per 24 hours on your plan. Try again in {}.",
                     limit.what,
                     human_wait(retry_after_secs)
                 ),
@@ -538,7 +557,37 @@ pub async fn scan_rate_limit_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, Response> {
-    enforce_usage_limit(&state.scan_rate_limit, request, next).await
+    let claims = request
+        .extensions()
+        .get::<crate::middleware::auth::Claims>()
+        .cloned();
+    let plan_limits = scan_limits_for(&state, claims).await;
+    enforce_usage_limit(&state.scan_rate_limit, plan_limits, request, next).await
+}
+
+/// The per-person scan limits that apply to this request (a minute, a day):
+/// a team key's team's plan, or the best plan among a person's teams.
+/// Signed-out requests, and lookups that fail, get the configured (Free)
+/// limits.
+async fn scan_limits_for(
+    state: &crate::AppState,
+    claims: Option<crate::middleware::auth::Claims>,
+) -> Option<(u32, u32)> {
+    let claims = claims?;
+    let pool = state.db.pool();
+    let found = match claims.org_id {
+        Some(team) => crate::services::plans::team_plan(pool, team)
+            .await
+            .map(|p| (p.limits.scans_per_minute, p.limits.scans_per_day)),
+        None => crate::services::plans::person_limits(pool, claims.sub).await,
+    };
+    match found {
+        Ok(limits) => Some(limits),
+        Err(e) => {
+            tracing::warn!("couldn't look up plan limits: {e}");
+            None
+        }
+    }
 }
 
 /// Per-person limit on live website checks.
@@ -547,7 +596,7 @@ pub async fn site_check_rate_limit_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, Response> {
-    enforce_usage_limit(&state.site_check_rate_limit, request, next).await
+    enforce_usage_limit(&state.site_check_rate_limit, None, request, next).await
 }
 
 /// IP-based rate limiting middleware
@@ -860,9 +909,9 @@ mod tests {
     #[tokio::test]
     async fn usage_limit_minute_block_does_not_use_daily_quota() {
         let limit = UsageLimit::new("scans", 2, 3, ClientIp::new(None, false));
-        assert!(limit.check("user:a").await.is_ok());
-        assert!(limit.check("user:a").await.is_ok());
-        let (window, _) = limit.check("user:a").await.unwrap_err();
+        assert!(limit.check("user:a", None).await.is_ok());
+        assert!(limit.check("user:a", None).await.is_ok());
+        let (window, _) = limit.check("user:a", None).await.unwrap_err();
         assert_eq!(window, Window::Minute);
         // Only the two allowed requests count toward the day.
         let RateLimitResult::Allowed { remaining, .. } =
@@ -871,15 +920,33 @@ mod tests {
             panic!("daily quota should not be exhausted");
         };
         assert_eq!(remaining, 0);
-        assert!(limit.check("user:b").await.is_ok(), "limits are per person");
+        assert!(
+            limit.check("user:b", None).await.is_ok(),
+            "limits are per person"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_plans_limits_replace_the_configured_ones() {
+        let limit = UsageLimit::new("scans", 1, 1, ClientIp::new(None, false));
+        // Free: one scan.
+        assert!(limit.check("user:free", None).await.is_ok());
+        assert!(limit.check("user:free", None).await.is_err());
+        // A paid plan's person gets its own, higher limits.
+        for _ in 0..5 {
+            assert!(limit.check("user:paid", Some((10, 5))).await.is_ok());
+        }
+        let (window, result) = limit.check("user:paid", Some((10, 5))).await.unwrap_err();
+        assert_eq!(window, Window::Day);
+        assert!(matches!(result, RateLimitResult::Limited { limit: 5, .. }));
     }
 
     #[tokio::test]
     async fn usage_limit_enforces_the_daily_cap() {
         let limit = UsageLimit::new("scans", 100, 2, ClientIp::new(None, false));
-        assert!(limit.check("ip:1.2.3.4").await.is_ok());
-        assert!(limit.check("ip:1.2.3.4").await.is_ok());
-        let (window, result) = limit.check("ip:1.2.3.4").await.unwrap_err();
+        assert!(limit.check("ip:1.2.3.4", None).await.is_ok());
+        assert!(limit.check("ip:1.2.3.4", None).await.is_ok());
+        let (window, result) = limit.check("ip:1.2.3.4", None).await.unwrap_err();
         assert_eq!(window, Window::Day);
         let RateLimitResult::Limited {
             retry_after_secs,

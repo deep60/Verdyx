@@ -37,7 +37,7 @@ use uuid::Uuid;
 
 use crate::handlers::auth::{sync_user_to_gateway_db, UsAuthResponse};
 use crate::handlers::identity::UserIdentity;
-use crate::handlers::organization::{can_manage, member_role, MAX_SEATS};
+use crate::handlers::organization::{can_manage, member_role};
 use crate::middleware::auth::{cookie, session_cookies, Claims};
 use crate::services::{audit, oidc, siem::CredentialKey};
 use crate::AppState;
@@ -308,6 +308,10 @@ pub async fn join_team(
     user_id: Uuid,
     role: &str,
 ) -> Result<bool, sqlx::Error> {
+    let max_seats = crate::services::plans::team_plan(pool, org_id)
+        .await?
+        .limits
+        .seats;
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT id FROM organizations WHERE id = $1 FOR UPDATE")
         .bind(org_id)
@@ -320,7 +324,7 @@ pub async fn join_team(
     .bind(org_id)
     .fetch_one(&mut *tx)
     .await?;
-    if seats >= MAX_SEATS {
+    if seats >= max_seats {
         tracing::warn!(%org_id, "team is full; SSO user not added");
         return Ok(false);
     }

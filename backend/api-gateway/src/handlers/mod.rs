@@ -20,6 +20,7 @@ pub mod identity;
 pub mod livehunt;
 pub mod oauth;
 pub mod organization;
+pub mod plans;
 pub mod privacy;
 pub mod reputation;
 pub mod retrohunt;
