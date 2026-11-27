@@ -11,6 +11,8 @@ export interface User {
   totalEarnings: string;
   isVerified: boolean;
   createdAt: string;
+  /** A Verdyx administrator: sees the admin console. The API checks it again. */
+  isAdmin?: boolean;
 }
 
 /**

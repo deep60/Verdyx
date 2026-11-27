@@ -90,6 +90,9 @@ pub struct UserResponse {
     pub total_earnings: String, // BigDecimal as string
     pub created_at: DateTime<Utc>,
     pub is_verified: bool,
+    /// A Verdyx administrator: the website shows the admin console. The
+    /// gateway checks the session itself on every admin route.
+    pub is_admin: bool,
 }
 
 impl From<User> for UserResponse {
@@ -103,6 +106,7 @@ impl From<User> for UserResponse {
             total_earnings: user.total_stakes.to_string(),
             created_at: user.created_at,
             is_verified: user.is_verified,
+            is_admin: false,
         }
     }
 }
@@ -696,6 +700,7 @@ fn to_user_response_with_rep(u: UserIdentity, reputation_score: i32) -> UserResp
         total_earnings: "0".to_string(),
         created_at: u.created_at,
         is_verified: u.email_verified,
+        is_admin: u.is_admin,
     }
 }
 

@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Menu, User, Users, LogOut, Wallet, Search } from "lucide-react";
+import { Menu, User, Users, LogOut, Wallet, Search, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { BOUNTIES_ENABLED } from "@/lib/features";
 
@@ -147,6 +147,14 @@ export function Navigation() {
                       <span>Teams</span>
                     </Link>
                   </DropdownMenuItem>
+                  {user.isAdmin && (
+                    <DropdownMenuItem asChild>
+                      <Link href="/admin" className="flex w-full cursor-pointer items-center" data-testid="link-admin">
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                        <span>Admin</span>
+                      </Link>
+                    </DropdownMenuItem>
+                  )}
                   {BOUNTIES_ENABLED && !user.walletAddress && (
                     <DropdownMenuItem onClick={connectWallet}>
                       <Wallet className="mr-2 h-4 w-4" />
@@ -234,6 +242,14 @@ export function Navigation() {
                             Teams
                           </Button>
                         </Link>
+                        {user.isAdmin && (
+                          <Link href="/admin" onClick={() => setMobileOpen(false)}>
+                            <Button variant="outline" className="w-full justify-start border-[#32342C] text-[#F3F1EA]">
+                              <ShieldCheck className="mr-2 h-4 w-4" />
+                              Admin
+                            </Button>
+                          </Link>
+                        )}
                         {BOUNTIES_ENABLED && !user.walletAddress && (
                           <Button
                             variant="outline"

@@ -59,8 +59,16 @@ many members, keys and storage connections the team has against its limits.
 
 ## Changing a team's plan (administrators)
 
-These need a Verdyx administrator's own session; API keys can't use them.
-Each change is written to the team's activity log.
+Verdyx administrators do this on the website's **Admin** page (`/admin`, in
+the account menu; only administrators see it). It lists teams newest first,
+with their plan, members and scans this month, and can search by name or id
+and filter by plan or custom limits. Choosing a team shows its usage, a form
+for its plan and limits (an empty field keeps the plan's limit), and its last
+plan changes. Saving asks for confirmation, showing the limits the team will
+have.
+
+The page uses these routes. They need a Verdyx administrator's own session;
+API keys can't use them. Each change is written to the team's activity log.
 
 ```bash
 # Find the team
@@ -81,4 +89,10 @@ curl -s -X PUT "https://api.verdyx.dev/api/v1/admin/teams/$TEAM/plan" \
 the plan's own limits. Its fields are `scansPerMinute`, `scansPerDay`,
 `teamScansPerMonth`, `unlimitedMonthlyScans` (`true` for no monthly limit),
 `seats`, `teamKeys` and `storageConnections`. `GET /admin/teams/{id}/plan`
-shows a team's plan, overrides and usage.
+shows a team's name, plan, overrides, usage and its last 10 plan changes
+(`history`).
+
+`GET /admin/teams` takes `q` (part of a name, or a team id), `plan` (`free`,
+`team`, `enterprise`, or `custom` for teams with custom limits) and `limit`
+(up to 200, default 50). Each team has `plan`, `custom`, `overrides`,
+`members`, `scansThisMonth`, `planChangedAt` and `createdAt`.
