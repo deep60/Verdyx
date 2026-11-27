@@ -1,10 +1,11 @@
 {
-  "ranAt": "2026-11-26T19:29:33Z",
-  "revision": "b085bfdc26eef9c006c625cf263a874f5a688b1e",
-  "image": "ghcr.io/deep60/verdyx-analysis-engine@sha256:8ca035eba0338b1bdc57f7eedbae14972311b7f52a7a251166eb80090745c61c",
-  "clamav": false,
+  "ranAt": "2026-11-27T16:34:12Z",
+  "revision": "eea1ee00646a7d2dd9d204939b6c123752f0612d",
+  "image": "ghcr.io/deep60/verdyx-analysis-engine@sha256:42ae065643d0b4e9d11950b2a1b325adbdcb9d5c6eb5c9d0cca1e978bc0034b0",
+  "clamav": true,
+  "peModel": true,
   "feeds": false,
-  "seconds": 1436,
+  "seconds": 3062,
   "set": {
     "malicious": 197,
     "clean": 2038,
@@ -14,13 +15,13 @@
   "consensus": {
     "malware": {
       "total": 197,
-      "flagged": 107,
-      "malicious": 2,
+      "flagged": 123,
+      "malicious": 21,
       "noVerdict": 0
     },
     "clean": {
       "total": 2038,
-      "flagged": 16,
+      "flagged": 6,
       "malicious": 0,
       "noVerdict": 0
     }
@@ -39,6 +40,21 @@
         "flagged": 17,
         "malicious": 1,
         "noVerdict": 0
+      }
+    },
+    {
+      "name": "ClamAV",
+      "malware": {
+        "total": 197,
+        "flagged": 45,
+        "malicious": 45,
+        "noVerdict": 152
+      },
+      "clean": {
+        "total": 2038,
+        "flagged": 0,
+        "malicious": 0,
+        "noVerdict": 2038
       }
     },
     {
@@ -84,6 +100,21 @@
         "flagged": 0,
         "malicious": 0,
         "noVerdict": 2038
+      }
+    },
+    {
+      "name": "Verdyx PE Model",
+      "malware": {
+        "total": 94,
+        "flagged": 78,
+        "malicious": 69,
+        "noVerdict": 2
+      },
+      "clean": {
+        "total": 229,
+        "flagged": 1,
+        "malicious": 0,
+        "noVerdict": 1
       }
     },
     {
@@ -133,9 +164,7 @@
     }
   ],
   "notMeasured": [
-    "Archive contents",
-    "ClamAV",
-    "Verdyx PE Model"
+    "Archive contents"
   ],
   "byFileType": [
     {
@@ -152,6 +181,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 0
+        },
+        "ClamAV": {
+          "total": 9,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 9
         },
         "YARA": {
           "total": 9,
@@ -170,6 +205,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 9
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -195,8 +236,8 @@
       "name": "elf",
       "consensus": {
         "total": 16,
-        "flagged": 6,
-        "malicious": 0,
+        "flagged": 12,
+        "malicious": 2,
         "noVerdict": 0
       },
       "engines": {
@@ -205,6 +246,12 @@
           "flagged": 3,
           "malicious": 0,
           "noVerdict": 0
+        },
+        "ClamAV": {
+          "total": 16,
+          "flagged": 10,
+          "malicious": 10,
+          "noVerdict": 6
         },
         "YARA": {
           "total": 16,
@@ -223,6 +270,12 @@
           "flagged": 4,
           "malicious": 0,
           "noVerdict": 12
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -259,6 +312,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 7,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 7
+        },
         "YARA": {
           "total": 7,
           "flagged": 0,
@@ -276,6 +335,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 7
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -312,6 +377,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 24,
+          "flagged": 2,
+          "malicious": 2,
+          "noVerdict": 22
+        },
         "YARA": {
           "total": 24,
           "flagged": 0,
@@ -329,6 +400,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 24
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 24,
@@ -365,6 +442,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 5,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 5
+        },
         "YARA": {
           "total": 5,
           "flagged": 2,
@@ -382,6 +465,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 5
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -407,8 +496,8 @@
       "name": "pe",
       "consensus": {
         "total": 94,
-        "flagged": 64,
-        "malicious": 2,
+        "flagged": 69,
+        "malicious": 19,
         "noVerdict": 0
       },
       "engines": {
@@ -417,6 +506,12 @@
           "flagged": 55,
           "malicious": 4,
           "noVerdict": 0
+        },
+        "ClamAV": {
+          "total": 94,
+          "flagged": 28,
+          "malicious": 28,
+          "noVerdict": 66
         },
         "YARA": {
           "total": 94,
@@ -435,6 +530,12 @@
           "flagged": 2,
           "malicious": 2,
           "noVerdict": 92
+        },
+        "Verdyx PE Model": {
+          "total": 94,
+          "flagged": 78,
+          "malicious": 69,
+          "noVerdict": 2
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -460,7 +561,7 @@
       "name": "script",
       "consensus": {
         "total": 42,
-        "flagged": 6,
+        "flagged": 11,
         "malicious": 0,
         "noVerdict": 0
       },
@@ -470,6 +571,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 0
+        },
+        "ClamAV": {
+          "total": 42,
+          "flagged": 5,
+          "malicious": 5,
+          "noVerdict": 37
         },
         "YARA": {
           "total": 42,
@@ -488,6 +595,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 42
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -515,7 +628,7 @@
       "name": "MinGit-2.47.0-64-bit",
       "consensus": {
         "total": 347,
-        "flagged": 10,
+        "flagged": 3,
         "malicious": 0,
         "noVerdict": 0
       },
@@ -525,6 +638,12 @@
           "flagged": 9,
           "malicious": 0,
           "noVerdict": 0
+        },
+        "ClamAV": {
+          "total": 347,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 347
         },
         "YARA": {
           "total": 347,
@@ -543,6 +662,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 347
+        },
+        "Verdyx PE Model": {
+          "total": 184,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 1
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -579,6 +704,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 44,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 44
+        },
         "YARA": {
           "total": 44,
           "flagged": 0,
@@ -596,6 +727,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 44
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -632,6 +769,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 295,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 295
+        },
         "YARA": {
           "total": 295,
           "flagged": 0,
@@ -649,6 +792,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 295
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -674,7 +823,7 @@
       "name": "notepad++-8.7-portable-x64",
       "consensus": {
         "total": 212,
-        "flagged": 1,
+        "flagged": 0,
         "malicious": 0,
         "noVerdict": 0
       },
@@ -684,6 +833,12 @@
           "flagged": 1,
           "malicious": 1,
           "noVerdict": 0
+        },
+        "ClamAV": {
+          "total": 212,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 212
         },
         "YARA": {
           "total": 212,
@@ -702,6 +857,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 212
+        },
+        "Verdyx PE Model": {
+          "total": 7,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -738,6 +899,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 260,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 260
+        },
         "YARA": {
           "total": 260,
           "flagged": 0,
@@ -755,6 +922,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 260
+        },
+        "Verdyx PE Model": {
+          "total": 1,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -791,6 +964,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 595,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 595
+        },
         "YARA": {
           "total": 595,
           "flagged": 0,
@@ -808,6 +987,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 595
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -833,7 +1018,7 @@
       "name": "putty-0.81-w64",
       "consensus": {
         "total": 7,
-        "flagged": 4,
+        "flagged": 2,
         "malicious": 0,
         "noVerdict": 0
       },
@@ -843,6 +1028,12 @@
           "flagged": 4,
           "malicious": 0,
           "noVerdict": 0
+        },
+        "ClamAV": {
+          "total": 7,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 7
         },
         "YARA": {
           "total": 7,
@@ -861,6 +1052,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 7
+        },
+        "Verdyx PE Model": {
+          "total": 6,
+          "flagged": 1,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -897,6 +1094,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 35,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 35
+        },
         "YARA": {
           "total": 35,
           "flagged": 0,
@@ -914,6 +1117,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 35
+        },
+        "Verdyx PE Model": {
+          "total": 31,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -950,6 +1159,12 @@
           "malicious": 0,
           "noVerdict": 0
         },
+        "ClamAV": {
+          "total": 243,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 243
+        },
         "YARA": {
           "total": 243,
           "flagged": 0,
@@ -967,6 +1182,12 @@
           "flagged": 0,
           "malicious": 0,
           "noVerdict": 243
+        },
+        "Verdyx PE Model": {
+          "total": 0,
+          "flagged": 0,
+          "malicious": 0,
+          "noVerdict": 0
         },
         "Office Document Analyzer": {
           "total": 0,
@@ -990,12 +1211,14 @@
     }
   ],
   "missedFamilies": [
+    "ACRStealer (4)",
+    "ArcaneStealer (1)",
     "Arechclient2 (2)",
     "CECbot (1)",
     "CoinMiner (1)",
-    "DCRat (3)",
+    "DCAgentRMM (1)",
     "DarkCloud (1)",
-    "Flame (1)",
+    "GhostPulse (1)",
     "GhostRAT (1)",
     "GuLoader (4)",
     "HijackLoader (1)",
@@ -1004,7 +1227,6 @@
     "Koadic (2)",
     "Loda (2)",
     "LxBaseRAT (4)",
-    "MassLogger (4)",
     "MopsStealer (1)",
     "NGate (2)",
     "NovaStealer (1)",
@@ -1012,46 +1234,15 @@
     "ReverseShell (1)",
     "Sliver (1)",
     "TonRAT (1)",
-    "WannaCry (4)",
     "ZigClipper (3)",
     "a310Logger (1)"
   ],
   "falsePositives": [
     {
-      "file": "MinGit-2.47.0-64-bit/mingw64/bin/Avalonia.DesignerSupport.dll",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "MinGit-2.47.0-64-bit/mingw64/bin/Avalonia.dll",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
       "file": "MinGit-2.47.0-64-bit/mingw64/bin/libcrypto-3-x64.dll",
       "engines": [
         "Verdyx Heuristic Engine",
         "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "MinGit-2.47.0-64-bit/mingw64/bin/libiconv-2.dll",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "MinGit-2.47.0-64-bit/mingw64/bin/libpsl-5.dll",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "MinGit-2.47.0-64-bit/mingw64/bin/libunistring-5.dll",
-      "engines": [
-        "Verdyx Heuristic Engine"
       ]
     },
     {
@@ -1069,30 +1260,6 @@
       ]
     },
     {
-      "file": "MinGit-2.47.0-64-bit/usr/bin/msys-iconv-2.dll",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "MinGit-2.47.0-64-bit/usr/bin/sh.exe",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "notepad++-8.7-portable-x64/notepad++.exe",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "putty-0.81-w64/PAGEANT.EXE",
-      "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
       "file": "putty-0.81-w64/PUTTY.CHM",
       "engines": [
         "Verdyx Static Analyzer"
@@ -1101,12 +1268,7 @@
     {
       "file": "putty-0.81-w64/PUTTY.EXE",
       "engines": [
-        "Verdyx Static Analyzer"
-      ]
-    },
-    {
-      "file": "putty-0.81-w64/PUTTYGEN.EXE",
-      "engines": [
+        "Verdyx PE Model",
         "Verdyx Static Analyzer"
       ]
     },
