@@ -27,6 +27,7 @@ import {
   ArrowRight,
   Hash,
   Cpu,
+  Gauge,
 } from "lucide-react";
 import type { ApiSubmission } from "@/lib/api-types";
 
@@ -239,6 +240,14 @@ export function CommandPalette() {
             <Home className="h-4 w-4" />
             <span>Overview · Public Bench</span>
             <CommandShortcut>HOME</CommandShortcut>
+          </CommandItem>
+          <CommandItem
+            value="benchmark-detection-false-positives"
+            onSelect={() => runCommand(() => setLocation("/benchmark"))}
+          >
+            <Gauge className="h-4 w-4" />
+            <span>Detection Benchmark</span>
+            <CommandShortcut>BENCH</CommandShortcut>
           </CommandItem>
           <CommandItem
             value="pricing-plans-enterprise"

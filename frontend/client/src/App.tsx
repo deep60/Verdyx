@@ -31,6 +31,7 @@ const Teams = lazy(() => import("@/pages/teams"));
 const AnalysisDetails = lazy(() => import("@/pages/analysis-details"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const Pricing = lazy(() => import("@/pages/pricing"));
+const Benchmark = lazy(() => import("@/pages/benchmark"));
 const Privacy = lazy(() => import("@/pages/privacy"));
 const Terms = lazy(() => import("@/pages/terms"));
 const ForgotPassword = lazy(() => import("@/pages/forgot-password"));
@@ -58,6 +59,7 @@ function Router() {
         <Route path="/features/consensus">{<Redirect to="/architecture" replace />}</Route>
         <Route path="/use-cases">{<Redirect to="/#capabilities" replace />}</Route>
         <Route path="/pricing" component={Pricing} />
+        <Route path="/benchmark" component={Benchmark} />
         <Route path="/privacy" component={Privacy} />
         <Route path="/terms" component={Terms} />
         <Route path="/login" component={Login} />
