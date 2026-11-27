@@ -44,9 +44,25 @@ This:
    `ABUSE_CH_API_KEY`, read from the server's `.env`), checking every hash;
 3. runs `verdyx-benchmark` from the live analysis-engine image, with no network
    and a 700 MB memory cap;
-4. copies `report.md` and `report.json` back into `benchmark/results/`.
+4. copies `report.md`, `report.json` and `run.json` back into `benchmark/results/`.
 
 Samples stay on the server, so later runs only download what's missing.
+
+## Publishing the results
+
+The public page at [verdyx.dev/benchmark](https://verdyx.dev/benchmark) shows
+the latest run. After `run_on_server.sh`, regenerate its data and commit it
+with the change that moved the numbers:
+
+```bash
+python3 backend/analysis-engine/benchmark/publish.py
+```
+
+This reads `results/report.json` and `results/run.json` (when the run
+happened, and the engine image's digest and git commit) and writes
+`frontend/client/src/data/benchmark.json`. Only totals and the names of
+flagged clean files are published, nothing about individual malware samples.
+Tests: `python3 -m unittest backend/analysis-engine/benchmark/test_publish.py`.
 
 ## Reading the report
 

@@ -60,3 +60,7 @@ __pycache__/
 # Trained model bundles and EMBER data stay out of git (large, and the data has its own licence)
 ml/bundle/
 ml-models/
+
+# Benchmark runs (large; the public summary lives in frontend/client/src/data/benchmark.json)
+backend/analysis-engine/benchmark/results/report.*
+backend/analysis-engine/benchmark/results/run.json

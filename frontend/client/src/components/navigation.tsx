@@ -22,6 +22,7 @@ const navItems = [
   { href: "/architecture", label: "Architecture" },
   { href: "/dashboard", label: "Dashboard" },
   ...(BOUNTIES_ENABLED ? [{ href: "/marketplace", label: "Marketplace" }] : []),
+  { href: "/benchmark", label: "Benchmark" },
   { href: "/pricing", label: "Pricing" },
   { href: "/api", label: "API" },
 ];

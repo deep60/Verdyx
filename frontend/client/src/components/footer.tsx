@@ -23,6 +23,7 @@ const footerSections = [
     links: [
       { href: "/#capabilities", label: "File & URL Engines" },
       { href: "/architecture", label: "How Consensus Works" },
+      { href: "/benchmark", label: "Detection Benchmark" },
       { href: "/#capabilities", label: "Security Engines" },
       { href: "/#capabilities", label: "Enterprise Use Cases" },
     ],
