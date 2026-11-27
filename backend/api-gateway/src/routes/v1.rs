@@ -184,6 +184,11 @@ fn user_routes() -> Router<AppState> {
                 .put(crate::handlers::data::set_my_retention),
         )
         .route("/me/export", get(crate::handlers::data::export_my_data))
+        .route(
+            "/me/privacy",
+            get(crate::handlers::privacy::get_my_privacy)
+                .put(crate::handlers::privacy::set_my_privacy),
+        )
         .route("/me/api-keys", get(user::list_api_keys))
         .route("/me/api-keys/{key_id}", delete(user::revoke_api_key))
 }
@@ -243,6 +248,10 @@ fn submission_routes(state: AppState) -> Router<AppState> {
             "/{submission_id}/similar",
             get(crate::handlers::similarity::get_similar),
         )
+        .route(
+            "/{submission_id}/sharing",
+            put(crate::handlers::privacy::set_scan_sharing),
+        )
         .route("/my-submissions", get(submission::get_my_submissions))
 }
 
@@ -274,6 +283,10 @@ fn team_routes() -> Router<AppState> {
         .route(
             "/{org_id}/retention",
             put(crate::handlers::data::set_team_retention),
+        )
+        .route(
+            "/{org_id}/privacy",
+            put(crate::handlers::privacy::set_team_privacy),
         )
 }
 

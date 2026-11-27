@@ -375,8 +375,9 @@ export function FileSubmissionForm() {
           {analysisType === "behavioral" && (
             <p className="flex gap-2 rounded-md border border-warning/40 bg-warning/10 p-3 text-xs text-warning" data-testid="behavioral-notice">
               <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-              If VirusTotal hasn't seen this file, it's uploaded there to run, and VirusTotal's users can then download it.
-              Don't use this for private documents.
+              Uses VirusTotal's existing sandbox report, looked up by hash. If there's none, the file is uploaded so the
+              sandboxes can run it only when your privacy settings, or your team's, allow it. They don't by default. VirusTotal's
+              customers can download uploaded files.
             </p>
           )}
         </fieldset>

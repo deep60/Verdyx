@@ -4,7 +4,7 @@ Verdyx sends an HTTP `POST` to your URL when something happens to your scans: a 
 
 ## Set one up
 
-On your profile page, open the **Webhooks** tab. Or use the API:
+On your profile page, open the **API and webhooks** tab. Or use the API:
 
 ```http
 POST /api/v1/webhooks

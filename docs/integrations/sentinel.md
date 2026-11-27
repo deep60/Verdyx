@@ -103,7 +103,7 @@ HTTP 403 and are retried.
 
 ## 5. In Verdyx: add the destination
 
-On your profile page, open the **Webhooks** tab and choose **Microsoft Sentinel**, then fill in:
+On your profile page, open the **API and webhooks** tab and choose **Microsoft Sentinel**, then fill in:
 
 | Field | Value |
 |---|---|

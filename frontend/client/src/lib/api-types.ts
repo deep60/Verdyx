@@ -37,6 +37,10 @@ export interface ApiSubmission {
   bountyId?: string | null;
   /** The team the scan is saved to. */
   organizationId?: string | null;
+  /** Anyone with the report's link may open it. */
+  sharedByLink?: boolean;
+  /** Behavioral analysis may upload the file to VirusTotal. */
+  mayUploadFile?: boolean;
   priority?: boolean;
   metadata?: Record<string, unknown>;
   createdAt?: string;

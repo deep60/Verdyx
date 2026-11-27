@@ -47,6 +47,9 @@ struct Submission {
     pub organization_id: Option<Uuid>,
     /// `metadata.analysisType` from the submit form.
     pub analysis_type: Option<String>,
+    /// May the file be uploaded to VirusTotal? Set when the scan was made,
+    /// from the account's or team's privacy setting; off by default.
+    pub may_upload_file: bool,
 }
 
 /// Start the analysis queue consumer worker
@@ -460,12 +463,12 @@ async fn process_submission(
     }
 
     // Behavioral scans of files keep what the sandbox step needs: the hash
-    // and, when small enough to upload, the bytes.
+    // and, when the file may be uploaded, the bytes.
     let is_file = submission.submission_type != "url";
     let sandbox_input = match (&file_data, mode, is_file) {
         (Some(data), AnalysisMode::Behavioral, true) => Some((
             sha256_hex(data),
-            (data.len() <= MAX_UPLOAD_BYTES).then(|| data.clone()),
+            upload_permit(submission.may_upload_file, data),
         )),
         _ => None,
     };
@@ -617,13 +620,24 @@ fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
 }
 
-/// Looks up VirusTotal's behaviour report and, when there is none, uploads
-/// the file so the sandboxes run it.
+/// The bytes Behavioral analysis may upload, or why it may not.
+fn upload_permit(allowed: bool, data: &[u8]) -> Result<Vec<u8>, &'static str> {
+    if !allowed {
+        Err("VirusTotal has no sandbox report for this file. The file wasn't uploaded: sharing files with VirusTotal is off in your privacy settings.")
+    } else if data.len() > MAX_UPLOAD_BYTES {
+        Err("VirusTotal has no sandbox report for this file, and files over 32 MB aren't uploaded.")
+    } else {
+        Ok(data.to_vec())
+    }
+}
+
+/// Looks up VirusTotal's behaviour report and, when there is none and the
+/// file may be uploaded, uploads it so the sandboxes run it.
 async fn sandbox_step(
     sandbox: Option<&SandboxClient>,
     sha256: &str,
     filename: &str,
-    bytes: Option<Vec<u8>>,
+    bytes: Result<Vec<u8>, &'static str>,
 ) -> SandboxOutcome {
     let Some(client) = sandbox else {
         return SandboxOutcome::Skipped(
@@ -633,10 +647,8 @@ async fn sandbox_step(
     match client.behaviour(sha256).await {
         Ok(Some(report)) => SandboxOutcome::Report(report),
         Ok(None) => match bytes {
-            None => SandboxOutcome::Skipped(
-                "VirusTotal has no sandbox report for this file, and files over 32 MB aren't uploaded.".to_string(),
-            ),
-            Some(bytes) => match client.upload(filename, bytes).await {
+            Err(why) => SandboxOutcome::Skipped(why.to_string()),
+            Ok(bytes) => match client.upload(filename, bytes).await {
                 Ok(()) => SandboxOutcome::Submitted,
                 Err(e) => SandboxOutcome::Error(e.to_string()),
             },
@@ -789,7 +801,8 @@ async fn fetch_submission_from_db(db_pool: &PgPool, submission_id: Uuid) -> Resu
         r#"
         SELECT id, submitter_id, file_hash, url, original_filename, file_size,
                mime_type, file_path, submission_type, analysis_status, organization_id,
-               metadata ->> 'analysisType' AS analysis_type
+               metadata ->> 'analysisType' AS analysis_type,
+               COALESCE(may_upload_file, FALSE) AS may_upload_file
         FROM submissions
         WHERE id = $1
         "#,
@@ -1236,5 +1249,30 @@ mod unreachable_page_tests {
         r.add_detection(det(URL_CHECKS, ThreatVerdict::Suspicious, None));
         note_unreachable_page(&mut r, "blocked destination");
         assert_eq!(r.consensus_verdict, ThreatVerdict::Suspicious);
+    }
+}
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+
+    #[test]
+    fn files_are_uploaded_only_when_the_scan_allows_it() {
+        let small = vec![1u8; 10];
+        assert_eq!(upload_permit(true, &small), Ok(small.clone()));
+        let refused = upload_permit(false, &small).unwrap_err();
+        assert!(refused.contains("privacy settings"), "{refused}");
+        let big = vec![0u8; MAX_UPLOAD_BYTES + 1];
+        assert!(upload_permit(true, &big).unwrap_err().contains("32 MB"));
+        // Not allowed wins over too large: the reason is the setting.
+        assert!(upload_permit(false, &big)
+            .unwrap_err()
+            .contains("privacy settings"));
+    }
+
+    #[tokio::test]
+    async fn without_a_sandbox_client_nothing_is_sent() {
+        let out = sandbox_step(None, "ab", "a.exe", Ok(vec![1])).await;
+        assert!(matches!(out, SandboxOutcome::Skipped(_)));
     }
 }
