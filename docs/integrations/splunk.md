@@ -25,7 +25,7 @@ public authority. Verdyx checks the certificate, so a self-signed one fails.
 
 ## 2. In Verdyx: add the destination
 
-On your profile page, open the **Webhooks** tab and choose **Splunk**, then fill in:
+On your profile page, open the **API and webhooks** tab and choose **Splunk**, then fill in:
 
 - **HEC URL**: the address above. `/services/collector/event` is added for you.
 - **HEC token**: the token from step 1. It's stored encrypted and never shown

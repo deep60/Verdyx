@@ -15,6 +15,7 @@ import { WebhooksManager } from "@/components/webhooks-manager";
 import { ApiKeysManager } from "@/components/api-keys-manager";
 import { AuditLog } from "@/components/audit-log";
 import { DataControls } from "@/components/data-controls";
+import { PrivacySettings } from "@/components/privacy-settings";
 import { ThreatFeedCard } from "@/components/threat-feed-card";
 import { SEO } from "@/components/seo";
 import {
@@ -273,6 +274,7 @@ export default function Profile() {
                   </CardContent>
                 </Card>
 
+                <PrivacySettings />
                 <DataControls />
                 <AuditLog endpoint="/api/users/me/audit" personal viewerId={user.id} />
 

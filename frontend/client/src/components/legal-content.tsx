@@ -146,7 +146,8 @@ export function PrivacyContent() {
             VirusTotal: we send a file&apos;s hash, or the web address you scanned, to read the result of its last
             analysis and, for Behavioral Analysis, the behaviour its sandboxes recorded. Other scans only look results
             up. A Behavioral Analysis of a file VirusTotal hasn&apos;t seen uploads the file so its sandboxes can run
-            it; VirusTotal then keeps it, and its users can download it. The form says so before you choose it.
+            it, but only if you, or the team the scan is saved to, turned that on in the privacy settings. It&apos;s off
+            by default. An uploaded file is kept by VirusTotal, and its customers can download it.
           </li>
           <li>Google Safe Browsing: we send the web address you scanned to check it against Google&apos;s phishing and malware lists.</li>
           <li>

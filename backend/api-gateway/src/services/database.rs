@@ -518,7 +518,7 @@ impl DatabaseService {
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at, organization_id,
+                is_malicious, created_at, organization_id, shared_by_link, may_upload_file,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'consensus_verdict' AS verdict,
@@ -568,6 +568,8 @@ impl DatabaseService {
                 priority: r.get("priority"),
                 bounty_id: r.get("bounty_id"),
                 organization_id: r.get("organization_id"),
+                shared_by_link: r.get("shared_by_link"),
+                may_upload_file: r.get("may_upload_file"),
                 created_at: r.get("created_at"),
             }
         }))
@@ -585,7 +587,7 @@ impl DatabaseService {
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at, organization_id,
+                is_malicious, created_at, organization_id, shared_by_link, may_upload_file,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'consensus_verdict' AS verdict,
@@ -636,6 +638,8 @@ impl DatabaseService {
                     priority: r.get("priority"),
                     bounty_id: r.get("bounty_id"),
                     organization_id: r.get("organization_id"),
+                    shared_by_link: r.get("shared_by_link"),
+                    may_upload_file: r.get("may_upload_file"),
                     created_at: r.get("created_at"),
                 }
             })
@@ -655,7 +659,7 @@ impl DatabaseService {
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at, organization_id,
+                is_malicious, created_at, organization_id, shared_by_link, may_upload_file,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'consensus_verdict' AS verdict,
@@ -701,6 +705,8 @@ impl DatabaseService {
                 priority: r.get("priority"),
                 bounty_id: r.get("bounty_id"),
                 organization_id: r.get("organization_id"),
+                shared_by_link: r.get("shared_by_link"),
+                may_upload_file: r.get("may_upload_file"),
                 created_at: r.get("created_at"),
             }
         }))
@@ -775,7 +781,7 @@ impl DatabaseService {
                 id, submitter_id, original_filename, file_hash, url,
                 file_size, mime_type, submission_type,
                 COALESCE(analysis_status, 'pending') AS analysis_status,
-                is_malicious, created_at, organization_id,
+                is_malicious, created_at, organization_id, shared_by_link, may_upload_file,
                 metadata ->> 'description'  AS description,
                 metadata ->> 'analysisType' AS analysis_type,
                 metadata ->> 'consensus_verdict' AS verdict,
@@ -826,6 +832,8 @@ impl DatabaseService {
                     priority: r.get("priority"),
                     bounty_id: r.get("bounty_id"),
                     organization_id: r.get("organization_id"),
+                    shared_by_link: r.get("shared_by_link"),
+                    may_upload_file: r.get("may_upload_file"),
                     created_at: r.get("created_at"),
                 }
             })

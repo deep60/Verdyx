@@ -19,6 +19,7 @@ import { PdfForensicsPanel, hasPdfAnalysis } from "@/components/pdf-forensics-pa
 import { AttackMatrix } from "@/components/attack-matrix";
 import { IocGraph } from "@/components/ioc-graph";
 import { SimilarFilesPanel } from "@/components/similar-files-panel";
+import { ScanAccess } from "@/components/scan-access";
 import { mapAttackTechniques } from "@/lib/attack-mapping";
 import { useWebSocket } from "@/hooks/use-websocket";
 import { apiRequest } from "@/lib/queryClient";
@@ -336,6 +337,7 @@ export default function AnalysisDetails() {
             )}
           </div>
         </header>
+        <ScanAccess submissionId={submission.id} scan={submission} userId={user?.id} />
         {submission.filePurgedAt && (
           <p className="mb-6 border border-border bg-card/50 px-4 py-3 text-sm text-muted-foreground" data-testid="file-purged-note">
             The uploaded file was deleted on {new Date(submission.filePurgedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}{" "}

@@ -116,6 +116,11 @@ pub struct FileSubmissionListItem {
     /// When the stored sample was deleted by retention (single-scan endpoint).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_purged_at: Option<DateTime<Utc>>,
+    /// Anyone with the report's link may open it.
+    pub shared_by_link: bool,
+    /// Behavioral analysis may upload the file to VirusTotal (decided when
+    /// the scan was made, from the account's or team's setting).
+    pub may_upload_file: bool,
 }
 
 /// Turns the worker's stored diagnostic ("attempt 3/3: Could not fetch …")
@@ -1085,14 +1090,19 @@ pub async fn create_file_submission(
         "description": description,
     });
 
+    // Files stay with Verdyx unless the account or team allows uploading.
+    let may_upload_file =
+        crate::handlers::privacy::may_upload_file(state.db.pool(), submitter_id, organization_id)
+            .await;
+
     let response = sqlx::query_as::<_, (Uuid,)>(
         r#"
         INSERT INTO submissions (
             id, submitter_id, original_filename, file_hash, url, file_size,
             mime_type, file_path, submission_type, analysis_status,
-            metadata, created_at, updated_at, organization_id
+            metadata, created_at, updated_at, organization_id, may_upload_file
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10, $11, $11, $12, $13)
         RETURNING id
         "#,
     )
@@ -1108,6 +1118,7 @@ pub async fn create_file_submission(
     .bind(&metadata)
     .bind(now)
     .bind(organization_id)
+    .bind(may_upload_file)
     .fetch_one(state.db.pool())
     .await
     .map(|row: (Uuid,)| {
@@ -1239,6 +1250,7 @@ pub(crate) enum Access {
 /// Who may read a scan and its results.
 ///
 /// - A signed-out upload has no owner, so its unguessable link is the only key.
+/// - A scan its owner shared by link: anyone with the link.
 /// - A scan with a bounty is posted for analysts, so any signed-in user may.
 /// - A team key may read its team's scans, and nothing else private.
 /// - Otherwise the person who submitted it, an admin, or anyone in the team
@@ -1247,7 +1259,7 @@ pub(crate) fn can_view(
     submission: &FileSubmissionListItem,
     claims: Option<&crate::middleware::auth::Claims>,
 ) -> Access {
-    if submission.submitter_id.is_nil() {
+    if submission.submitter_id.is_nil() || submission.shared_by_link {
         return Access::Allowed;
     }
     let Some(claims) = claims else {
@@ -1929,7 +1941,18 @@ mod tests {
             bounty_id: bounty,
             organization_id: None,
             created_at: Utc::now(),
+            shared_by_link: false,
+            may_upload_file: false,
         }
+    }
+
+    #[test]
+    fn a_scan_shared_by_link_opens_for_anyone() {
+        let owner = Uuid::new_v4();
+        let mut s = sub(owner, None);
+        assert_eq!(can_view(&s, None), Access::Denied, "private by default");
+        s.shared_by_link = true;
+        assert_eq!(can_view(&s, None), Access::Allowed);
     }
 
     fn claims(user: Uuid, role: &str) -> Claims {
