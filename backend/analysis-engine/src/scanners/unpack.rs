@@ -10,6 +10,11 @@
 //! Formats that are zip files underneath but have their own structure (Office
 //! documents, Android APKs, Java JARs, OpenDocument) are not treated as plain
 //! archives: their parts mean nothing on their own to the generic engines.
+//!
+//! An email is unpacked too ([`unpack_email`]): its attachments, including
+//! forwarded messages, are its members. Phishing and malware arrive as
+//! attachments, so an email is judged by what it carries as well as by its
+//! headers and text.
 
 use std::io::{Cursor, Read};
 
@@ -56,6 +61,9 @@ pub enum ArchiveFormat {
     SevenZip,
     Tar,
     Gzip,
+    /// An email's attachments. Never returned by [`detect`]: whether a file
+    /// is an email depends on its name too, so callers ask for it.
+    Email,
 }
 
 impl ArchiveFormat {
@@ -65,6 +73,7 @@ impl ArchiveFormat {
             Self::SevenZip => "7z",
             Self::Tar => "tar",
             Self::Gzip => "gzip",
+            Self::Email => "email",
         }
     }
 }
@@ -148,8 +157,137 @@ pub fn unpack(data: &[u8], limits: UnpackLimits) -> Option<Unpacked> {
         ArchiveFormat::SevenZip => unpack_7z(data, &mut budget, &mut out),
         ArchiveFormat::Tar => unpack_tar(data, &mut budget, &mut out),
         ArchiveFormat::Gzip => unpack_gzip(data, &mut budget, &mut out),
+        ArchiveFormat::Email => unpack_email_into(data, &mut budget, &mut out),
     };
     ok.then_some(out)
+}
+
+/// An email's attachments, or `None` if `data` doesn't read as an email.
+/// Forwarded messages are members too (as `.eml`), so their attachments are
+/// scanned when they in turn are unpacked. Images shown inline in the text
+/// (logos, signatures) are left out.
+pub fn unpack_email(data: &[u8], limits: UnpackLimits) -> Option<Unpacked> {
+    let mut out = Unpacked {
+        format: ArchiveFormat::Email,
+        members: Vec::new(),
+        skipped: Vec::new(),
+        password: None,
+        locked: false,
+    };
+    let mut budget = Budget::new(limits);
+    unpack_email_into(data, &mut budget, &mut out).then_some(out)
+}
+
+fn unpack_email_into(data: &[u8], budget: &mut Budget, out: &mut Unpacked) -> bool {
+    use mail_parser::MimeHeaders;
+
+    let Some(message) = mail_parser::MessageParser::default().parse(data) else {
+        return false;
+    };
+    let mut taken_names: Vec<String> = Vec::new();
+    for part in message.attachments() {
+        let is_image = part
+            .content_type()
+            .is_some_and(|ct| ct.ctype().eq_ignore_ascii_case("image"));
+        let inline = part.content_disposition().is_some_and(|d| d.is_inline());
+        if inline && is_image {
+            continue;
+        }
+        // Numbered among the attachments kept, as people would count them.
+        let name = attachment_name(part, taken_names.len() + 1, &taken_names);
+        taken_names.push(name.clone());
+        let bytes: &[u8] = match part.message() {
+            Some(nested) => nested.raw_message(),
+            None => part.contents(),
+        };
+        if bytes.is_empty() {
+            continue;
+        }
+        match budget.take(out, &name, &mut &bytes[..]) {
+            Take::Taken => {}
+            Take::Skipped(why) => out.skipped.push(why),
+            Take::Failed => out.skipped.push(format!("{name}: could not be read")),
+        }
+    }
+    true
+}
+
+/// The attachment's own name, made unique, or one made from its position.
+fn attachment_name(part: &mail_parser::MessagePart<'_>, n: usize, taken: &[String]) -> String {
+    use mail_parser::MimeHeaders;
+
+    let own = part
+        .attachment_name()
+        .map(|s| {
+            s.chars()
+                .filter(|c| !c.is_control())
+                .collect::<String>()
+                .trim()
+                .to_string()
+        })
+        .filter(|s| !s.is_empty());
+    let base = match own {
+        Some(name) if part.is_message() && !name.to_ascii_lowercase().ends_with(".eml") => {
+            format!("{name}.eml")
+        }
+        Some(name) => name,
+        None if part.is_message() => format!("attached-message-{n}.eml"),
+        None => format!("attachment-{n}"),
+    };
+    if !taken.contains(&base) {
+        return base;
+    }
+    format!("{n}-{base}")
+}
+
+/// The links in an email's text and HTML, forwarded messages included, in
+/// the order they appear and without repeats. At most `max`.
+pub fn email_links(data: &[u8], max: usize) -> Vec<String> {
+    let Some(message) = mail_parser::MessageParser::default().parse(data) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    collect_links(&message, max, 0, &mut out);
+    out
+}
+
+/// Forwarded messages are followed this many levels deep for links.
+const MAX_LINK_DEPTH: usize = 3;
+
+fn collect_links(
+    message: &mail_parser::Message<'_>,
+    max: usize,
+    depth: usize,
+    out: &mut Vec<String>,
+) {
+    use std::sync::OnceLock;
+    static LINK: OnceLock<regex::Regex> = OnceLock::new();
+    let link = LINK.get_or_init(|| {
+        regex::Regex::new(r#"(?i)\bhttps?://[^\s"'<>()\[\]{}\\^`|]+"#).expect("link pattern")
+    });
+    for part in message.text_bodies().chain(message.html_bodies()) {
+        let Some(text) = part.text_contents() else {
+            continue;
+        };
+        for found in link.find_iter(text) {
+            if out.len() >= max {
+                return;
+            }
+            let url = found
+                .as_str()
+                .replace("&amp;", "&")
+                .trim_end_matches(['.', ',', ';', ':', '!', '?', '\''])
+                .to_string();
+            if url::Url::parse(&url).is_ok_and(|u| u.host_str().is_some()) && !out.contains(&url) {
+                out.push(url);
+            }
+        }
+    }
+    if depth < MAX_LINK_DEPTH {
+        for nested in message.attachments().filter_map(|p| p.message()) {
+            collect_links(nested, max, depth + 1, out);
+        }
+    }
 }
 
 struct Budget {
@@ -381,6 +519,97 @@ fn unpack_gzip(data: &[u8], budget: &mut Budget, out: &mut Unpacked) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // ─── Email ───
+
+    const PHISH: &str = "From: \"IT Desk\" <it@example.net>\r\n\
+To: you@example.com\r\n\
+Subject: Your mailbox is full\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=\"b1\"\r\n\
+\r\n\
+--b1\r\n\
+Content-Type: multipart/alternative; boundary=\"b2\"\r\n\
+\r\n\
+--b2\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Sign in at https://login.example.org/reset?u=1. Thanks.\r\n\
+--b2\r\n\
+Content-Type: text/html\r\n\
+\r\n\
+<p><a href=\"https://login.example.org/reset?u=1&amp;t=2\">Sign in</a>\r\n\
+<img src=\"cid:logo\"></p>\r\n\
+--b2--\r\n\
+--b1\r\n\
+Content-Type: image/png\r\n\
+Content-Disposition: inline\r\n\
+Content-ID: <logo>\r\n\
+Content-Transfer-Encoding: base64\r\n\
+\r\n\
+iVBORw0KGgo=\r\n\
+--b1\r\n\
+Content-Type: application/octet-stream; name=\"invoice.exe\"\r\n\
+Content-Disposition: attachment; filename=\"invoice.exe\"\r\n\
+Content-Transfer-Encoding: base64\r\n\
+\r\n\
+TVqQAAMAAAAEAAAA\r\n\
+--b1\r\n\
+Content-Type: message/rfc822\r\n\
+Content-Disposition: attachment\r\n\
+\r\n\
+From: someone@example.org\r\n\
+Subject: Fwd: payment\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+See http://pay.example.biz/now\r\n\
+--b1--\r\n";
+
+    #[test]
+    fn an_email_is_unpacked_into_its_attachments() {
+        let u = unpack_email(PHISH.as_bytes(), UnpackLimits::default()).expect("an email");
+        assert_eq!(u.format.name(), "email");
+        let names: Vec<&str> = u.members.iter().map(|m| m.path.as_str()).collect();
+        // The inline logo is left out; the forwarded message is kept whole.
+        assert_eq!(names, ["invoice.exe", "attached-message-2.eml"]);
+        assert!(u.members[0].data.starts_with(b"MZ"), "base64 is decoded");
+        let fwd = String::from_utf8_lossy(&u.members[1].data);
+        assert!(fwd.contains("Subject: Fwd: payment"));
+    }
+
+    #[test]
+    fn an_email_without_attachments_has_no_members() {
+        let plain = b"From: a@example.com\r\nSubject: hi\r\n\r\nhello\r\n";
+        let u = unpack_email(plain, UnpackLimits::default()).expect("an email");
+        assert!(u.members.is_empty() && u.skipped.is_empty());
+    }
+
+    #[test]
+    fn attachments_over_the_limits_are_listed_as_skipped() {
+        let limits = UnpackLimits {
+            max_members: 1,
+            ..UnpackLimits::default()
+        };
+        let u = unpack_email(PHISH.as_bytes(), limits).expect("an email");
+        assert_eq!(u.members.len(), 1);
+        assert_eq!(u.skipped.len(), 1);
+        assert!(u.skipped[0].contains("more than 1 files"));
+    }
+
+    #[test]
+    fn links_come_from_every_body_without_repeats() {
+        let links = email_links(PHISH.as_bytes(), 10);
+        assert_eq!(
+            links,
+            [
+                "https://login.example.org/reset?u=1",
+                "https://login.example.org/reset?u=1&t=2",
+                "http://pay.example.biz/now",
+            ]
+        );
+        assert_eq!(email_links(PHISH.as_bytes(), 1).len(), 1);
+        assert!(email_links(b"\x00\x01 not mail", 10).is_empty());
+    }
+
     use super::*;
     use std::io::Write;
 

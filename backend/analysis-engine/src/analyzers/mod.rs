@@ -829,7 +829,9 @@ impl AnalysisEngine {
 
     /// Unpack an archive and run every engine on each file inside, so a
     /// zipped (or `infected`-password) sample is judged by what it contains,
-    /// not by its compressed bytes. `None` if the file isn't an archive.
+    /// not by its compressed bytes. An email's attachments are scanned the
+    /// same way. `None` if the file isn't an archive or an email with
+    /// attachments.
     async fn scan_archive_contents(
         &mut self,
         request: &FileAnalysisRequest,
@@ -850,7 +852,15 @@ impl AnalysisEngine {
         } else {
             ARCHIVE_TIME_BUDGET
         };
-        let mut unpacked = unpack::unpack(&request.file_data, limits)?;
+        let mut unpacked = if looks_like_email(&request.filename, &request.file_data) {
+            let email = unpack::unpack_email(&request.file_data, limits)?;
+            if email.members.is_empty() && email.skipped.is_empty() {
+                return None;
+            }
+            email
+        } else {
+            unpack::unpack(&request.file_data, limits)?
+        };
         let members = std::mem::take(&mut unpacked.members);
 
         let started = std::time::Instant::now();
@@ -1787,6 +1797,11 @@ pub(crate) fn archive_contents_detection(
         })
         .collect();
 
+    let items = if unpacked.format == crate::scanners::unpack::ArchiveFormat::Email {
+        "attachment(s)"
+    } else {
+        "file(s)"
+    };
     let opened_with = unpacked
         .password
         .map(|p| format!(" Opened with the password \"{p}\"."))
@@ -1804,13 +1819,13 @@ pub(crate) fn archive_contents_detection(
         )
     } else if flagged.is_empty() {
         format!(
-            "{} file(s) inside this {} were scanned by every engine; none was flagged.{opened_with}",
+            "{} {items} inside this {} were scanned by every engine; none was flagged.{opened_with}",
             scanned.len(),
             unpacked.format.name()
         )
     } else {
         format!(
-            "{} of {} file(s) inside this {} were flagged: {}.{opened_with}",
+            "{} of {} {items} inside this {} were flagged: {}.{opened_with}",
             flagged.len(),
             scanned.len(),
             unpacked.format.name(),
@@ -2053,6 +2068,61 @@ mod archive_tests {
             .contains("eicar.com: Malicious"));
         assert_eq!(r.consensus_verdict, ThreatVerdict::Malicious);
         assert!(r.consensus_explanation.contains("a file inside it"));
+    }
+
+    fn email_with(attachments: &[(&str, &[u8])]) -> Vec<u8> {
+        use base64::Engine;
+        let mut m = String::from(
+            "From: billing@example.net\r\nTo: you@example.com\r\nSubject: Invoice\r\n\
+             MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"x\"\r\n\r\n\
+             --x\r\nContent-Type: text/plain\r\n\r\nPlease see the attached invoice.\r\n",
+        );
+        for (name, body) in attachments {
+            m.push_str(&format!(
+                "--x\r\nContent-Type: application/octet-stream; name=\"{name}\"\r\n\
+                 Content-Disposition: attachment; filename=\"{name}\"\r\n\
+                 Content-Transfer-Encoding: base64\r\n\r\n{}\r\n",
+                base64::engine::general_purpose::STANDARD.encode(body)
+            ));
+        }
+        m.push_str("--x--\r\n");
+        m.into_bytes()
+    }
+
+    #[tokio::test]
+    async fn malware_attached_to_an_email_makes_the_email_malicious() {
+        let zipped = zip_of(&[("eicar.com", EICAR)], Some("infected"));
+        let mail = email_with(&[("notes.txt", b"Agenda"), ("invoice.zip", &zipped)]);
+        let r = analyse("invoice.eml", mail).await;
+        let row = contents(&r);
+        assert_eq!(row.metadata["format"], "email");
+        assert_eq!(row.verdict, ThreatVerdict::Malicious);
+        let summary = row.metadata["summary"].as_str().unwrap();
+        assert!(summary.contains("1 of 2 attachment(s)"), "{summary}");
+        assert!(summary.contains("invoice.zip: Malicious"), "{summary}");
+        assert_eq!(r.consensus_verdict, ThreatVerdict::Malicious);
+    }
+
+    #[tokio::test]
+    async fn an_email_with_clean_attachments_says_so_and_one_without_has_no_row() {
+        let mail = email_with(&[("notes.txt", b"Agenda for Monday")]);
+        let r = analyse("notes.eml", mail).await;
+        let summary = contents(&r).metadata["summary"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            summary.contains("1 attachment(s) inside this email"),
+            "{summary}"
+        );
+        assert_ne!(r.consensus_verdict, ThreatVerdict::Malicious);
+
+        let bare = email_with(&[]);
+        let r = analyse("hello.eml", bare).await;
+        assert!(!r
+            .detections
+            .iter()
+            .any(|d| d.engine_name == ARCHIVE_CONTENTS));
     }
 
     #[tokio::test]

@@ -26,6 +26,7 @@ use super::url_scanner::UrlScanResult;
 use super::{Finding, ThreatLevel};
 use crate::models::analysis_result::{
     DetectionResult, EngineType, SeverityLevel, ThreatCategory, ThreatVerdict, AUTHORITATIVE_KEY,
+    STRONG_SIGNAL_KEY,
 };
 
 pub const URLHAUS: &str = "URLhaus";
@@ -33,6 +34,145 @@ pub const THREATFOX: &str = "ThreatFox";
 pub const URL_CHECKS: &str = "URL checks";
 pub const VIRUSTOTAL: &str = "VirusTotal";
 pub const SAFE_BROWSING: &str = "Google Safe Browsing";
+/// Engine name for the verdict on the links in an email.
+pub const EMAIL_LINKS: &str = "Email links";
+/// Links in one email that are looked up.
+pub const EMAIL_LINKS_CHECKED: usize = 5;
+
+/// Which of an email's links to look up: hosts not on the trusted list come
+/// first (a link to a well-known site is rarely the payload), one link per
+/// host, at most `max`.
+pub fn pick_email_links(
+    links: &[String],
+    is_trusted: impl Fn(&str) -> bool,
+    max: usize,
+) -> Vec<String> {
+    let mut seen_hosts: Vec<String> = Vec::new();
+    let mut unknown = Vec::new();
+    let mut trusted = Vec::new();
+    for link in links {
+        let Some(host) = url::Url::parse(link)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        else {
+            continue;
+        };
+        if seen_hosts.contains(&host) {
+            continue;
+        }
+        if is_trusted(&host) {
+            trusted.push(link.clone());
+        } else {
+            unknown.push(link.clone());
+        }
+        seen_hosts.push(host);
+    }
+    unknown.into_iter().chain(trusted).take(max).collect()
+}
+
+/// One vote for an email from the URL engines' verdicts on its links: the
+/// worst of them. A link that's on a blocklist is a strong signal (the email
+/// is at least suspicious) but doesn't decide the verdict alone, since an
+/// email can quote a bad link to warn about it. When nothing flags a link the
+/// row has no opinion: a link missing from blocklists isn't proof it's safe.
+pub fn email_links_detection(
+    found: usize,
+    checked: &[(String, Vec<DetectionResult>)],
+    duration_ms: u64,
+) -> DetectionResult {
+    let rank = |v: &ThreatVerdict| match v {
+        ThreatVerdict::Malicious => 2,
+        ThreatVerdict::Suspicious => 1,
+        _ => 0,
+    };
+    let mut worst = ThreatVerdict::Unknown;
+    let mut listed = false;
+    let mut confidence = 0.0_f32;
+    let mut reasons = Vec::new();
+    let mut links = Vec::new();
+    for (url, votes) in checked {
+        let flagged: Vec<&DetectionResult> = votes
+            .iter()
+            .filter(|d| d.non_vote().is_none() && rank(&d.verdict) > 0)
+            .collect();
+        let link_worst = flagged
+            .iter()
+            .map(|d| d.verdict.clone())
+            .max_by_key(rank)
+            .unwrap_or(ThreatVerdict::Unknown);
+        if rank(&link_worst) > rank(&worst) {
+            worst = link_worst.clone();
+        }
+        for d in &flagged {
+            if d.verdict == worst {
+                confidence = confidence.max(d.confidence);
+            }
+            if d.metadata.get(AUTHORITATIVE_KEY).and_then(Value::as_bool) == Some(true) {
+                listed = true;
+            }
+        }
+        let engines: Vec<&str> = flagged.iter().map(|d| d.engine_name.as_str()).collect();
+        if !engines.is_empty() {
+            reasons.push(format!("{url}: {:?} ({})", link_worst, engines.join(", ")));
+        }
+        links.push(json!({
+            "url": url,
+            "verdict": format!("{link_worst:?}"),
+            "engines": engines,
+        }));
+    }
+
+    let not_checked = found.saturating_sub(checked.len());
+    let more = if not_checked > 0 {
+        format!(" {not_checked} more link(s) weren't looked up.")
+    } else {
+        String::new()
+    };
+    let summary = if reasons.is_empty() {
+        format!(
+            "{} link(s) in this email were looked up in URLhaus, ThreatFox and Verdyx's URL checks; none was flagged.{more}",
+            checked.len()
+        )
+    } else {
+        format!(
+            "{} of {} link(s) in this email were flagged: {}.{more}",
+            reasons.len(),
+            checked.len(),
+            reasons.join("; ")
+        )
+    };
+
+    let mut metadata = HashMap::new();
+    metadata.insert("links".to_string(), json!(links));
+    metadata.insert("linksFound".to_string(), json!(found));
+    metadata.insert("summary".to_string(), json!(summary));
+    metadata.insert("reasons".to_string(), json!(reasons));
+    if worst == ThreatVerdict::Unknown {
+        metadata.insert("reason".to_string(), json!(summary));
+    }
+    if listed && worst == ThreatVerdict::Malicious {
+        metadata.insert(STRONG_SIGNAL_KEY.to_string(), json!(true));
+    }
+    let (severity, categories) = match worst {
+        ThreatVerdict::Malicious => (SeverityLevel::High, vec![ThreatCategory::Phishing]),
+        ThreatVerdict::Suspicious => (SeverityLevel::Medium, vec![ThreatCategory::Phishing]),
+        _ => (SeverityLevel::Info, vec![]),
+    };
+    DetectionResult {
+        detection_id: Uuid::new_v4(),
+        engine_name: EMAIL_LINKS.to_string(),
+        engine_version: "live".to_string(),
+        engine_type: EngineType::ThreatIntel,
+        verdict: worst,
+        confidence,
+        severity,
+        categories,
+        metadata,
+        detected_at: Utc::now(),
+        processing_time_ms: duration_ms,
+        error_message: None,
+    }
+}
 
 /// One detection per URL engine. Feeds are left out when no abuse.ch key is set.
 pub fn url_detections(scan: &UrlScanResult, host_is_trusted: bool) -> Vec<DetectionResult> {
@@ -484,6 +624,82 @@ fn url_checks_detection(scan: &UrlScanResult) -> DetectionResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn vote(name: &str, verdict: ThreatVerdict, listed: bool) -> DetectionResult {
+        let mut metadata = HashMap::new();
+        if listed {
+            metadata.insert(AUTHORITATIVE_KEY.to_string(), json!(true));
+        }
+        if verdict == ThreatVerdict::Unknown {
+            metadata.insert("reason".to_string(), json!("Not listed"));
+        }
+        detection(name, verdict, 0.9, SeverityLevel::High, metadata, 1)
+    }
+
+    #[test]
+    fn unknown_hosts_are_looked_up_first_one_link_per_host() {
+        let links: Vec<String> = [
+            "https://www.google.com/a",
+            "https://evil.example/login",
+            "https://evil.example/other",
+            "https://cdn.example.net/x.js",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let picked = pick_email_links(&links, |h| h.ends_with("google.com"), 5);
+        assert_eq!(
+            picked,
+            [
+                "https://evil.example/login",
+                "https://cdn.example.net/x.js",
+                "https://www.google.com/a"
+            ]
+        );
+        assert_eq!(pick_email_links(&links, |_| false, 1).len(), 1);
+    }
+
+    #[test]
+    fn a_listed_link_flags_the_email_without_deciding_it_alone() {
+        let checked = vec![
+            (
+                "https://evil.example/login".to_string(),
+                vec![
+                    vote(URLHAUS, ThreatVerdict::Malicious, true),
+                    vote(URL_CHECKS, ThreatVerdict::Suspicious, false),
+                ],
+            ),
+            (
+                "https://ok.example/".to_string(),
+                vec![vote(URLHAUS, ThreatVerdict::Unknown, false)],
+            ),
+        ];
+        let d = email_links_detection(7, &checked, 3);
+        assert_eq!(d.engine_name, EMAIL_LINKS);
+        assert_eq!(d.verdict, ThreatVerdict::Malicious);
+        assert_eq!(d.metadata[STRONG_SIGNAL_KEY], true);
+        assert!(!d.metadata.contains_key(AUTHORITATIVE_KEY));
+        let summary = d.metadata["summary"].as_str().unwrap();
+        assert!(summary.starts_with("1 of 2 link(s)"), "{summary}");
+        assert!(summary.contains("evil.example/login: Malicious (URLhaus, URL checks)"));
+        assert!(summary.ends_with("5 more link(s) weren't looked up."));
+        assert_eq!(d.metadata["links"][1]["verdict"], "Unknown");
+    }
+
+    #[test]
+    fn links_nobody_flags_are_no_opinion_not_clean() {
+        let checked = vec![(
+            "https://ok.example/".to_string(),
+            vec![vote(URLHAUS, ThreatVerdict::Unknown, false)],
+        )];
+        let d = email_links_detection(1, &checked, 3);
+        assert_eq!(d.verdict, ThreatVerdict::Unknown);
+        assert!(d.non_vote().is_some());
+        assert!(d.metadata["reason"]
+            .as_str()
+            .unwrap()
+            .contains("none was flagged"));
+    }
 
     fn m(
         source: &str,

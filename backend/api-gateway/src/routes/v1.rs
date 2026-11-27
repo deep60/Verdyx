@@ -201,6 +201,7 @@ fn submission_routes(state: AppState) -> Router<AppState> {
     let scans = Router::new()
         .route("/", post(submission::create_submission))
         .route("/file", post(submission::create_file_submission))
+        .route("/email", post(submission::create_email_submission))
         .route(
             "/{submission_id}/start-analysis",
             post(submission::start_analysis),
@@ -311,6 +312,22 @@ fn team_routes() -> Router<AppState> {
             "/{org_id}/sso/scim-token",
             post(crate::handlers::sso::new_scim_token)
                 .delete(crate::handlers::sso::revoke_scim_token),
+        )
+        .route(
+            "/{org_id}/storage",
+            get(crate::handlers::storage::list).post(crate::handlers::storage::create),
+        )
+        .route(
+            "/{org_id}/storage/{connection_id}",
+            patch(crate::handlers::storage::update).delete(crate::handlers::storage::remove),
+        )
+        .route(
+            "/{org_id}/storage/{connection_id}/scan",
+            post(crate::handlers::storage::scan_now),
+        )
+        .route(
+            "/{org_id}/storage/{connection_id}/objects",
+            get(crate::handlers::storage::objects),
         )
 }
 

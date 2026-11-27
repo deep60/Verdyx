@@ -343,6 +343,7 @@ async fn main() -> Result<()> {
     services::retention::spawn(state.clone());
     services::chain_indexer::spawn(state.clone());
     services::webhook_delivery::spawn(state.clone());
+    services::storage_scan::spawn(state.clone());
     let app = routes::create_router(state)
         .layer(axum::middleware::from_fn(move |req, next| {
             let ip = audit_client_ip.clone();
