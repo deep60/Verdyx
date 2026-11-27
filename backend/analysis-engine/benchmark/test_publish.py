@@ -56,6 +56,11 @@ class PublishTest(unittest.TestCase):
         self.assertEqual(d["missedFamilies"], ["Alpha (1)", "Zeta (2)"])
         self.assertEqual(d["falsePositives"], [{"file": "putty-0.81-w64/PUTTY.EXE", "engines": ["Static"]}])
 
+    def test_says_which_remote_engines_ran(self):
+        self.assertFalse(publish.build(REPORT, RUN)["peModel"])
+        on = publish.build(REPORT, {**RUN, "clamav": True, "peModel": True})
+        self.assertTrue(on["clamav"] and on["peModel"])
+
     def test_no_sample_details_leak(self):
         text = json.dumps(publish.build(REPORT, RUN))
         self.assertNotIn("SecretFamily/abc", text)

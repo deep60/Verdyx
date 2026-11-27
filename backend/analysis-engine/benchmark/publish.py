@@ -91,6 +91,7 @@ def build(report: dict, run: dict) -> dict:
         "revision": run.get("revision") or None,
         "image": run.get("image") or None,
         "clamav": bool(run.get("clamav", False)),
+        "peModel": bool(run.get("peModel", False)),
         "feeds": bool(s.get("feeds_enabled", False)),
         "seconds": s.get("seconds", 0),
         "set": {

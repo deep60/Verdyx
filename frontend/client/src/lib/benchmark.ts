@@ -33,6 +33,8 @@ export interface BenchmarkData {
   revision: string | null;
   image: string | null;
   clamav: boolean;
+  /** The Windows program model (EMBER2024). Missing from runs before it was measured. */
+  peModel?: boolean;
   /** Hash-reputation feeds (VirusTotal, MalwareBazaar). Off for a fair test. */
   feeds: boolean;
   seconds: number;
