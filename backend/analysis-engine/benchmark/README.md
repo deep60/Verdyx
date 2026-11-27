@@ -42,8 +42,12 @@ This:
 1. uploads `manifest.json` and `fetch_samples.sh` to `/opt/verdyx-benchmark`;
 2. downloads the samples in a throwaway Debian container (MalwareBazaar needs
    `ABUSE_CH_API_KEY`, read from the server's `.env`), checking every hash;
-3. runs `verdyx-benchmark` from the live analysis-engine image, with no network
-   and a 700 MB memory cap;
+3. runs `verdyx-benchmark` from the live analysis-engine image with a 700 MB
+   memory cap. ClamAV and the Windows program model (EMBER2024) run on the
+   worker VM: each is used when production has it set up (`CLAMAV_HOST`,
+   `PE_MODEL_URL`) and it answers, and the run then gets a network to reach
+   them. Otherwise it has none. `BENCHMARK_CLAMAV=off` and
+   `BENCHMARK_PE_MODEL=off` leave them out;
 4. copies `report.md`, `report.json` and `run.json` back into `benchmark/results/`.
 
 Samples stay on the server, so later runs only download what's missing.

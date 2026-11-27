@@ -125,6 +125,8 @@ export default function Benchmark() {
               )}
               {" · ClamAV "}
               {data.clamav ? "on" : "off"}
+              {" · Windows program model "}
+              {data.peModel ? "on" : "off"}
               {" · hash lookups "}
               {data.feeds ? "on" : "off"}
             </p>
