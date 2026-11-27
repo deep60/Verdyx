@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use super::siem;
 use crate::AppState;
 
 /// Rows claimed per round.
@@ -272,11 +273,19 @@ pub fn max_attempts(configured: Option<i32>) -> i32 {
 // ─── Sending ──────────────────────────────────────────────────────────────
 
 /// A webhook as the sender needs it.
-#[derive(Debug, Clone, sqlx::FromRow)]
+#[derive(Debug, Clone, Default)]
 pub struct Target {
     pub url: String,
     pub secret: Option<String>,
     pub headers: Option<Value>,
+    /// `webhook` (or empty), `splunk` or `sentinel`.
+    pub kind: String,
+    /// Destination settings (see `siem::validate`).
+    pub config: Value,
+    /// The destination's credential, already unsealed.
+    pub credential: Option<String>,
+    /// Tests only: where to sign in to Entra ID instead of Microsoft.
+    pub sentinel_login: Option<String>,
 }
 
 /// What happened to one attempt.
@@ -308,7 +317,40 @@ pub async fn send(
         Ok(u) => u,
         Err(why) => return fail(why.to_string()),
     };
-    let body = envelope(delivery_id, event, created_at, data, web_url).to_string();
+    let env = envelope(delivery_id, event, created_at, data, web_url);
+    let kind = if target.kind.is_empty() {
+        siem::KIND_WEBHOOK
+    } else {
+        target.kind.as_str()
+    };
+    if kind != siem::KIND_WEBHOOK {
+        let req = match siem::request(
+            http,
+            kind,
+            url.as_str(),
+            &target.config,
+            target.credential.as_deref(),
+            created_at,
+            &env,
+            target.sentinel_login.as_deref(),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(why) => return fail(why),
+        };
+        let mut attempt = finish(req.send().await).await;
+        if let Some(code) = attempt.status_code {
+            if code == 401 || code == 403 {
+                siem::after_refusal(kind, &target.config, target.credential.as_deref());
+            }
+            if let (false, Some(h)) = (attempt.ok, siem::hint(kind, code as u16)) {
+                attempt.error = attempt.error.map(|e| format!("{e}: {h}"));
+            }
+        }
+        return attempt;
+    }
+    let body = env.to_string();
     let ts = Utc::now().timestamp();
     let mut req = http
         .post(url)
@@ -322,7 +364,12 @@ pub async fn send(
     for (k, v) in custom_headers(target.headers.as_ref()) {
         req = req.header(k, v);
     }
-    match req.body(body).send().await {
+    finish(req.body(body).send().await).await
+}
+
+/// Read a response (or failure) into an [`Attempt`].
+async fn finish(sent: Result<reqwest::Response, reqwest::Error>) -> Attempt {
+    match sent {
         Ok(resp) => {
             let code = resp.status();
             let mut text = resp.text().await.unwrap_or_default();
@@ -346,11 +393,16 @@ pub async fn send(
                 }),
             }
         }
-        Err(e) => fail(describe(&e)),
+        Err(e) => Attempt {
+            ok: false,
+            status_code: None,
+            response_body: None,
+            error: Some(describe(&e)),
+        },
     }
 }
 
-fn describe(e: &reqwest::Error) -> String {
+pub(crate) fn describe(e: &reqwest::Error) -> String {
     use std::error::Error;
     let mut msg = if e.is_timeout() {
         "timed out".to_string()
@@ -397,6 +449,9 @@ struct Hook {
     url: String,
     secret: Option<String>,
     headers: Option<Value>,
+    kind: String,
+    config: Value,
+    credential: Option<String>,
     is_active: Option<bool>,
     retry_max_attempts: Option<i32>,
     retry_interval_seconds: Option<i32>,
@@ -407,13 +462,14 @@ struct Hook {
 pub async fn process(
     db: &PgPool,
     http: &reqwest::Client,
+    key: &siem::CredentialKey,
     web_url: &str,
     row: Claimed,
 ) -> Result<(), sqlx::Error> {
     let (id, webhook_id, event, data, attempt, created_at) = row;
     let hook: Option<Hook> = sqlx::query_as(
-        "SELECT url, secret, headers, is_active, retry_max_attempts, retry_interval_seconds, exponential_backoff \
-         FROM webhooks WHERE id = $1",
+        "SELECT url, secret, headers, kind, config, credential, is_active, retry_max_attempts, \
+         retry_interval_seconds, exponential_backoff FROM webhooks WHERE id = $1",
     )
     .bind(webhook_id)
     .fetch_optional(db)
@@ -422,6 +478,9 @@ pub async fn process(
         url,
         secret,
         headers,
+        kind,
+        config,
+        credential,
         is_active,
         retry_max_attempts: max,
         retry_interval_seconds: interval,
@@ -446,6 +505,10 @@ pub async fn process(
             url,
             secret,
             headers,
+            kind,
+            config,
+            credential: credential.as_deref().and_then(|c| key.open(c)),
+            sentinel_login: None,
         },
         id,
         &event,
@@ -539,6 +602,9 @@ pub fn spawn(state: AppState) {
         let db = state.db.pool().clone();
         let http = client(false);
         let web = web_url();
+        let key = Arc::new(siem::CredentialKey::from_config(
+            &state.config.security.jwt_secret,
+        ));
         // Rows that were being sent when the gateway stopped are sent again.
         if let Err(e) = sqlx::query(
             "UPDATE webhook_deliveries SET status = 'retrying' WHERE status = 'sending'",
@@ -575,10 +641,10 @@ pub fn spawn(state: AppState) {
             let full = rows.len() as i64 == BATCH;
             let mut tasks = tokio::task::JoinSet::new();
             for row in rows {
-                let (db, http, web) = (db.clone(), http.clone(), web.clone());
+                let (db, http, web, key) = (db.clone(), http.clone(), web.clone(), key.clone());
                 tasks.spawn(async move {
                     let id = row.0;
-                    if let Err(e) = process(&db, &http, &web, row).await {
+                    if let Err(e) = process(&db, &http, &key, &web, row).await {
                         tracing::warn!("webhook delivery {id}: {e}");
                     }
                 });
@@ -780,6 +846,7 @@ mod tests {
             url: "http://localtest.me/".into(),
             secret: None,
             headers: None,
+            ..Default::default()
         };
         let r = send(
             &client(false),
@@ -828,6 +895,7 @@ mod tests {
             url,
             secret: Some("whsec_test".into()),
             headers: Some(json!({"Authorization": "Bearer t", "Host": "evil"})),
+            ..Default::default()
         };
         let r = send(
             &http,
@@ -893,6 +961,7 @@ mod tests {
             url,
             secret: None,
             headers: None,
+            ..Default::default()
         };
         let r = send(
             &http,

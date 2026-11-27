@@ -9,6 +9,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Webhook, Plus, Trash2, Send, Copy, CheckCircle2, XCircle, Clock } from "lucide-react";
+import {
+  DESTINATIONS,
+  DESTINATION_KINDS,
+  apiErrorMessage,
+  createBody,
+  destinationSummary,
+  kindOf,
+  missing,
+  type DestinationKind,
+} from "@/lib/destinations";
 
 interface WebhookItem {
   id: string;
@@ -19,6 +29,9 @@ interface WebhookItem {
   description?: string | null;
   last_triggered_at?: string | null;
   created_at: string;
+  kind?: string;
+  config?: Record<string, unknown> | null;
+  has_credential?: boolean;
 }
 
 interface WebhookListResponse {
@@ -51,8 +64,11 @@ const DEFAULT_EVENTS = [
 export function WebhooksManager() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [kind, setKind] = useState<DestinationKind>("webhook");
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
+  const [credential, setCredential] = useState("");
+  const [config, setConfig] = useState<Record<string, string>>({});
   const [selectedEvents, setSelectedEvents] = useState<string[]>([
     "analysis.completed",
     "livehunt.match",
@@ -68,32 +84,37 @@ export function WebhooksManager() {
     enabled: Boolean(selectedWebhookId),
   });
 
+  const draft = { kind, url, description, events: selectedEvents, credential, config };
+  const spec = DESTINATIONS[kind];
+  const notReady = missing(draft);
+
   const createMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/webhooks", {
-        url: url.trim(),
-        events: selectedEvents,
-        description: description.trim() || undefined,
-      });
+      const res = await apiRequest("POST", "/api/webhooks", createBody(draft));
       return (await res.json()) as WebhookItem;
     },
     onSuccess: (created) => {
       toast({
-        title: "Webhook endpoint registered",
-        description: `HMAC signing secret generated for ${created.url}`,
+        title: `${DESTINATIONS[kindOf(created.kind)].label} added`,
+        description:
+          kindOf(created.kind) === "webhook"
+            ? `Deliveries to ${created.url} are signed with the key shown in the list.`
+            : "Send a test event to check it's set up.",
       });
       setUrl("");
       setDescription("");
+      setCredential("");
+      setConfig({});
       setSelectedWebhookId(created.id);
       queryClient.invalidateQueries({ queryKey: ["/api/webhooks"] });
     },
     onError: (err) => {
       toast({
-        title: "Could not register webhook",
-        description:
-          err instanceof Error
-            ? err.message
-            : "Provide a public HTTPS URL (localhost/private IPs are blocked for SSRF protection).",
+        title: "Couldn't add it",
+        description: apiErrorMessage(
+          err,
+          "Check the address: it must be public (local and private addresses are refused).",
+        ),
         variant: "destructive",
       });
     },
@@ -175,10 +196,11 @@ export function WebhooksManager() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Webhook className="h-5 w-5 text-primary" />
-            Register Outbound Webhook
+            Send events out
           </CardTitle>
           <CardDescription>
-            Receive real-time HMAC-signed JSON callbacks when scans finish or bounties settle. Private/loopback IPs are blocked for SSRF safety.
+            Get scan results and live-hunt matches as they happen: as a signed webhook, or straight into Splunk or
+            Microsoft Sentinel. Failed deliveries are retried.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -186,33 +208,105 @@ export function WebhooksManager() {
             className="space-y-4"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!url.trim() || selectedEvents.length === 0) return;
+              if (notReady) return;
               createMutation.mutate();
             }}
           >
+            <div className="space-y-2">
+              <Label id="destination-kind-label">Send to</Label>
+              <div role="radiogroup" aria-labelledby="destination-kind-label" className="flex flex-wrap gap-2">
+                {DESTINATION_KINDS.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    role="radio"
+                    aria-checked={kind === k}
+                    onClick={() => {
+                      setKind(k);
+                      setConfig({});
+                      setCredential("");
+                    }}
+                    className={`border px-3 py-1.5 text-sm transition-colors ${
+                      kind === k
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border text-muted-foreground hover:border-primary/40"
+                    }`}
+                    data-testid={`destination-${k}`}
+                  >
+                    {DESTINATIONS[k].label}
+                  </button>
+                ))}
+              </div>
+              {spec.docs && (
+                <p className="text-xs text-muted-foreground">
+                  Setting it up on the {spec.label} side:{" "}
+                  <a href={spec.docs} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                    step-by-step guide
+                  </a>
+                  .
+                </p>
+              )}
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="webhook-url">Endpoint URL (HTTPS)</Label>
+                <Label htmlFor="webhook-url">{spec.urlLabel}</Label>
                 <Input
                   id="webhook-url"
                   type="url"
-                  placeholder="https://soc.example.com/webhooks/verdyx"
+                  placeholder={spec.urlPlaceholder}
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   required
+                  aria-describedby="webhook-url-help"
                   data-testid="input-webhook-url"
                 />
+                <p id="webhook-url-help" className="text-[11px] text-muted-foreground">
+                  {spec.urlHelp}
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="webhook-desc">Description (Optional)</Label>
                 <Input
                   id="webhook-desc"
-                  placeholder="Splunk SOAR / CI pipeline gate"
+                  placeholder="SOC alerts / CI pipeline gate"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   data-testid="input-webhook-description"
                 />
               </div>
+              {spec.credentialLabel && (
+                <div className="space-y-2">
+                  <Label htmlFor="destination-credential">{spec.credentialLabel}</Label>
+                  <Input
+                    id="destination-credential"
+                    type="password"
+                    autoComplete="off"
+                    value={credential}
+                    onChange={(e) => setCredential(e.target.value)}
+                    aria-describedby="destination-credential-help"
+                    data-testid="input-destination-credential"
+                  />
+                  <p id="destination-credential-help" className="text-[11px] text-muted-foreground">
+                    {spec.credentialHelp} It's stored encrypted and never shown again.
+                  </p>
+                </div>
+              )}
+              {spec.fields.map((f) => (
+                <div key={f.key} className="space-y-2">
+                  <Label htmlFor={`destination-${f.key}`}>
+                    {f.label}
+                    {f.optional && <span className="text-muted-foreground"> (optional)</span>}
+                  </Label>
+                  <Input
+                    id={`destination-${f.key}`}
+                    placeholder={f.placeholder}
+                    value={config[f.key] ?? ""}
+                    onChange={(e) => setConfig((c) => ({ ...c, [f.key]: e.target.value }))}
+                    data-testid={`input-destination-${f.key}`}
+                  />
+                </div>
+              ))}
             </div>
 
             <div className="space-y-2">
@@ -238,11 +332,12 @@ export function WebhooksManager() {
 
             <Button
               type="submit"
-              disabled={createMutation.isPending || !url.trim() || selectedEvents.length === 0}
+              disabled={createMutation.isPending || Boolean(notReady)}
+              title={notReady ?? undefined}
               data-testid="button-create-webhook"
             >
               <Plus className="h-4 w-4 mr-1.5" />
-              {createMutation.isPending ? "Registering..." : "Create Webhook"}
+              {createMutation.isPending ? "Adding…" : `Add ${spec.label}`}
             </Button>
           </form>
         </CardContent>
@@ -250,9 +345,9 @@ export function WebhooksManager() {
 
       <Card className="glassmorphism border-primary/20">
         <CardHeader>
-          <CardTitle className="text-lg">Configured Endpoints ({webhooks.length})</CardTitle>
+          <CardTitle className="text-lg">Destinations ({webhooks.length})</CardTitle>
           <CardDescription>
-            Click <strong>Test Ping</strong> to dispatch a sample `analysis.completed` payload and inspect the HTTP status code.
+            <strong>Test</strong> sends a sample <code>analysis.completed</code> event and shows what came back.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -260,7 +355,7 @@ export function WebhooksManager() {
             <p className="text-sm text-muted-foreground">Loading webhooks…</p>
           ) : webhooks.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No webhooks registered yet. Add an HTTPS endpoint above to start receiving events.
+              Nothing set up yet. Add a webhook, Splunk or Sentinel above to start receiving events.
             </p>
           ) : (
             webhooks.map((wh) => (
@@ -276,6 +371,10 @@ export function WebhooksManager() {
                       </Badge>
                       <span className="font-mono text-sm font-semibold break-all">{wh.url}</span>
                     </div>
+                    <p className="text-xs text-muted-foreground" data-testid={`destination-summary-${wh.id}`}>
+                      {destinationSummary(kindOf(wh.kind), wh.config)}
+                      {kindOf(wh.kind) !== "webhook" && !wh.has_credential && " · credential missing"}
+                    </p>
                     {wh.description && (
                       <p className="text-xs text-muted-foreground">{wh.description}</p>
                     )}
@@ -289,7 +388,7 @@ export function WebhooksManager() {
                       data-testid={`button-test-webhook-${wh.id}`}
                     >
                       <Send className="h-3.5 w-3.5 mr-1.5" />
-                      Test Ping
+                      Test
                     </Button>
                     <Button
                       size="sm"
@@ -320,7 +419,7 @@ export function WebhooksManager() {
                       </Badge>
                     ))}
                   </div>
-                  {wh.secret && (
+                  {wh.secret && kindOf(wh.kind) === "webhook" && (
                     <button
                       type="button"
                       onClick={() => {
