@@ -211,6 +211,12 @@ async fn main() -> Result<()> {
         .route(
             "/api/v1/auth/oauth/{provider}/callback",
             post(handlers::auth::oauth_callback),
+        )
+        // Called by the gateway with a signed grant, not a session.
+        .route("/api/v1/internal/sso/user", post(handlers::auth::sso_user))
+        .route(
+            "/api/v1/internal/sso/session",
+            post(handlers::auth::sso_session),
         );
 
     // Protected routes (authentication required)

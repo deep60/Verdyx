@@ -6,6 +6,7 @@ import { SEO } from "@/components/seo";
 import { ApiKeysManager } from "@/components/api-keys-manager";
 import { AuditLog } from "@/components/audit-log";
 import { ThreatFeedCard } from "@/components/threat-feed-card";
+import { TeamSso } from "@/components/team-sso";
 import { RetentionSelect, retentionLabel } from "@/components/data-controls";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,7 @@ import {
   type TeamRole,
   type TeamSummary,
 } from "@/lib/teams";
-import { Copy, FileSearch, History, KeyRound, LogOut, Mail, Plus, Trash2, Users } from "lucide-react";
+import { Building2, Copy, FileSearch, History, KeyRound, LogOut, Mail, Plus, Trash2, Users } from "lucide-react";
 import { BOUNTIES_ENABLED } from "@/lib/features";
 
 const TEAMS = "/api/orgs";
@@ -588,6 +589,11 @@ export function TeamPanel({ teamId, onGone }: { teamId: string; onGone: () => vo
               </TabsTrigger>
             )}
             {manager && (
+              <TabsTrigger value="sso">
+                <Building2 className="mr-1 h-3.5 w-3.5" /> Sign-in
+              </TabsTrigger>
+            )}
+            {manager && (
               <TabsTrigger value="audit">
                 <History className="mr-1 h-3.5 w-3.5" /> Audit log
               </TabsTrigger>
@@ -625,6 +631,11 @@ export function TeamPanel({ teamId, onGone }: { teamId: string; onGone: () => vo
               <div className="mt-6">
                 <ThreatFeedCard team={{ id: team.id, name: team.name }} />
               </div>
+            </TabsContent>
+          )}
+          {manager && (
+            <TabsContent value="sso" className="pt-4">
+              <TeamSso teamId={team.id} teamName={team.name} />
             </TabsContent>
           )}
           {manager && (

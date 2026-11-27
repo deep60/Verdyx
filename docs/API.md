@@ -18,6 +18,7 @@ Rather than calling the routes by hand, you can use:
 - **Splunk and Microsoft Sentinel**, to send events into your SIEM: [splunk.md](integrations/splunk.md), [sentinel.md](integrations/sentinel.md)
 - **Similarity search**, to find variants of a file by fuzzy hash: [similarity.md](api/similarity.md)
 - **Privacy**, where files go and who can open a report: [privacy.md](privacy.md)
+- **Single sign-on and provisioning** with Okta, Microsoft Entra ID and other identity providers: [sso.md](integrations/sso.md)
 
 They all scan the same way:
 1. `POST /submissions/file`, a multipart form with `file`, or `url` for a URL, plus optional `description`, `organizationId` and `priority`.

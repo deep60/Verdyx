@@ -37,6 +37,7 @@ enum Failure {
     TwoFactor,
     Suspended,
     NoEmail,
+    SsoRequired,
     Unavailable,
     Failed,
 }
@@ -49,6 +50,7 @@ impl Failure {
             Self::TwoFactor => "two_factor",
             Self::Suspended => "suspended",
             Self::NoEmail => "no_email",
+            Self::SsoRequired => "sso_required",
             Self::Unavailable => "unavailable",
             Self::Failed => "failed",
         }
@@ -235,6 +237,12 @@ pub async fn callback(
     };
 
     sync_user_to_gateway_db(&state, &auth.user).await;
+    if crate::handlers::sso::required_for(state.db.pool(), auth.user.id, &auth.user.email)
+        .await
+        .is_some()
+    {
+        return back_to_login(Failure::SsoRequired, HeaderMap::new());
+    }
     crate::services::audit::Event::by_user(auth.user.id, "auth.login")
         .detail("method", provider.clone())
         .record(state.db.pool())
