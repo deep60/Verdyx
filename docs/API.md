@@ -15,6 +15,7 @@ Rather than calling the routes by hand, you can use:
 - **The Python SDK**: [`sdk/python`](../sdk/python)
 - **The GitHub Action**: [`action`](../action)
 - **Webhooks**, to have results pushed to you: [webhooks.md](api/webhooks.md)
+- **Splunk and Microsoft Sentinel**, to send events into your SIEM: [splunk.md](integrations/splunk.md), [sentinel.md](integrations/sentinel.md)
 - **Similarity search**, to find variants of a file by fuzzy hash: [similarity.md](api/similarity.md)
 
 They all scan the same way:

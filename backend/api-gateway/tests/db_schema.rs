@@ -399,3 +399,73 @@ async fn similar_files_only_come_from_uploads_the_caller_may_read() {
 
     tx.rollback().await.expect("rollback");
 }
+
+#[tokio::test]
+async fn siem_destinations_keep_their_kind_and_hide_their_credential() {
+    let Some(database_url) = test_database_url() else {
+        eprintln!("skipping api-gateway schema test; API_GATEWAY_DATABASE_URL not set");
+        return;
+    };
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await
+        .expect("connect to test database");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("migrations apply cleanly");
+
+    let mut tx = pool.begin().await.expect("begin tx");
+    let user = Uuid::new_v4();
+
+    // Existing webhooks become kind 'webhook' with no settings.
+    let plain: (String, serde_json::Value, bool) = sqlx::query_as(
+        "INSERT INTO webhooks (user_id, url, events) VALUES ($1, 'https://hooks.example.com/x', '{*}') \
+         RETURNING kind, config, has_credential",
+    )
+    .bind(user)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(plain, ("webhook".into(), serde_json::json!({}), false));
+
+    let splunk: (String, bool) = sqlx::query_as(
+        "INSERT INTO webhooks (user_id, url, events, kind, config, credential) \
+         VALUES ($1, 'https://splunk.example.com:8088', '{*}', 'splunk', '{\"index\":\"sec\"}', 'v1:sealed') \
+         RETURNING kind, has_credential",
+    )
+    .bind(user)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(splunk, ("splunk".into(), true));
+
+    // has_credential follows the column; it can't be written directly.
+    let cleared: bool = sqlx::query_scalar(
+        "UPDATE webhooks SET credential = NULL WHERE user_id = $1 AND kind = 'splunk' RETURNING has_credential",
+    )
+    .bind(user)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert!(!cleared);
+
+    sqlx::query("SAVEPOINT bad_kind")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let refused = sqlx::query(
+        "INSERT INTO webhooks (user_id, url, events, kind) VALUES ($1, 'https://x.example.com', '{*}', 'syslog')",
+    )
+    .bind(user)
+    .execute(&mut *tx)
+    .await;
+    assert!(refused.is_err(), "unknown kinds are refused");
+    sqlx::query("ROLLBACK TO SAVEPOINT bad_kind")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    tx.rollback().await.unwrap();
+}

@@ -7,7 +7,33 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::services::siem;
 use crate::AppState;
+
+/// A refusal with a reason the website can show.
+type ApiError = (StatusCode, Json<serde_json::Value>);
+
+fn bad(msg: impl Into<String>) -> ApiError {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": msg.into() })),
+    )
+}
+
+fn internal(e: sqlx::Error) -> ApiError {
+    tracing::error!("DB error in webhooks: {}", e);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({ "error": "something went wrong" })),
+    )
+}
+
+fn not_found() -> ApiError {
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({ "error": "no such destination" })),
+    )
+}
 
 /// Webhook configuration
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -26,6 +52,14 @@ pub struct Webhook {
     pub last_triggered_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// `webhook`, `splunk` or `sentinel`.
+    pub kind: String,
+    /// Destination settings (see `services::siem::validate`).
+    pub config: serde_json::Value,
+    /// Sealed; never sent back.
+    #[serde(skip_serializing)]
+    pub credential: Option<String>,
+    pub has_credential: bool,
 }
 
 /// Register webhook request
@@ -35,6 +69,11 @@ pub struct RegisterWebhookRequest {
     pub events: Vec<String>,
     pub description: Option<String>,
     pub headers: Option<serde_json::Value>,
+    /// `webhook` (default), `splunk` or `sentinel`.
+    pub kind: Option<String>,
+    pub config: Option<serde_json::Value>,
+    /// The HEC token (Splunk) or the app's client key (Sentinel).
+    pub credential: Option<String>,
 }
 
 /// Update webhook request
@@ -45,6 +84,10 @@ pub struct UpdateWebhookRequest {
     pub is_active: Option<bool>,
     pub description: Option<String>,
     pub headers: Option<serde_json::Value>,
+    /// Replaces the settings when given.
+    pub config: Option<serde_json::Value>,
+    /// Replaces the stored credential when given and not empty.
+    pub credential: Option<String>,
 }
 
 /// Webhook delivery log
@@ -130,10 +173,34 @@ pub async fn create_webhook(
     State(state): State<AppState>,
     claims: crate::middleware::auth::Claims,
     Json(payload): Json<RegisterWebhookRequest>,
-) -> Result<Json<Webhook>, StatusCode> {
-    if !is_safe_webhook_url(&payload.url) || !events_ok(&payload.events) {
-        return Err(StatusCode::BAD_REQUEST);
+) -> Result<Json<Webhook>, ApiError> {
+    let kind = payload.kind.as_deref().unwrap_or(siem::KIND_WEBHOOK);
+    if !siem::is_kind(kind) {
+        return Err(bad("unknown destination type"));
     }
+    if !events_ok(&payload.events) {
+        return Err(bad("choose at least one event"));
+    }
+    let credential = payload
+        .credential
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+    if credential.is_some_and(|c| !siem::credential_ok(c)) {
+        return Err(bad("that credential doesn't look right"));
+    }
+    let config = siem::validate(
+        kind,
+        &payload.url,
+        payload.config.as_ref().unwrap_or(&serde_json::Value::Null),
+        credential.is_some(),
+    )
+    .map_err(bad)?;
+    let sealed = match kind {
+        siem::KIND_WEBHOOK => None,
+        _ => credential
+            .map(|c| siem::CredentialKey::from_config(&state.config.security.jwt_secret).seal(c)),
+    };
 
     // Generate a random secret for HMAC signing
     let secret = format!(
@@ -144,8 +211,8 @@ pub async fn create_webhook(
     let user_id = claims.sub;
 
     let webhook = sqlx::query_as::<_, Webhook>(
-        "INSERT INTO webhooks (id, user_id, url, events, secret, description, headers)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "INSERT INTO webhooks (id, user_id, url, events, secret, description, headers, kind, config, credential)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *",
     )
     .bind(webhook_id)
@@ -154,13 +221,17 @@ pub async fn create_webhook(
     .bind(&payload.events)
     .bind(&secret)
     .bind(&payload.description)
-    .bind(&payload.headers)
+    .bind(if kind == siem::KIND_WEBHOOK {
+        payload.headers.clone()
+    } else {
+        None
+    })
+    .bind(kind)
+    .bind(&config)
+    .bind(&sealed)
     .fetch_one(state.db.pool())
     .await
-    .map_err(|e| {
-        tracing::error!("DB error creating webhook: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(internal)?;
 
     Ok(Json(webhook))
 }
@@ -229,17 +300,42 @@ pub async fn update_webhook(
     claims: crate::middleware::auth::Claims,
     Path(webhook_id): Path<Uuid>,
     Json(payload): Json<UpdateWebhookRequest>,
-) -> Result<Json<Webhook>, StatusCode> {
-    if let Some(ref u) = payload.url {
-        if !is_safe_webhook_url(u) {
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    }
+) -> Result<Json<Webhook>, ApiError> {
+    let current =
+        sqlx::query_as::<_, Webhook>("SELECT * FROM webhooks WHERE id = $1 AND user_id = $2")
+            .bind(webhook_id)
+            .bind(claims.sub)
+            .fetch_optional(state.db.pool())
+            .await
+            .map_err(internal)?
+            .ok_or_else(not_found)?;
     if let Some(ref events) = payload.events {
         if !events_ok(events) {
-            return Err(StatusCode::BAD_REQUEST);
+            return Err(bad("choose at least one event"));
         }
     }
+    let credential = payload
+        .credential
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+    if credential.is_some_and(|c| !siem::credential_ok(c)) {
+        return Err(bad("that credential doesn't look right"));
+    }
+    // Check the destination as it will be after the change.
+    let url = payload.url.clone().unwrap_or_else(|| current.url.clone());
+    let config = siem::validate(
+        &current.kind,
+        &url,
+        payload.config.as_ref().unwrap_or(&current.config),
+        credential.is_some() || current.has_credential,
+    )
+    .map_err(bad)?;
+    let sealed = match current.kind.as_str() {
+        siem::KIND_WEBHOOK => None,
+        _ => credential
+            .map(|c| siem::CredentialKey::from_config(&state.config.security.jwt_secret).seal(c)),
+    };
 
     // Build dynamic UPDATE query
     let webhook = sqlx::query_as::<_, Webhook>(
@@ -249,6 +345,8 @@ pub async fn update_webhook(
             is_active = COALESCE($4, is_active),
             description = COALESCE($5, description),
             headers = COALESCE($6, headers),
+            config = $8,
+            credential = COALESCE($9, credential),
             updated_at = NOW()
          WHERE id = $1 AND user_id = $7
          RETURNING *",
@@ -258,15 +356,18 @@ pub async fn update_webhook(
     .bind(&payload.events)
     .bind(payload.is_active)
     .bind(&payload.description)
-    .bind(&payload.headers)
+    .bind(if current.kind == siem::KIND_WEBHOOK {
+        payload.headers.clone()
+    } else {
+        None
+    })
     .bind(claims.sub)
+    .bind(&config)
+    .bind(&sealed)
     .fetch_optional(state.db.pool())
     .await
-    .map_err(|e| {
-        tracing::error!("DB error updating webhook: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
-    .ok_or(StatusCode::NOT_FOUND)?;
+    .map_err(internal)?
+    .ok_or_else(not_found)?;
 
     Ok(Json(webhook))
 }
@@ -328,10 +429,15 @@ pub async fn test_webhook(
     use crate::services::webhook_delivery as wd;
     let id = Uuid::new_v4();
     let now = chrono::Utc::now();
+    let key = siem::CredentialKey::from_config(&state.config.security.jwt_secret);
     let target = wd::Target {
         url: webhook.url.clone(),
         secret: webhook.secret.clone(),
         headers: webhook.headers.clone(),
+        kind: webhook.kind.clone(),
+        config: webhook.config.clone(),
+        credential: webhook.credential.as_deref().and_then(|c| key.open(c)),
+        sentinel_login: None,
     };
     let result = wd::send(
         &wd::client(false),
@@ -436,4 +542,39 @@ pub async fn list_available_events(
             })
             .collect(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_stored_credential_is_never_serialised() {
+        let now = Utc::now();
+        let w = Webhook {
+            id: Uuid::nil(),
+            user_id: Uuid::nil(),
+            url: "https://splunk.example.com:8088".into(),
+            events: vec!["*".into()],
+            secret: None,
+            is_active: true,
+            description: None,
+            headers: None,
+            retry_max_attempts: None,
+            retry_interval_seconds: None,
+            exponential_backoff: None,
+            last_triggered_at: None,
+            created_at: now,
+            updated_at: now,
+            kind: "splunk".into(),
+            config: serde_json::json!({"index": "sec"}),
+            credential: Some("v1:sealed".into()),
+            has_credential: true,
+        };
+        let v = serde_json::to_value(&w).unwrap();
+        assert!(v.get("credential").is_none());
+        assert_eq!(v["has_credential"], true);
+        assert_eq!(v["kind"], "splunk");
+        assert!(!v.to_string().contains("v1:sealed"));
+    }
 }

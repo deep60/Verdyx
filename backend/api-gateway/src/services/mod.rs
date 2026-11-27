@@ -9,4 +9,5 @@ pub mod event_bus;
 pub mod proxy_service;
 pub mod redis;
 pub mod retention;
+pub mod siem;
 pub mod webhook_delivery;

@@ -21,6 +21,22 @@ The response includes `secret` (`whsec_…`). Keep it somewhere safe; it's how y
 
 The **Test** button, or `POST /api/v1/webhooks/{id}/test {"event_type": "webhook.test"}`, sends a signed test delivery straight away and returns what your endpoint answered.
 
+## Splunk and Microsoft Sentinel
+
+A webhook can send straight into a SIEM instead of to your own URL. Set `kind`:
+
+| `kind` | Sends to | Needs |
+|---|---|---|
+| `webhook` | Your URL, signed (the default) | `url` |
+| `splunk` | Splunk's HTTP Event Collector, one Splunk event per Verdyx event | `url` (the HEC address), `credential` (the HEC token); optional `config.index`, `config.sourcetype` |
+| `sentinel` | A Sentinel custom table through the Logs Ingestion API | `url` (the data collection endpoint), `credential` (the Entra app's client secret), `config.tenantId`, `config.clientId`, `config.dcrImmutableId`; optional `config.streamName` |
+
+`credential` is stored encrypted and never returned: responses carry
+`has_credential` instead. To replace it, send a new one with
+`PUT /api/v1/webhooks/{id}`. Events, retries and the delivery log are the
+same as for webhooks. Setup guides: [Splunk](../integrations/splunk.md),
+[Microsoft Sentinel](../integrations/sentinel.md).
+
 ## Events
 
 | Event | When | `data` |
