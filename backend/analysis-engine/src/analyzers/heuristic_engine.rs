@@ -348,6 +348,14 @@ impl HeuristicEngine {
             PS,
         );
         add(
+            "SCRIPT_108",
+            "Loads a program from memory",
+            "Decodes or unpacks data and runs it as a .NET assembly without writing it to disk",
+            r"(?is)(FromBase64String|GZipStream|DeflateStream).*(Reflection\.Assembly\]::Load\(|\]::Load\(\s*\$|\.EntryPoint\.Invoke|CurrentDomain\.Load\()|(Reflection\.Assembly\]::Load\(|\]::Load\(\s*\$|\.EntryPoint\.Invoke|CurrentDomain\.Load\().*(FromBase64String|GZipStream|DeflateStream)",
+            HeuristicSeverity::Medium,
+            PS,
+        );
+        add(
             "SCRIPT_106",
             "Defender tampering",
             "Turns off Microsoft Defender or excludes paths from it",
