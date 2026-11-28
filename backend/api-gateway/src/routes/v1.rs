@@ -7,7 +7,7 @@ use axum::{
 use crate::{
     handlers::{
         analysis, auth, bounty, chain, consensus_proxy, engines, health, oauth, organization,
-        reputation, submission, user, web_intel, webhook,
+        reputation, submission, user, web_intel, web_recon, webhook,
     },
     middleware::{auth as auth_mw, rate_limiter},
     AppState,
@@ -134,6 +134,7 @@ fn analysis_routes(state: AppState) -> Router<AppState> {
         ));
     let site_checks = Router::new()
         .route("/web-intel", get(web_intel::inspect_url_web_intel))
+        .route("/web-recon", get(web_recon::inspect_url_web_recon))
         .route_layer(middleware::from_fn_with_state(
             state,
             rate_limiter::site_check_rate_limit_middleware,

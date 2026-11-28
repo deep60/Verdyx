@@ -32,6 +32,7 @@ pub mod submission;
 pub mod threat_feed;
 pub mod user;
 pub mod web_intel;
+pub mod web_recon;
 pub mod webhook;
 pub mod websocket;
 

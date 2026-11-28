@@ -45,8 +45,9 @@ const DEV_SURFACES = [
 const RECON: { name: string; detail: string }[] = [
   { name: "Network and host", detail: "IP, ASN, open ports, co-hosted names, redirect chain." },
   { name: "TLS and headers", detail: "Certificate, grade, HSTS, CSP, WAF, mixed content." },
-  { name: "DNS and mail", detail: "Records, DNSSEC, SPF, DKIM, DMARC, RDAP, crt.sh." },
+  { name: "DNS and mail", detail: "Records, DNSSEC, SPF, DKIM, DMARC, RDAP." },
   { name: "Page and threats", detail: "Forms, scripts, trackers, blocklists, favicon hash." },
+  { name: "Bug bounty recon", detail: "Subdomains, takeovers, archived URLs, JS endpoints, exposed keys." },
 ];
 
 const STEPS = [

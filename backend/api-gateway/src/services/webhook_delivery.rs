@@ -182,15 +182,35 @@ pub fn client(allow_private: bool) -> reqwest::Client {
 
 /// The same client with a longer limit per request, for downloads.
 pub fn client_with_timeout(allow_private: bool, timeout: Duration) -> reqwest::Client {
-    reqwest::Client::builder()
-        .dns_resolver(Arc::new(PublicOnly { allow_private }))
+    public_client_builder(allow_private)
         .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
         .timeout(timeout)
         .connect_timeout(CONNECT_TIMEOUT)
         .user_agent(USER_AGENT)
         .build()
         .expect("webhook HTTP client")
+}
+
+/// A client builder that only connects to public addresses and uses no
+/// proxy. Callers add their own timeout, user agent and redirect policy;
+/// use [`safe_redirects`] if redirects are followed.
+pub fn public_client_builder(allow_private: bool) -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .dns_resolver(Arc::new(PublicOnly { allow_private }))
+        .no_proxy()
+}
+
+/// Follows up to `max` redirects, stopping at any that [`check_url`] refuses.
+/// The resolver already refuses names that resolve privately; this also
+/// catches redirects to a private address written as an IP.
+pub fn safe_redirects(max: usize) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= max || check_url(attempt.url().as_str()).is_err() {
+            attempt.stop()
+        } else {
+            attempt.follow()
+        }
+    })
 }
 
 // ─── What is sent ─────────────────────────────────────────────────────────
