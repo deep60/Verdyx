@@ -104,6 +104,14 @@ marketplace moved on-chain. They are read-only:
 - `GET /analysis/by-hash/:file_hash`
 - `POST /analysis/submit`
 - `POST /analysis/:analysis_id/dispute`
+- `GET /analysis/web-intel?url=…`: website checks (DNS, mail, TLS, headers, ports, WHOIS, the page).
+- `GET /analysis/web-recon?url=…`: recon for bug bounty work, from public sources:
+  - `subdomains`: from certificate transparency logs (Cert Spotter, with crt.sh as a backup); the first 150 are resolved, each with `status` `live`, `no-address`, `nxdomain`, `error` or `unchecked`, and any CNAME.
+  - `takeovers.candidates`: a CNAME to a service such as GitHub Pages, Heroku or S3 where nothing is claimed, with `level` `likely` or `check` and the evidence.
+  - `archivedUrls`: URLs from the Wayback Machine and AlienVault OTX, sorted into `withParams`, `paramNames`, `interestingPaths`, `interestingFiles`, `javascriptFiles` and `all`.
+  - `javascript`: `endpoints` found in the page and up to 8 of the site's own scripts, and `exposedKeys` (masked).
+
+  A source that couldn't be reached has `available: false` and an `error`, so a failure is never reported as "nothing found". Results are cached for six hours per domain. Both routes share the site-check rate limit, and neither will connect to a private or internal address.
 
 ## Reputation Routes
 

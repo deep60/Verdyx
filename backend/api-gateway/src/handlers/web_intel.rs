@@ -19,6 +19,12 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
+use super::web_recon::{
+    certificate_for_host, enumerate_subdomains, name_covers, registrable_domain,
+};
+use crate::services::webhook_delivery::{
+    check_url, is_public, public_client_builder, safe_redirects,
+};
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -26,20 +32,14 @@ pub struct WebIntelQuery {
     pub url: String,
 }
 
-fn is_private_or_local_host(host: &str) -> bool {
-    let lower = host.trim().to_lowercase();
-    lower == "localhost"
-        || lower == "0.0.0.0"
-        || lower == "::1"
-        || lower.starts_with("127.")
-        || lower.starts_with("10.")
-        || lower.starts_with("192.168.")
-        || lower.starts_with("169.254.")
-        || lower.ends_with(".internal")
-        || lower.ends_with(".local")
-}
+const USER_AGENT: &str = "Mozilla/5.0 (compatible; Verdyx-Recon/3.0; +https://verdyx.dev)";
 
-fn normalize_target_url(raw: &str) -> Result<(reqwest::Url, String, String), StatusCode> {
+/// The URL to inspect, its host and origin. Private, reserved and internal
+/// targets are refused here; names are checked again when connecting, since
+/// they can resolve anywhere.
+pub(crate) fn normalize_target_url(
+    raw: &str,
+) -> Result<(reqwest::Url, String, String), StatusCode> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
@@ -49,14 +49,14 @@ fn normalize_target_url(raw: &str) -> Result<(reqwest::Url, String, String), Sta
     } else {
         format!("https://{trimmed}")
     };
+    check_url(&with_scheme).map_err(|_| StatusCode::BAD_REQUEST)?;
     let parsed = reqwest::Url::parse(&with_scheme).map_err(|_| StatusCode::BAD_REQUEST)?;
     let host = parsed
         .host_str()
         .ok_or(StatusCode::BAD_REQUEST)?
+        .trim_start_matches('[')
+        .trim_end_matches(']')
         .to_lowercase();
-    if is_private_or_local_host(&host) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
     let origin = format!(
         "{}://{}",
         parsed.scheme(),
@@ -65,21 +65,19 @@ fn normalize_target_url(raw: &str) -> Result<(reqwest::Url, String, String), Sta
     Ok((parsed, host, origin))
 }
 
-/// Extract registrable root domain (e.g., `sub.example.co.uk` -> `example.co.uk` or `www.google.com` -> `google.com`)
-fn extract_root_domain(host: &str) -> String {
-    let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() <= 2 {
-        return host.to_string();
-    }
-    let second_level_tlds = ["co", "com", "org", "net", "gov", "edu", "ac"];
-    if parts.len() >= 3
-        && parts.last().is_some_and(|last| last.len() == 2)
-        && second_level_tlds.contains(&parts[parts.len() - 2])
-    {
-        parts[parts.len() - 3..].join(".")
-    } else {
-        parts[parts.len() - 2..].join(".")
-    }
+/// A client for the target: public addresses only, redirects checked.
+fn target_client(timeout: Duration, follow_redirects: bool) -> Result<reqwest::Client, StatusCode> {
+    public_client_builder(false)
+        .redirect(if follow_redirects {
+            safe_redirects(5)
+        } else {
+            reqwest::redirect::Policy::none()
+        })
+        .user_agent(USER_AGENT)
+        .timeout(timeout)
+        .connect_timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 /// `GET /api/v1/submissions/:submission_id/web-intel`
@@ -157,28 +155,27 @@ fn extract_doh_answers(doh: &Value) -> Vec<Value> {
 pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     let started = Instant::now();
     let (parsed_url, host, origin) = normalize_target_url(raw_url)?;
-    let root_domain = extract_root_domain(&host);
+    let root_domain = registrable_domain(&host);
     let full_url_str = parsed_url.to_string();
 
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Verdyx-Recon/2.1")
-        .timeout(Duration::from_secs(7))
-        .build()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let client = target_client(Duration::from_secs(7), true)?;
+    let no_redirect_client = target_client(Duration::from_secs(4), false)?;
 
-    let no_redirect_client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .user_agent("Verdyx-Recon/2.1")
-        .timeout(Duration::from_secs(4))
-        .build()
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    // 1. Resolve IP addresses (IPv4 & IPv6)
+    // 1. Resolve IP addresses (IPv4 & IPv6). A name that only resolves to
+    // private addresses is refused, the same as a private IP.
     let port = parsed_url.port_or_known_default().unwrap_or(443);
-    let resolved_addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
+    let all_addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port))
         .await
         .map(|iter| iter.collect())
         .unwrap_or_default();
+    let resolved_addrs: Vec<std::net::SocketAddr> = all_addrs
+        .iter()
+        .copied()
+        .filter(|a| is_public(a.ip()))
+        .collect();
+    if !all_addrs.is_empty() && resolved_addrs.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let mut ipv4_list = Vec::new();
     let mut ipv6_list = Vec::new();
@@ -207,12 +204,21 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     // 2. Run external & direct probes concurrently
     let redirect_fut = trace_redirects(&no_redirect_client, &full_url_str);
     let page_fut = fetch_main_page(&client, &full_url_str);
-    let geo_ip_fut = fetch_json(&client, format!("https://ipwho.is/{primary_ip}"), 4);
-    let shodan_fut = fetch_json(
-        &client,
-        format!("https://internetdb.shodan.io/{primary_ip}"),
-        4,
-    );
+    // With no address there is nothing to look up: an empty address would
+    // make these services describe Verdyx's own server instead.
+    let ip_lookup = |url: String| {
+        let client = client.clone();
+        let known = !primary_ip.is_empty();
+        async move {
+            if known {
+                fetch_json(&client, url, 4).await
+            } else {
+                None
+            }
+        }
+    };
+    let geo_ip_fut = ip_lookup(format!("https://ipwho.is/{primary_ip}"));
+    let shodan_fut = ip_lookup(format!("https://internetdb.shodan.io/{primary_ip}"));
     let rdap_fut = fetch_json(&client, format!("https://rdap.org/domain/{root_domain}"), 5);
     let wayback_fut = fetch_json(
         &client,
@@ -222,14 +228,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         ),
         4,
     );
-    let crt_fut = fetch_json(
-        &client,
-        format!(
-            "https://crt.sh/?q={}&output=json",
-            urlencoding::encode(&root_domain)
-        ),
-        5,
-    );
+    let crt_fut = enumerate_subdomains(&root_domain);
     let hibp_fut = fetch_json(
         &client,
         format!(
@@ -260,7 +259,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         shodan_json,
         rdap_json,
         wayback_json,
-        crt_json,
+        enumeration,
         hibp_json,
         doh_a,
         doh_aaaa,
@@ -296,6 +295,19 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         sitemap_fut,
         sectxt_fut,
     );
+
+    // A lookup that failed is reported as unavailable, never as "nothing found".
+    let geo_json = geo_json.filter(|g| g.get("success").and_then(|v| v.as_bool()) != Some(false));
+    let geo_available = geo_json.is_some();
+    let geo_json = geo_json.unwrap_or_else(|| json!({}));
+    let shodan_available = shodan_json.is_some();
+    let shodan_json = shodan_json.unwrap_or_else(|| json!({}));
+    let rdap_available = rdap_json.is_some();
+    let rdap_json = rdap_json.unwrap_or_else(|| json!({}));
+    let wayback_available = wayback_json.is_some();
+    let wayback_json = wayback_json.unwrap_or_else(|| json!({}));
+    let hibp_available = hibp_json.is_some();
+    let hibp_json = hibp_json.unwrap_or_else(|| json!([]));
 
     // Unpack HTTP response details
     let (
@@ -513,28 +525,19 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     .await;
 
     // ── Certificate Transparency (SSL Cert & Subdomains) ──────────────────
-    let (ssl_cert_info, subdomains_list) = parse_crt_sh(
-        &crt_json,
-        &host,
-        &root_domain,
-        parsed_url.scheme() == "https",
-    );
+    let ssl_cert_info = ssl_certificate(&enumeration, &host);
+    const SUBDOMAINS_SHOWN: usize = 200;
 
     // ── RDAP / WHOIS & Domain Info ────────────────────────────────────────
     let (whois_info, domain_info) = parse_rdap(&rdap_json, &root_domain);
 
     // ── Shodan InternetDB (Open Ports, Associated Hosts, Vulnerabilities) ─
+    // No guessed ports: if Shodan has nothing, the list is empty.
     let open_ports: Vec<u64> = shodan_json
         .get("ports")
         .and_then(|p| p.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_u64()).collect())
-        .unwrap_or_else(|| {
-            if parsed_url.scheme() == "https" {
-                vec![80, 443]
-            } else {
-                vec![80]
-            }
-        });
+        .unwrap_or_default();
     let associated_hosts: Vec<String> = shodan_json
         .get("hostnames")
         .and_then(|h| h.as_array())
@@ -600,6 +603,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     // ── Archive History (Wayback Machine) ─────────────────────────────────
     let closest = &wayback_json["archived_snapshots"]["closest"];
     let archive_info = json!({
+        "lookupAvailable": wayback_available,
         "available": closest.get("available").and_then(|v| v.as_bool()).unwrap_or(false),
         "lastSnapshotUrl": closest.get("url").and_then(|v| v.as_str()),
         "timestamp": closest.get("timestamp").and_then(|v| v.as_str()),
@@ -652,8 +656,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     let isp_name = geo_json
         .get("connection")
         .and_then(|c| c.get("isp"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("Transit Provider");
+        .and_then(|v| v.as_str());
     let asn_num = geo_json
         .get("connection")
         .and_then(|c| c.get("asn"))
@@ -662,20 +665,10 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     let org_name = geo_json
         .get("connection")
         .and_then(|c| c.get("org"))
-        .and_then(|v| v.as_str())
-        .unwrap_or(&server_banner);
-    let country = geo_json
-        .get("country")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Unknown");
-    let city = geo_json
-        .get("city")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Unknown");
-    let region = geo_json
-        .get("region")
-        .and_then(|v| v.as_str())
-        .unwrap_or("Unknown");
+        .and_then(|v| v.as_str());
+    let country = geo_json.get("country").and_then(|v| v.as_str());
+    let city = geo_json.get("city").and_then(|v| v.as_str());
+    let region = geo_json.get("region").and_then(|v| v.as_str());
 
     let tls_enabled = final_url.starts_with("https://") || parsed_url.scheme() == "https";
 
@@ -701,13 +694,15 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
         // 2. Server Location
         "serverLocation": {
+            "available": geo_available,
+            "source": "ipwho.is",
             "country": country,
             "countryCode": geo_json.get("country_code").and_then(|v| v.as_str()).unwrap_or(""),
             "region": region,
             "city": city,
             "latitude": geo_json.get("latitude").and_then(|v| v.as_f64()),
             "longitude": geo_json.get("longitude").and_then(|v| v.as_f64()),
-            "timezone": geo_json.get("timezone").and_then(|t| t.get("id")).and_then(|v| v.as_str()).unwrap_or("UTC"),
+            "timezone": geo_json.get("timezone").and_then(|t| t.get("id")).and_then(|v| v.as_str()),
             "isp": isp_name,
             "org": org_name,
         },
@@ -718,7 +713,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
             "statusCode": status_code,
             "responseTimeMs": response_time_ms,
             "contentLengthBytes": page_bytes,
-            "contentType": headers_map.get("content-type").cloned().unwrap_or_else(|| "text/html".to_string()),
+            "contentType": headers_map.get("content-type").cloned(),
         },
 
         // 4. Server Info
@@ -734,6 +729,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
         // 5. Open Ports
         "openPorts": {
+            "available": shodan_available,
             "ports": open_ports,
             "totalOpen": open_ports.len(),
             "source": "Shodan InternetDB",
@@ -741,15 +737,17 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
         // 6. Associated Hosts
         "associatedHosts": {
+            "available": shodan_available,
             "hostnames": associated_hosts,
             "count": associated_hosts.len(),
         },
 
         // 7. Vulnerabilities
         "vulnerabilities": {
+            "available": shodan_available,
             "cves": vulns,
             "count": vulns.len(),
-            "status": if vulns.is_empty() { "No known CVEs linked on Shodan InternetDB" } else { "CVEs identified on host services" },
+            "status": if !shodan_available { "Shodan InternetDB was unavailable" } else if vulns.is_empty() { "No known CVEs linked on Shodan InternetDB" } else { "CVEs identified on host services" },
         },
 
         // 8. Redirect Chain
@@ -789,7 +787,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
         // 13. Firewall
         "firewall": {
             "detected": !detected_wafs.is_empty(),
-            "providers": if detected_wafs.is_empty() { vec!["None / Direct Origin"] } else { detected_wafs },
+            "providers": if detected_wafs.is_empty() { vec!["None detected"] } else { detected_wafs },
             "serverHeader": server_banner,
         },
 
@@ -871,9 +869,12 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
         // 26. Subdomains
         "subdomains": {
-            "count": subdomains_list.len(),
-            "items": subdomains_list,
-            "source": "Certificate Transparency (crt.sh)",
+            "available": enumeration.available,
+            "count": enumeration.total,
+            "items": enumeration.subdomains.iter().take(SUBDOMAINS_SHOWN).collect::<Vec<_>>(),
+            "truncated": enumeration.total > SUBDOMAINS_SHOWN,
+            "source": enumeration.source,
+            "error": enumeration.error,
         },
 
         // 27. Crawl Rules
@@ -925,6 +926,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
         // 38. Archive History
         "archiveHistory": archive_info,
+        "whoisAvailable": rdap_available,
 
         // 41. Malware & Phishing
         "malwarePhishing": {
@@ -937,6 +939,7 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
 
         // 42. Data Breaches
         "dataBreaches": {
+            "available": hibp_available,
             "count": breaches_list.len(),
             "breaches": breaches_list,
             "source": "Have I Been Pwned (Domain Breach Index)",
@@ -967,18 +970,22 @@ pub async fn run_full_web_intel(raw_url: &str) -> Result<Value, StatusCode> {
     }))
 }
 
-async fn fetch_json(client: &reqwest::Client, url: String, timeout_secs: u64) -> Value {
-    match client
+/// The JSON body, `{}` when the service says it has no record (404), or
+/// `None` when the lookup failed, so a failure is never shown as "nothing".
+async fn fetch_json(client: &reqwest::Client, url: String, timeout_secs: u64) -> Option<Value> {
+    let resp = client
         .get(&url)
         .timeout(Duration::from_secs(timeout_secs))
         .send()
         .await
-    {
-        Ok(resp) if resp.status().is_success() => {
-            resp.json::<Value>().await.unwrap_or_else(|_| json!({}))
-        }
-        _ => json!({}),
+        .ok()?;
+    if resp.status() == StatusCode::NOT_FOUND {
+        return Some(json!({}));
     }
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json::<Value>().await.ok()
 }
 
 async fn fetch_text(client: &reqwest::Client, url: String, timeout_secs: u64) -> Option<String> {
@@ -999,6 +1006,16 @@ async fn trace_redirects(client: &reqwest::Client, start_url: &str) -> Vec<Value
 
     for step in 1..=6 {
         let hop_start = Instant::now();
+        if let Err(why) = check_url(&current) {
+            hops.push(json!({
+                "step": step,
+                "url": current,
+                "statusCode": 0,
+                "error": format!("Not followed: {why}"),
+                "latencyMs": 0,
+            }));
+            break;
+        }
         match client.get(&current).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
@@ -1287,22 +1304,54 @@ fn analyze_html_document(
     if let Some(pwr) = headers.get("x-powered-by") {
         stack.push(json!({ "name": pwr, "category": "Runtime" }));
     }
-    for (tech, cat, marker) in [
-        ("Next.js", "Frontend Framework", "_next/static"),
-        ("React", "UI Library", "react"),
-        ("Vue.js", "Frontend Framework", "__vue"),
-        ("Nuxt", "Frontend Framework", "_nuxt/"),
-        ("Angular", "Frontend Framework", "ng-version"),
-        ("Svelte", "Frontend Framework", "svelte-"),
-        ("WordPress", "CMS", "wp-content"),
-        ("Shopify", "E-Commerce", "cdn.shopify.com"),
-        ("Webflow", "CMS", "webflow.com"),
-        ("Tailwind CSS", "CSS Framework", "tailwind"),
-        ("Bootstrap", "CSS Framework", "bootstrap"),
-        ("jQuery", "JavaScript Library", "jquery"),
-        ("Cloudflare", "CDN & Edge", "cloudflare"),
+    // Markers specific enough not to match ordinary page text.
+    for (tech, cat, markers) in [
+        (
+            "Next.js",
+            "Frontend Framework",
+            &["/_next/static", "__next_data__"][..],
+        ),
+        (
+            "React",
+            "UI Library",
+            &["data-reactroot", "react-dom", "__react"][..],
+        ),
+        (
+            "Vue.js",
+            "Frontend Framework",
+            &["data-v-app", "__vue", "vue.runtime"][..],
+        ),
+        ("Nuxt", "Frontend Framework", &["/_nuxt/", "__nuxt"][..]),
+        ("Angular", "Frontend Framework", &["ng-version="][..]),
+        (
+            "Svelte",
+            "Frontend Framework",
+            &["class=\"svelte-", "__sveltekit"][..],
+        ),
+        ("WordPress", "CMS", &["/wp-content/", "/wp-includes/"][..]),
+        ("Shopify", "E-Commerce", &["cdn.shopify.com"][..]),
+        (
+            "Webflow",
+            "CMS",
+            &["data-wf-site", "assets.website-files.com"][..],
+        ),
+        (
+            "Bootstrap",
+            "CSS Framework",
+            &["bootstrap.min.css", "bootstrap.min.js", "bootstrap.bundle"][..],
+        ),
+        (
+            "jQuery",
+            "JavaScript Library",
+            &["jquery.min.js", "jquery-3.", "jquery.js"][..],
+        ),
+        (
+            "Cloudflare",
+            "CDN & Edge",
+            &["/cdn-cgi/", "cdnjs.cloudflare.com"][..],
+        ),
     ] {
-        if lower_html.contains(marker) {
+        if markers.iter().any(|m| lower_html.contains(m)) {
             stack.push(json!({ "name": tech, "category": cat }));
         }
     }
@@ -1439,54 +1488,31 @@ fn analyze_html_document(
     })
 }
 
-fn parse_crt_sh(
-    crt_json: &Value,
-    host: &str,
-    root_domain: &str,
-    tls_enabled: bool,
-) -> (Value, Vec<String>) {
-    let mut subdomains = HashSet::new();
-    let mut latest_cert: Option<Value> = None;
-
-    if let Some(arr) = crt_json.as_array() {
-        for entry in arr.iter().take(150) {
-            if let Some(name_val) = entry.get("name_value").and_then(|v| v.as_str()) {
-                for line in name_val.lines() {
-                    let clean = line.trim().trim_start_matches("*.").to_lowercase();
-                    if clean.ends_with(root_domain) && !clean.contains(' ') {
-                        subdomains.insert(clean);
-                    }
-                }
-            }
-            if latest_cert.is_none() {
-                latest_cert = Some(json!({
-                    "issuer": entry.get("issuer_name").and_then(|v| v.as_str()).unwrap_or("Let's Encrypt / DigiCert CA"),
-                    "commonName": entry.get("common_name").and_then(|v| v.as_str()).unwrap_or(host),
-                    "notBefore": entry.get("not_before").and_then(|v| v.as_str()).unwrap_or(""),
-                    "notAfter": entry.get("not_after").and_then(|v| v.as_str()).unwrap_or(""),
-                    "serialNumber": entry.get("serial_number").and_then(|v| v.as_str()).unwrap_or(""),
-                    "valid": tls_enabled,
-                }));
-            }
-        }
+/// The host's certificate as recorded in certificate transparency logs, or
+/// `available: false`. Nothing is filled in when the logs have no match.
+fn ssl_certificate(enumeration: &super::web_recon::Enumeration, host: &str) -> Value {
+    match certificate_for_host(&enumeration.certs, host) {
+        Some(cert) => json!({
+            "available": true,
+            "source": enumeration.source,
+            "fromLogs": true,
+            "commonName": cert.names.iter().find(|n| name_covers(n, host)).or(cert.names.first()),
+            "names": cert.names.iter().take(20).collect::<Vec<_>>(),
+            "issuer": cert.issuer,
+            "notBefore": cert.not_before,
+            "notAfter": cert.not_after,
+        }),
+        None => json!({
+            "available": false,
+            "source": enumeration.source,
+            "fromLogs": true,
+            "note": if enumeration.available {
+                "No certificate for this host was found in the certificate transparency logs."
+            } else {
+                "The certificate transparency logs couldn't be reached."
+            },
+        }),
     }
-
-    let cert = latest_cert.unwrap_or_else(|| {
-        json!({
-            "issuer": if tls_enabled { "Verified Public Trust CA" } else { "None (HTTP)" },
-            "commonName": host,
-            "notBefore": "Active",
-            "notAfter": "Valid",
-            "serialNumber": "N/A",
-            "valid": tls_enabled,
-        })
-    });
-
-    let mut sub_vec: Vec<String> = subdomains.into_iter().collect();
-    sub_vec.sort();
-    sub_vec.truncate(50);
-
-    (cert, sub_vec)
 }
 
 fn parse_rdap(rdap: &Value, root_domain: &str) -> (Value, Value) {
@@ -1698,7 +1724,7 @@ fn resolve_same_host(href: &str, origin: &str, host: &str) -> Option<String> {
         return None;
     }
     let resolved_host = absolute.host_str()?.to_lowercase();
-    if resolved_host != host.to_lowercase() || is_private_or_local_host(&resolved_host) {
+    if resolved_host != host.to_lowercase() || check_url(absolute.as_str()).is_err() {
         return None;
     }
     Some(absolute.to_string())
@@ -1821,12 +1847,7 @@ async fn favicon_record(href: Option<&str>, origin: &str, host: &str) -> Value {
         });
     };
 
-    let client = match reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(4))
-        .user_agent("Verdyx-Recon/2.1")
-        .build()
-    {
+    let client = match target_client(Duration::from_secs(4), false) {
         Ok(client) => client,
         Err(_) => {
             return json!({
@@ -1963,6 +1984,79 @@ mod dom_tests {
             .cloned()
             .unwrap_or_default();
         assert_eq!(scripts.len(), 1);
+    }
+
+    #[test]
+    fn private_and_internal_targets_are_refused() {
+        for target in [
+            "http://127.0.0.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.5",
+            "http://[::1]/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://100.64.0.1/",
+            "localhost:8080",
+            "http://db.internal/",
+            "http://user:pass@example.com/",
+            "ftp://example.com/",
+        ] {
+            assert!(
+                normalize_target_url(target).is_err(),
+                "{target} should be refused"
+            );
+        }
+        let (url, host, origin) = normalize_target_url("Example.com/path").unwrap();
+        assert_eq!(url.as_str(), "https://example.com/path");
+        assert_eq!(host, "example.com");
+        assert_eq!(origin, "https://example.com");
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_a_private_address_is_not_followed() {
+        let client = target_client(Duration::from_secs(2), false).unwrap();
+        let hops = trace_redirects(&client, "http://169.254.169.254/latest/meta-data/").await;
+        assert_eq!(hops.len(), 1);
+        assert_eq!(hops[0]["statusCode"], 0);
+        assert!(hops[0]["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("Not followed"));
+    }
+
+    #[test]
+    fn no_certificate_is_invented_when_the_logs_have_none() {
+        let enumeration = crate::handlers::web_recon::Enumeration {
+            source: "Certificate Transparency (Cert Spotter)",
+            available: false,
+            error: Some("timed out".into()),
+            subdomains: vec![],
+            total: 0,
+            certs: vec![],
+        };
+        let cert = ssl_certificate(&enumeration, "example.com");
+        assert_eq!(cert["available"], false);
+        assert!(cert.get("issuer").is_none());
+        assert!(cert["note"]
+            .as_str()
+            .unwrap()
+            .contains("couldn't be reached"));
+    }
+
+    #[test]
+    fn tech_stack_markers_ignore_ordinary_words() {
+        let html = "<html><body><p>We react quickly. Bootstrap your startup. Tailwind ahead. Cloudflare outage news.</p></body></html>";
+        let value = analyze_html_document(html, "news.test", "https://news.test", &HashMap::new());
+        assert_eq!(value["techStack"]["count"], 0);
+        let html = r#"<div id="__next"></div><script src="/_next/static/chunks/main.js"></script><script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>"#;
+        let value = analyze_html_document(html, "app.test", "https://app.test", &HashMap::new());
+        let names: Vec<&str> = value["techStack"]["technologies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .collect();
+        assert!(names.contains(&"Next.js"));
+        assert!(names.contains(&"jQuery"));
     }
 
     #[test]

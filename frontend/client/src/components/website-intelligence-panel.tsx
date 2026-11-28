@@ -1,4 +1,5 @@
 import { fetchLiveWebsiteIntel } from "@/lib/browser-osint";
+import { ReconPanel } from "@/components/recon-panel";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -43,7 +44,7 @@ interface WebsiteIntelligencePanelProps {
   initialUrl?: string;
 }
 
-type CategoryFilter = "all" | "network" | "tls" | "dns" | "http" | "threat";
+type CategoryFilter = "all" | "recon" | "network" | "tls" | "dns" | "http" | "threat";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IntelData = Record<string, any>;
@@ -155,6 +156,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                 {(
                   [
                     ["all", "All Modules (36+)"],
+                    ["recon", "Bug Bounty Recon"],
                     ["network", "Network & Server"],
                     ["tls", "SSL / TLS & Security"],
                     ["dns", "DNS, Mail & WHOIS"],
@@ -271,6 +273,10 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
             </div>
           </div>
 
+          {showCategory("recon", "Recon subdomains takeover wayback endpoints keys") && (
+            <ReconPanel url={intel.finalUrl || intel.targetUrl || intel.host} />
+          )}
+
           {/* 36-Module Grid */}
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {/* 1. IP Info */}
@@ -329,16 +335,21 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                   <CardDescription>Where in the world the server is physically hosted</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
+                  {intel.serverLocation?.available === false && (
+                    <p className="text-xs text-muted-foreground">The location lookup was unavailable.</p>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Country</span>
                     <span className="font-medium">
-                      {intel.serverLocation?.country} ({intel.serverLocation?.countryCode})
+                      {intel.serverLocation?.country
+                        ? `${intel.serverLocation.country} (${intel.serverLocation.countryCode})`
+                        : "—"}
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">City / Region</span>
                     <span>
-                      {intel.serverLocation?.city}, {intel.serverLocation?.region}
+                      {[intel.serverLocation?.city, intel.serverLocation?.region].filter(Boolean).join(", ") || "—"}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -349,7 +360,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Timezone</span>
-                    <span className="font-mono text-xs">{intel.serverLocation?.timezone}</span>
+                    <span className="font-mono text-xs">{intel.serverLocation?.timezone ?? "—"}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -411,11 +422,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">ISP / Network</span>
-                    <span className="truncate max-w-[180px]">{intel.serverInfo?.isp}</span>
+                    <span className="truncate max-w-[180px]">{intel.serverInfo?.isp ?? "—"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Organization</span>
-                    <span className="truncate max-w-[180px]">{intel.serverInfo?.organization}</span>
+                    <span className="truncate max-w-[180px]">{intel.serverInfo?.organization ?? "—"}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -440,7 +451,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                     ))}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Source: {intel.openPorts?.source} ({intel.openPorts?.totalOpen || 0} reachable ports)
+                    {intel.openPorts?.available === false
+                      ? "Shodan InternetDB was unavailable, so no ports are shown."
+                      : (intel.openPorts?.totalOpen || 0) === 0
+                        ? "Shodan has no open ports on record for this IP."
+                        : `Source: ${intel.openPorts?.source} (${intel.openPorts?.totalOpen} ports on record)`}
                   </p>
                 </CardContent>
               </Card>
@@ -465,7 +480,9 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                     ))
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      No additional co-hosted domains reported on this IP.
+                      {intel.associatedHosts?.available === false
+                        ? "Shodan InternetDB was unavailable."
+                        : "No additional co-hosted domains reported on this IP."}
                     </p>
                   )}
                 </CardContent>
@@ -508,16 +525,19 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                     <Lock className="h-4 w-4 text-primary" />
                     SSL Certificate
                   </CardTitle>
-                  <CardDescription>Certificate issuer, subject, validity, and serial</CardDescription>
+                  <CardDescription>The newest certificate for this host in certificate transparency logs</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
+                  {intel.sslCertificate?.available === false && (
+                    <p className="text-xs text-muted-foreground">{intel.sslCertificate?.note}</p>
+                  )}
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Common Name</span>
-                    <span className="font-mono text-xs">{intel.sslCertificate?.commonName}</span>
+                    <span className="text-muted-foreground">Name</span>
+                    <span className="font-mono text-xs">{intel.sslCertificate?.commonName ?? "—"}</span>
                   </div>
                   <div>
                     <span className="text-xs text-muted-foreground block">Issuer</span>
-                    <span className="text-xs font-medium break-all">{intel.sslCertificate?.issuer}</span>
+                    <span className="text-xs font-medium break-all">{intel.sslCertificate?.issuer ?? "—"}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-muted-foreground">Not Before</span>
@@ -991,9 +1011,12 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Layers className="h-4 w-4 text-primary" />
-                    Subdomains ({intel.subdomains?.count || 0})
+                    Subdomains {intel.subdomains?.available === false ? "" : `(${intel.subdomains?.count || 0})`}
                   </CardTitle>
-                  <CardDescription>Subdomains discovered in public Certificate Transparency logs</CardDescription>
+                  <CardDescription>
+                    From {intel.subdomains?.source || "certificate transparency logs"}. Live status, takeovers and
+                    downloads are in Bug Bounty Recon.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-1 text-xs max-h-48 overflow-y-auto">
                   {(intel.subdomains?.items || []).length > 0 ? (
@@ -1003,7 +1026,11 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                       </div>
                     ))
                   ) : (
-                    <p className="text-muted-foreground">No additional CT log subdomains listed.</p>
+                    <p className="text-muted-foreground">
+                      {intel.subdomains?.available === false
+                        ? `The certificate logs couldn't be reached${intel.subdomains?.error ? ` (${intel.subdomains.error})` : ""}, so no subdomains are shown.`
+                        : "No subdomains in the certificate logs."}
+                    </p>
                   )}
                 </CardContent>
               </Card>
@@ -1260,7 +1287,7 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Linked CVEs</span>
                     <Badge variant={(intel.vulnerabilities?.count || 0) === 0 ? "default" : "destructive"}>
-                      {intel.vulnerabilities?.count || 0} CVEs
+                      {intel.vulnerabilities?.available === false ? "—" : `${intel.vulnerabilities?.count || 0} CVEs`}
                     </Badge>
                   </div>
                   <p className="text-muted-foreground">{intel.vulnerabilities?.status}</p>
@@ -1310,7 +1337,9 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                 <CardContent className="space-y-2 text-xs max-h-48 overflow-y-auto">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Recorded Incidents</span>
-                    <Badge variant="outline">{intel.dataBreaches?.count || 0}</Badge>
+                    <Badge variant="outline">
+                      {intel.dataBreaches?.available === false ? "Unavailable" : intel.dataBreaches?.count || 0}
+                    </Badge>
                   </div>
                   {(intel.dataBreaches?.breaches || []).map(
                     (b: { title: string; breachDate: string; pwnCount: number }, idx: number) => (
@@ -1366,7 +1395,13 @@ export function WebsiteIntelligencePanel({ submissionId, initialUrl = "" }: Webs
                 <CardContent className="space-y-2 text-xs">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Wayback Archive</span>
-                    <span>{intel.archiveHistory?.available ? "Archived" : "No Snapshot"}</span>
+                    <span>
+                      {intel.archiveHistory?.lookupAvailable === false
+                        ? "Lookup unavailable"
+                        : intel.archiveHistory?.available
+                          ? "Archived"
+                          : "No Snapshot"}
+                    </span>
                   </div>
                   {intel.archiveHistory?.waybackOverviewUrl && (
                     <a
