@@ -28,6 +28,7 @@ const Login = lazy(() => import("@/pages/login"));
 const Register = lazy(() => import("@/pages/register"));
 const Profile = lazy(() => import("@/pages/profile"));
 const Teams = lazy(() => import("@/pages/teams"));
+const Admin = lazy(() => import("@/pages/admin"));
 const AnalysisDetails = lazy(() => import("@/pages/analysis-details"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const Pricing = lazy(() => import("@/pages/pricing"));
@@ -92,6 +93,11 @@ function Router() {
         <Route path="/teams">
           <ProtectedRoute>
             <Teams />
+          </ProtectedRoute>
+        </Route>
+        <Route path="/admin">
+          <ProtectedRoute>
+            <Admin />
           </ProtectedRoute>
         </Route>
         <Route path="/profile">

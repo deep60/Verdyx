@@ -102,42 +102,94 @@ fn require_admin(claims: &Claims) -> ApiResult<()> {
 #[derive(Debug, Deserialize)]
 pub struct TeamSearch {
     pub q: Option<String>,
+    /// Only teams on this plan; `custom` for teams with custom limits.
+    pub plan: Option<String>,
     pub limit: Option<i64>,
 }
 
-/// `GET /admin/teams?q=`: teams by name or id, with their plans.
+/// The `plan` filter as SQL takes it: a plan name, `custom`, or empty for all.
+pub fn plan_filter(plan: Option<&str>) -> Result<String, &'static str> {
+    match plan.map(str::trim).unwrap_or("") {
+        "" | "all" => Ok(String::new()),
+        p if p == "custom" || plans::PLANS.contains(&p) => Ok(p.to_string()),
+        _ => Err("plan must be free, team, enterprise or custom"),
+    }
+}
+
+/// `GET /admin/teams?q=&plan=`: teams by name or id, with their plans and
+/// this month's scans.
 pub async fn admin_list_teams(
     State(state): State<AppState>,
     claims: Claims,
     Query(search): Query<TeamSearch>,
 ) -> ApiResult<Json<Value>> {
     require_admin(&claims)?;
-    let q = search.q.unwrap_or_default().trim().to_lowercase();
+    let plan = plan_filter(search.plan.as_deref()).map_err(|m| err(StatusCode::BAD_REQUEST, m))?;
+    let q = search.q.unwrap_or_default();
     let limit = search.limit.unwrap_or(50).clamp(1, 200);
-    let rows: Vec<(Uuid, String, String, Value, i64, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT o.id, o.name, o.plan, o.plan_limits,
-                (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id),
-                o.created_at
+    let teams = list_teams(state.db.pool(), &q, &plan, limit)
+        .await
+        .map_err(db_err)?;
+    Ok(Json(json!({ "teams": teams })))
+}
+
+/// Teams matching a name or id (`q`) and a [`plan_filter`], newest first.
+async fn list_teams(
+    pool: &sqlx::PgPool,
+    q: &str,
+    plan: &str,
+    limit: i64,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let q = q.trim().to_lowercase();
+    let (month_start, _) = plans::month_bounds(Utc::now());
+    let rows: Vec<AdminTeamRow> = sqlx::query_as(
+        "SELECT o.id, o.name, o.plan, o.plan_limits AS overrides,
+                (SELECT COUNT(*) FROM organization_members m WHERE m.organization_id = o.id) AS members,
+                (SELECT COUNT(*) FROM submissions s
+                 WHERE s.organization_id = o.id AND s.created_at >= $3) AS scans_this_month,
+                o.plan_changed_at, o.created_at
          FROM organizations o
-         WHERE $1 = '' OR LOWER(o.name) LIKE '%' || $1 || '%' OR o.id::text = $1
+         WHERE ($1 = '' OR LOWER(o.name) LIKE '%' || $1 || '%' OR o.id::text = $1)
+           AND ($4 = ''
+                OR ($4 = 'custom' AND o.plan_limits <> '{}'::jsonb)
+                OR o.plan = $4)
          ORDER BY o.created_at DESC
          LIMIT $2",
     )
     .bind(&q)
     .bind(limit)
-    .fetch_all(state.db.pool())
-    .await
-    .map_err(db_err)?;
-    Ok(Json(json!({
-        "teams": rows.into_iter().map(|(id, name, plan, overrides, members, created_at)| json!({
-            "id": id,
-            "name": name,
-            "plan": plan,
-            "overrides": overrides,
-            "members": members,
-            "createdAt": created_at,
-        })).collect::<Vec<_>>(),
-    })))
+    .bind(month_start)
+    .bind(plan)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| {
+            json!({
+            "id": r.id,
+            "name": r.name,
+            "plan": r.plan,
+            "custom": r.overrides != json!({}),
+            "overrides": r.overrides,
+            "members": r.members,
+            "scansThisMonth": r.scans_this_month,
+            "planChangedAt": r.plan_changed_at,
+            "createdAt": r.created_at,
+            })
+        })
+        .collect())
+}
+
+#[derive(sqlx::FromRow)]
+struct AdminTeamRow {
+    id: Uuid,
+    name: String,
+    plan: String,
+    overrides: Value,
+    members: i64,
+    scans_this_month: i64,
+    plan_changed_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
 }
 
 /// `GET /admin/teams/{id}/plan`
@@ -148,19 +200,45 @@ pub async fn admin_get_plan(
 ) -> ApiResult<Json<Value>> {
     require_admin(&claims)?;
     let pool = state.db.pool();
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM organizations WHERE id = $1)")
-            .bind(org_id)
-            .fetch_one(pool)
-            .await
-            .map_err(db_err)?;
-    if !exists {
+    let name: Option<String> = sqlx::query_scalar("SELECT name FROM organizations WHERE id = $1")
+        .bind(org_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(db_err)?;
+    let Some(name) = name else {
         return Err(err(StatusCode::NOT_FOUND, "team not found"));
-    }
+    };
     let plan = plans::team_plan(pool, org_id).await.map_err(db_err)?;
     let mut usage = plans::team_usage(pool, org_id).await.map_err(db_err)?;
+    usage["name"] = json!(name);
     usage["overrides"] = json!(plan.overrides);
+    usage["history"] = json!(plan_history(pool, org_id).await.map_err(db_err)?);
     Ok(Json(usage))
+}
+
+/// The team's last plan changes, newest first, from its activity log.
+async fn plan_history(pool: &sqlx::PgPool, org_id: Uuid) -> Result<Vec<Value>, sqlx::Error> {
+    let rows: Vec<(DateTime<Utc>, Option<Uuid>, Value)> = sqlx::query_as(
+        "SELECT occurred_at, actor_id, details FROM audit_events
+         WHERE organization_id = $1 AND action = 'team.plan_changed'
+         ORDER BY id DESC LIMIT 10",
+    )
+    .bind(org_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(at, actor, d)| {
+            json!({
+                "at": at,
+                "actorId": actor,
+                "from": d.get("from"),
+                "plan": d.get("plan"),
+                "custom": d.get("custom").and_then(Value::as_bool).unwrap_or(false),
+                "overrides": d.get("overrides"),
+            })
+        })
+        .collect())
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,6 +288,7 @@ pub async fn admin_set_plan(
         .detail("from", before)
         .detail("plan", body.plan.clone())
         .detail("custom", body.overrides != plans::Overrides::default())
+        .detail("overrides", json!(body.overrides))
         .record(pool)
         .await;
     Ok(Json(plans::team_usage(pool, org_id).await.map_err(db_err)?))
@@ -238,6 +317,16 @@ mod tests {
     }
 
     #[test]
+    fn the_team_list_filters_by_plan() {
+        assert_eq!(plan_filter(None), Ok(String::new()));
+        assert_eq!(plan_filter(Some("all")), Ok(String::new()));
+        assert_eq!(plan_filter(Some(" team ")), Ok("team".into()));
+        assert_eq!(plan_filter(Some("custom")), Ok("custom".into()));
+        assert!(plan_filter(Some("gold")).is_err());
+        assert!(plan_filter(Some("free' OR 1=1")).is_err());
+    }
+
+    #[test]
     fn plan_changes_are_checked() {
         let ok: SetPlan =
             serde_json::from_value(json!({ "plan": "enterprise", "overrides": { "seats": 5000 } }))
@@ -250,5 +339,102 @@ mod tests {
         let zero: SetPlan =
             serde_json::from_value(json!({ "plan": "team", "overrides": { "seats": 0 } })).unwrap();
         assert!(check_change(&zero).is_err());
+    }
+
+    /// Against a real database; runs only when API_GATEWAY_DATABASE_URL is
+    /// set, and removes what it adds.
+    #[tokio::test]
+    async fn admin_views_hold_in_the_database() {
+        let Ok(url) = std::env::var("API_GATEWAY_DATABASE_URL") else {
+            eprintln!("skipping: API_GATEWAY_DATABASE_URL not set");
+            return;
+        };
+        let db = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+
+        let tag = Uuid::new_v4().simple().to_string();
+        let (plain, custom, person) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        for (t, name) in [
+            (plain, format!("Plain {tag}")),
+            (custom, format!("Custom {tag}")),
+        ] {
+            sqlx::query("INSERT INTO organizations (id, name, created_by) VALUES ($1, $2, $3)")
+                .bind(t)
+                .bind(name)
+                .bind(person)
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+        sqlx::query(
+            "UPDATE organizations SET plan = 'team', plan_limits = '{\"seats\": 500}', plan_changed_at = NOW()
+             WHERE id = $1",
+        )
+        .bind(custom)
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO audit_events (action, actor_id, organization_id, details)
+             VALUES ('team.plan_changed', $1, $2,
+                     '{\"from\": \"free\", \"plan\": \"team\", \"custom\": true, \"overrides\": {\"seats\": 500}}')",
+        )
+        .bind(person)
+        .bind(custom)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        // Search by name, in any case.
+        let all = list_teams(&db, &tag.to_uppercase(), "", 50).await.unwrap();
+        assert_eq!(all.len(), 2);
+        let found = list_teams(&db, &format!("custom {tag}"), "", 50)
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["plan"], "team");
+        assert_eq!(found[0]["custom"], true);
+        assert_eq!(found[0]["overrides"]["seats"], 500);
+        assert_eq!(found[0]["scansThisMonth"], 0);
+        assert!(found[0]["planChangedAt"].is_string());
+        // By id, and by plan.
+        assert_eq!(
+            list_teams(&db, &plain.to_string(), "", 50)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let custom_only = list_teams(&db, &tag, "custom", 50).await.unwrap();
+        assert_eq!(custom_only.len(), 1);
+        assert_eq!(custom_only[0]["id"], custom.to_string());
+        let free_only = list_teams(&db, &tag, "free", 50).await.unwrap();
+        assert_eq!(free_only.len(), 1);
+        assert_eq!(free_only[0]["custom"], false);
+        assert!(list_teams(&db, &tag, "enterprise", 50)
+            .await
+            .unwrap()
+            .is_empty());
+
+        // The plan history comes from the activity log.
+        let history = plan_history(&db, custom).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(
+            (history[0]["from"].as_str(), history[0]["plan"].as_str()),
+            (Some("free"), Some("team"))
+        );
+        assert_eq!(history[0]["overrides"]["seats"], 500);
+        assert!(plan_history(&db, plain).await.unwrap().is_empty());
+
+        // Audit rows are append-only by design, so only the teams go.
+        sqlx::query("DELETE FROM organizations WHERE id = ANY($1)")
+            .bind(vec![plain, custom])
+            .execute(&db)
+            .await
+            .unwrap();
     }
 }

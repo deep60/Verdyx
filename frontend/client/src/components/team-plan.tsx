@@ -9,7 +9,7 @@ const barClass: Record<Tone, string> = {
   danger: "bg-red-500",
 };
 
-function Meter({ label, used, limit, testId }: { label: string; used: number; limit: number | null; testId: string }) {
+export function Meter({ label, used, limit, testId }: { label: string; used: number; limit: number | null; testId: string }) {
   const m = meter(used, limit);
   return (
     <div className="space-y-1" data-testid={testId}>

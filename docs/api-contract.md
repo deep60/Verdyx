@@ -53,7 +53,8 @@ No `success/data/message/timestamp` wrapper unless explicitly documented.
   "reputationScore": 0,
   "totalEarnings": "string",
   "createdAt": "2026-04-15T12:34:56Z",
-  "isVerified": true
+  "isVerified": true,
+  "isAdmin": false
 }
 ```
 
