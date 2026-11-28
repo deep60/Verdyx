@@ -85,6 +85,29 @@ Tests: `python3 -m unittest backend/analysis-engine/benchmark/test_publish.py`.
 - `report.json` has every file's per-engine verdict, score and reasons, so
   threshold changes can be simulated without re-running the samples.
 
+## Seeing why scripts are missed
+
+```bash
+backend/analysis-engine/benchmark/describe_on_server.sh ubuntu@<server> -i ~/.ssh/<key> > script-profiles.txt
+```
+
+This prints a text profile of each malicious script: its encoding, line
+lengths, character mix, most common words, counts of obfuscation markers, and
+short excerpts. It runs on the server in a container with no network and the
+samples mounted read-only, so only the text comes back. `DESCRIBE_ONLY="<sha
+prefix> ..."` limits it to some samples. The script detections in
+`src/analyzers/script_layers.rs` were written from these profiles.
+
+To check a detection change for false positives on clean scripts you have
+locally (for example a `node_modules` folder):
+
+```bash
+SCRIPT_CORPUS=/path/to/scripts cargo test -p analysis-engine --lib clean_corpus -- --ignored --nocapture
+```
+
+It lists every file the heuristic engine flags with script unwrapping that it
+didn't flag without.
+
 ## Running it locally on clean files only
 
 To check false positives without any malware, point the program at clean

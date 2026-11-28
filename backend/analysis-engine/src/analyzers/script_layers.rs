@@ -44,6 +44,8 @@ const MIN_BASE64: usize = 64;
 const PAYLOAD_BYTES: usize = 64 << 10;
 /// An encoded-looking token this long that nothing can decode is too.
 const OPAQUE_TOKEN: usize = 100_000;
+/// This much random-looking text, in lines, is encrypted data.
+const RANDOM_TEXT: usize = 32 << 10;
 
 pub fn is_script(ext: &str) -> bool {
     SCRIPT_EXTS.contains(&ext)
@@ -77,7 +79,27 @@ static TICK: LazyLock<Regex> = LazyLock::new(|| re(r"([A-Za-z])`([A-Zcdg-mo-qswx
 /// A batch caret inside a word.
 static CARET: LazyLock<Regex> = LazyLock::new(|| re(r"([A-Za-z])\^+([A-Za-z])"));
 /// Batch substring expansion: %var:~3,1%.
-static ENV_SUBSTRING: LazyLock<Regex> = LazyLock::new(|| re(r"%[A-Za-z0-9_#$@]+:~-?\d+(,-?\d+)?%"));
+/// Variable names can be any characters but %, space and colon; Koadic's
+/// obfuscator uses Chinese ones.
+static ENV_SUBSTRING: LazyLock<Regex> = LazyLock::new(|| re(r"%[^%\s:]{1,40}:~-?\d+(,-?\d+)?%"));
+/// Any batch variable expansion, %name%.
+static BATCH_VAR: LazyLock<Regex> = LazyLock::new(|| re(r"%[^%\s]{1,40}%"));
+static BXOR: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)-bxor\b"));
+/// javascript-obfuscator's string-table lookups: q(0x152), _0x3a1f(0x1d).
+static HEX_LOOKUP: LazyLock<Regex> = LazyLock::new(|| re(r"\(\s*0x[0-9a-fA-F]{2,4}\s*\)"));
+static NON_ASCII_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"[^\x00-\x7F]{4,40}"));
+static U_ESCAPE: LazyLock<Regex> = LazyLock::new(|| re(r"\\u[0-9a-fA-F]{4}"));
+/// A string built up piece by piece: `X = X & "..."`, `$x += '...'`,
+/// `x = x + "..."`.
+static ACCUMULATE: LazyLock<Regex> = LazyLock::new(|| {
+    re(
+        r#"(?m)^[ \t]*(\$?[A-Za-z_]\w*)[ \t]*(?:\+=|=[ \t]*(\$?[A-Za-z_]\w*)[ \t]*[&+])[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)')"#,
+    )
+});
+/// `.split("marker").join("")`: filler removed at run time.
+static SPLIT_JOIN: LazyLock<Regex> = LazyLock::new(|| {
+    re(r#"\.split\(\s*['"]([^'"\r\n]{1,40})['"]\s*\)\s*\.join\(\s*(?:''|"")\s*\)"#)
+});
 /// One character code: [char]80, [char]0x50, Chr(80), ChrW(80).
 static CHAR_CODE: LazyLock<Regex> = LazyLock::new(|| {
     re(r"(?i)\[char\]\s*\(?\s*(0x[0-9a-f]{1,4}|\d{1,5})\s*\)?|\bchrw?\s*\(\s*(\d{1,5})\s*\)")
@@ -100,11 +122,11 @@ static HEX_RUN: LazyLock<Regex> =
     LazyLock::new(|| re(r"(?:[0-9A-Fa-f]{2}){64,}|(?:[0-9A-Fa-f]{2}[-:]){63,}[0-9A-Fa-f]{2}"));
 /// String literals, for reversing and for joining chunked payloads.
 static LITERAL: LazyLock<Regex> = LazyLock::new(|| re(r#""([^"\r\n]{8,})"|'([^'\r\n]{8,})'"#));
-/// `.Replace('#','A')`, `-replace '!','A'`, `Replace(s, "@", "A")`: the
-/// single-character swaps used to break base64 up.
+/// `.Replace('#','A')`, `-replace '!','A'`, `Replace(s, "@", "A")`: swaps
+/// used to break base64 up, and filler strings removed at run time.
 static REPLACE: LazyLock<Regex> = LazyLock::new(|| {
     re(
-        r#"(?i)(?:-replace|\breplace\s*\((?:[^,()\r\n]{0,60},)?)\s*\(?\s*['"]\\?([^'"\r\n]{1,3})['"]\s*,\s*['"]([^'"\r\n]{0,3})['"]"#,
+        r#"(?i)(?:-replace|\breplace\s*\((?:[^,()\r\n]{0,60},)?)\s*\(?\s*['"]\\?([^'"\r\n]{1,40})['"]\s*,\s*['"]([^'"\r\n]{0,3})['"]"#,
     )
 });
 static REVERSAL: LazyLock<Regex> = LazyLock::new(|| {
@@ -157,6 +179,32 @@ pub fn unwrap(text: &str, ext: &str) -> Unwrapped {
         out.push_text(&normal);
     }
 
+    // Strings built up piece by piece, put back together.
+    let mut built: Vec<(String, Vec<String>)> = Vec::new();
+    for c in ACCUMULATE.captures_iter(&normal) {
+        let name = &c[1];
+        if c.get(2)
+            .is_some_and(|other| !other.as_str().eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
+        let piece = c.get(3).or(c.get(4)).map_or("", |m| m.as_str()).to_string();
+        if let Some(i) = built.iter().position(|(n, _)| n.eq_ignore_ascii_case(name)) {
+            built[i].1.push(piece);
+        } else if built.len() < 256 {
+            built.push((name.to_string(), vec![piece]));
+        }
+    }
+    let most_pieces = built.iter().map(|(_, p)| p.len()).max().unwrap_or(0);
+    let assembled: Vec<String> = built
+        .into_iter()
+        .filter(|(_, p)| p.len() >= 8)
+        .map(|(_, p)| p.concat())
+        .collect();
+    for a in &assembled {
+        out.push_text(a);
+    }
+
     // 2. Character codes and number lists.
     for m in CHAR_CODE_RUN.find_iter(&normal) {
         let s: String = CHAR_CODE
@@ -185,20 +233,48 @@ pub fn unwrap(text: &str, ext: &str) -> Unwrapped {
     }
 
     // 3. Encoded blobs: as written, with any single-character swaps undone,
-    // reversed, and with chunked literals joined back up.
+    // reversed, and with chunked literals joined back up. Those last three
+    // are guesses: decoding the wrong way turns ordinary data into noise, so
+    // from them only definite finds count (a program, compressed data,
+    // text), never "a large blob of unknown bytes".
     let inflate_hint = INFLATE_HINT.is_match(&normal);
     let mut views: Vec<std::borrow::Cow<str>> = vec![normal.clone()];
+    // Encoded data written as many short lines (a here-string), and the
+    // strings built up above, are as written too.
+    let mut written = vec![0];
+    for stack in stacked_base64(&normal) {
+        written.push(views.len());
+        views.push(stack.into());
+    }
+    for a in &assembled {
+        written.push(views.len());
+        views.push(a.clone().into());
+    }
     let swaps: Vec<(String, String)> = REPLACE
         .captures_iter(&normal)
         .map(|c| (c[1].to_string(), c[2].to_string()))
+        .chain(
+            SPLIT_JOIN
+                .captures_iter(&normal)
+                .map(|c| (c[1].to_string(), String::new())),
+        )
         .filter(|(from, _)| !from.is_empty())
         .take(8)
         .collect();
     if !swaps.is_empty() {
-        let mut swapped = normal.to_string();
-        for (from, to) in &swaps {
-            swapped = swapped.replace(from.as_str(), to);
+        let swap = |s: &str| {
+            let mut s = s.to_string();
+            for (from, to) in &swaps {
+                s = s.replace(from.as_str(), to);
+            }
+            s
+        };
+        // Removing filler reveals code, so the rules read the result.
+        for a in &assembled {
+            out.push_text(&swap(a));
         }
+        let swapped = swap(&normal);
+        out.push_text(&swapped);
         views.push(swapped.into());
     }
     if REVERSAL.is_match(&normal) {
@@ -210,16 +286,17 @@ pub fn unwrap(text: &str, ext: &str) -> Unwrapped {
             views.push(reversed.into());
         }
     }
-    // Payloads split into many small literals are joined first, so the
-    // per-view blob limit can't be used up on the pieces.
+    // Payloads split into many small literals, joined back up. Each view
+    // has its own blob limit, so the pieces can't use it up.
     let joined: String = literals(&normal)
         .filter(|l| l.len() >= 16 && l.bytes().all(is_base64_byte))
         .collect();
     if joined.len() >= MIN_BASE64 * 4 {
-        views.insert(0, joined.into());
+        views.push(joined.into());
     }
 
-    for view in &views {
+    for (i, view) in views.iter().enumerate() {
+        let payload_before = found.payload;
         let mut blobs = 0;
         for m in BASE64_RUN.find_iter(view) {
             if blobs >= MAX_BLOBS {
@@ -244,14 +321,19 @@ pub fn unwrap(text: &str, ext: &str) -> Unwrapped {
                 inspect(&bytes, &mut out, &mut found, inflate_hint, 0);
             }
         }
+        if !written.contains(&i) {
+            found.payload = payload_before;
+        }
     }
 
-    // 4. A long encoded-looking token that nothing above could read.
+    // 4. A long encoded-looking token that nothing above could read, and
+    // encoded data hidden in random-looking or noise-padded text.
     if !found.readable {
         if let Some(len) = longest_dense_token(text) {
             found.opaque = Some(len);
         }
     }
+    let (random_bytes, noisy_bytes) = hidden_text(text);
 
     // 5. Findings.
     if found.program {
@@ -277,6 +359,26 @@ pub fn unwrap(text: &str, ext: &str) -> Unwrapped {
             &format!(
                 "Contains {} KB of encoded binary data of no known file type",
                 n >> 10
+            ),
+            HeuristicSeverity::Medium,
+        );
+    } else if noisy_bytes >= OPAQUE_TOKEN / 2 {
+        out.finding(
+            "SCRIPT_503",
+            "Script hides a large encoded payload",
+            &format!(
+                "Contains a {} KB string padded with noise characters",
+                noisy_bytes >> 10
+            ),
+            HeuristicSeverity::Medium,
+        );
+    } else if random_bytes >= RANDOM_TEXT {
+        out.finding(
+            "SCRIPT_503",
+            "Script hides a large encoded payload",
+            &format!(
+                "Contains {} KB of random-looking text lines (encrypted data)",
+                random_bytes >> 10
             ),
             HeuristicSeverity::Medium,
         );
@@ -307,6 +409,35 @@ pub fn unwrap(text: &str, ext: &str) -> Unwrapped {
     }
     if char_codes >= 50 {
         tricks.push(format!("{char_codes} character codes"));
+    }
+    if powershell {
+        let n = BXOR.find_iter(text).count();
+        if n >= 50 {
+            tricks.push(format!("{n} XOR operations"));
+        }
+    }
+    if batch {
+        let n = BATCH_VAR.find_iter(text).count();
+        if n >= 1000 {
+            tricks.push(format!("{n} variable expansions"));
+        }
+    }
+    let n = HEX_LOOKUP.find_iter(text).count();
+    if n >= 50 {
+        tricks.push(format!("{n} hex-indexed string lookups"));
+    }
+    // Filler repeated thousands of times, over a good part of the file.
+    // Libraries repeat localised strings or codepage tables a few hundred
+    // times (date-fns locales, xlsx's cpexcel).
+    let (filler, filler_bytes) = most_repeated(NON_ASCII_RUN.find_iter(text).map(|m| m.as_str()))
+        .max(most_repeated(U_ESCAPE.find_iter(text).map(|m| m.as_str())));
+    if filler >= 1000 && filler_bytes * 10 >= text.len() {
+        tricks.push(format!("the same filler repeated {filler} times"));
+    }
+    // Only VBScript: JavaScript and PowerShell code generators build output
+    // with `out += '...'` hundreds of times (ajv).
+    if matches!(ext, "vbs" | "vbe" | "wsf" | "hta") && most_pieces >= 100 {
+        tricks.push(format!("a string built from {most_pieces} pieces"));
     }
     if !tricks.is_empty() {
         out.finding(
@@ -368,8 +499,10 @@ fn inspect(bytes: &[u8], out: &mut Unwrapped, found: &mut Found, inflate_hint: b
     if let Some(text) = text_of(bytes) {
         found.readable = true;
         out.push_text(&text);
-        // A decoded stage often carries the next one.
-        if depth < 2 {
+        // A decoded stage often carries the next one. A source map doesn't:
+        // its "mappings" field is base64-like but decodes to noise, which
+        // looked like a hidden payload (jQuery's bundled sinon.js).
+        if depth < 2 && !is_source_map(&text) {
             for m in BASE64_RUN.find_iter(&text).take(8) {
                 if let Some(next) = base64_decode(m.as_str()) {
                     inspect(&next, out, found, inflate_hint, depth + 1);
@@ -387,6 +520,17 @@ fn inspect(bytes: &[u8], out: &mut Unwrapped, found: &mut Found, inflate_hint: b
     }
 }
 
+/// A JavaScript source map (`{"version":3,...`).
+fn is_source_map(text: &str) -> bool {
+    let head: String = text
+        .trim_start_matches('\u{FEFF}')
+        .chars()
+        .take(64)
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    head.starts_with("{\"version\":3")
+}
+
 /// A Windows (MZ + PE header or DOS stub text) or Linux (ELF) program.
 fn is_program(b: &[u8]) -> bool {
     if b.starts_with(b"\x7fELF") && b.len() >= 52 {
@@ -402,6 +546,95 @@ fn is_program(b: &[u8]) -> bool {
     // A chunk of a payload split across strings may end before the PE header.
     let head = &b[..b.len().min(256)];
     head.windows(12).any(|w| w == b"This program")
+}
+
+/// Base64 written as runs of short lines (a here-string, or one quoted line
+/// each), joined into one string per run.
+fn stacked_base64(text: &str) -> Vec<String> {
+    let mut stacks = Vec::new();
+    let mut run = String::new();
+    let mut lines = 0;
+    let mut flush = |run: &mut String, lines: &mut usize| {
+        if *lines >= 8 && run.len() >= MIN_BASE64 * 4 && stacks.len() < 16 {
+            stacks.push(std::mem::take(run));
+        }
+        run.clear();
+        *lines = 0;
+    };
+    for line in text.lines() {
+        let core = line
+            .trim()
+            .trim_end_matches(['+', '&', '_', ';', ',', ' ', '\t'])
+            .trim_matches(['"', '\'']);
+        if core.len() >= 40 && core.bytes().all(is_base64_byte) {
+            run.push_str(core);
+            lines += 1;
+        } else {
+            flush(&mut run, &mut lines);
+        }
+    }
+    flush(&mut run, &mut lines);
+    stacks
+}
+
+/// Bytes of text in lines that look like encrypted data (high entropy, not
+/// base64, which is decoded instead), and in very long lines padded with
+/// noise characters (`~!#$%^&*?`).
+fn hidden_text(text: &str) -> (usize, usize) {
+    let (mut random, mut noisy) = (0, 0);
+    for line in text.lines() {
+        let core = line
+            .trim_start()
+            .trim_start_matches(['\'', '#', '/', ';'])
+            .trim_start_matches("REM ")
+            .trim_matches(['"', '\'', ' ']);
+        let b = core.as_bytes();
+        if b.len() >= 50_000 {
+            let noise = b.iter().filter(|c| b"~!#$%^&*?".contains(c)).count();
+            if noise * 4 >= b.len() {
+                noisy += b.len();
+                continue;
+            }
+        }
+        if b.len() < 100 || b.len() > 4096 {
+            continue;
+        }
+        let spaces = b.iter().filter(|&&c| c == b' ').count();
+        let other = b.iter().filter(|&&c| !is_base64_byte(c)).count();
+        if spaces * 33 <= b.len() && other * 10 >= b.len() && entropy(b) >= 5.9 {
+            random += b.len();
+        }
+    }
+    (random, noisy)
+}
+
+/// Shannon entropy in bits per byte.
+fn entropy(b: &[u8]) -> f64 {
+    let mut counts = [0u32; 256];
+    for &c in b {
+        counts[c as usize] += 1;
+    }
+    let n = b.len() as f64;
+    counts
+        .iter()
+        .filter(|&&c| c > 0)
+        .map(|&c| {
+            let p = c as f64 / n;
+            -p * p.log2()
+        })
+        .sum()
+}
+
+/// How often the most common item occurs, and the bytes it takes up.
+fn most_repeated<'a>(items: impl Iterator<Item = &'a str>) -> (usize, usize) {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for i in items {
+        *counts.entry(i).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|&(_, n)| n)
+        .map_or((0, 0), |(s, n)| (n, n * s.len()))
 }
 
 /// The file names in a zip's local headers.
@@ -818,6 +1051,18 @@ mod tests {
         let map = b64(&br#"{"version":3,"sources":["a.js"],"mappings":"AAAA"}"#.repeat(3000));
         let js = format!("var a=1;\n//# sourceMappingURL=data:application/json;base64,{map}\n");
         assert!(unwrap(&js, "js").findings.is_empty());
+        // Even when its mappings are long enough to decode to a large blob.
+        let mappings: String = (0..200_000u32)
+            .map(|i| char::from(b"ACEGIKMOQSUWYacegikmoqsuwy024+/"[(i * 7 % 31) as usize]))
+            .collect();
+        let map = b64(
+            format!(r#"{{"version":3,"sources":["a.js"],"mappings":"{mappings}"}}"#).as_bytes(),
+        );
+        let js = format!(
+            "var a=1;\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,{map}\n"
+        );
+        let u = unwrap(&js, "js");
+        assert!(u.findings.is_empty(), "{:?}", ids(&u));
     }
 
     /// The rules read the recovered text, as run_heuristic_analysis does.
@@ -845,6 +1090,119 @@ mod tests {
         assert!(crate::analyzers::heuristic_text(&data).contains("Add-MpPreference -ExclusionPath"));
         // A program full of zeros is not text.
         assert!(!crate::analyzers::heuristic_text(&fake_program(4096)).contains("This program"));
+    }
+
+    /// Pseudo-random bytes from a seed.
+    fn noise(n: usize, mut x: u32) -> Vec<u8> {
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x as u8
+            })
+            .collect()
+    }
+
+    /// The patterns the benchmark's missed scripts use (seen with
+    /// benchmark/describe_scripts.py), rebuilt from harmless data.
+    #[test]
+    fn the_missed_benchmark_patterns_are_found() {
+        let has = |u: &Unwrapped, id: &str, text: &str| {
+            u.findings
+                .iter()
+                .any(|f| f.rule_id == id && f.description.contains(text))
+        };
+
+        // PowerShell loaders: an encrypted payload in a here-string of
+        // 76-character base64 lines.
+        let lines: String = b64(&noise(120_000, 7))
+            .as_bytes()
+            .chunks(76)
+            .map(|c| format!("{}\n", std::str::from_utf8(c).unwrap()))
+            .collect();
+        let u = unwrap(&format!("$EncryptedPayloadB64 = @'\n{lines}'@\n"), "ps1");
+        assert!(has(&u, "SCRIPT_503", "encoded binary"), "{:?}", ids(&u));
+
+        // XOR-decoded strings.
+        let xor = "$a = ($a -bxor ((86676825L) + 9743L - 9743L))\n".repeat(60);
+        assert!(has(&unwrap(&xor, "ps1"), "SCRIPT_504", "60 XOR operations"));
+
+        // JScript: a payload interleaved with noise characters.
+        let padded: String = b64(&noise(30_000, 3))
+            .chars()
+            .zip("~!#$%^&*? ".chars().cycle())
+            .flat_map(|(a, b)| [a, b])
+            .collect();
+        let u = unwrap(&format!("var p = '{padded}';"), "js");
+        assert!(has(&u, "SCRIPT_503", "noise characters"), "{:?}", ids(&u));
+
+        // VBScript: encrypted data as comment lines of random characters.
+        let printable: Vec<u8> = noise(60_000, 9)
+            .into_iter()
+            .map(|b| b'!' + b % 94)
+            .collect();
+        let comments: String = printable
+            .chunks(290)
+            .map(|c| format!("'{}\n", String::from_utf8_lossy(c)))
+            .collect();
+        let u = unwrap(&format!("Dim k : k = Array(115, 216)\n{comments}"), "vbs");
+        assert!(
+            has(&u, "SCRIPT_503", "random-looking text"),
+            "{:?}",
+            ids(&u)
+        );
+
+        // VBScript: code built up piece by piece, padded with filler that a
+        // Replace removes.
+        let filler = "ᵤಫᮖ⸇स⢽૯ℽ";
+        let code = "powershell -w hidden -enc AAAA; Add-MpPreference -ExclusionPath C:\\";
+        let mut vbs = format!("Dim c\nc = Replace(c, \"{filler}\", \"\")\n");
+        for ch in code.chars().cycle().take(code.len() * 20) {
+            vbs.push_str(&format!(
+                "c = c & \"{filler}{ch}{filler}{ch}\"\n' junk comment\n"
+            ));
+        }
+        let u = unwrap(&vbs, "vbs");
+        assert!(has(&u, "SCRIPT_504", "pieces"), "{:?}", ids(&u));
+        assert!(has(&u, "SCRIPT_504", "filler"), "{:?}", u.findings);
+        assert!(
+            u.text.contains("ppoowweerrsshheellll"),
+            "filler not removed"
+        );
+
+        // Batch: substrings of variables with non-English names, and junk
+        // variable expansions.
+        let koadic = "%變量名稱:~38,1%%饿斯豆尔:~47,1%".repeat(20);
+        assert!(has(
+            &unwrap(&koadic, "bat"),
+            "SCRIPT_504",
+            "variable substrings"
+        ));
+        let junk = "set \"a=%Xy1%g%Qz2%o\"\n".repeat(600);
+        assert!(has(
+            &unwrap(&junk, "bat"),
+            "SCRIPT_504",
+            "variable expansions"
+        ));
+
+        // HTA: javascript-obfuscator's string-table lookups.
+        let lookups = "F[q(0x172)]='hidden',X[q(0x152)]=k,".repeat(120);
+        assert!(has(&unwrap(&lookups, "hta"), "SCRIPT_504", "hex-indexed"));
+    }
+
+    #[test]
+    fn signed_powershell_is_not_random_text() {
+        let sig: String = b64(&noise(30_000, 5))
+            .as_bytes()
+            .chunks(64)
+            .map(|c| format!("# SIG # {}\n", std::str::from_utf8(c).unwrap()))
+            .collect();
+        let ps = format!(
+            "Write-Output 'hi'\n# SIG # Begin signature block\n{sig}# SIG # End signature block\n"
+        );
+        let u = unwrap(&ps, "ps1");
+        assert!(u.findings.is_empty(), "{:?}", u.findings);
     }
 
     #[test]
@@ -916,7 +1274,12 @@ mod corpus {
                 let mut ids: Vec<_> = m.iter().map(|x| x.rule_id.as_str()).collect();
                 ids.sort();
                 ids.dedup();
-                println!("NEW {} {:?}", f.display(), ids);
+                let why: Vec<_> = m
+                    .iter()
+                    .filter(|x| x.rule_id.starts_with("SCRIPT_5"))
+                    .map(|x| x.description.as_str())
+                    .collect();
+                println!("NEW {} {:?} {:?}", f.display(), ids, why);
             }
         }
         println!(
