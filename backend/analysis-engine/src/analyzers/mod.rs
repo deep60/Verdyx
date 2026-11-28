@@ -40,6 +40,7 @@ pub mod heuristic_engine;
 pub mod office_analyzer;
 pub mod pdf_analyzer;
 pub mod pe_model_analyzer;
+pub mod script_layers;
 pub mod signature_matcher;
 pub mod static_analyzer;
 
@@ -980,12 +981,29 @@ impl AnalysisEngine {
         }
 
         let start = std::time::Instant::now();
-        let content = heuristic_text(&request.file_data);
-        let matches = self
+        let mut content = heuristic_text(&request.file_data);
+        // Scripts are read again with their obfuscation undone, and the
+        // decoded layers can be findings of their own (script_layers.rs).
+        let ext = std::path::Path::new(&request.filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let mut layer_findings = Vec::new();
+        if script_layers::is_script(&ext) {
+            let unwrapped = script_layers::unwrap(&content, &ext);
+            if !unwrapped.text.is_empty() {
+                content.push('\n');
+                content.push_str(&unwrapped.text);
+            }
+            layer_findings = unwrapped.findings;
+        }
+        let mut matches = self
             .heuristic_engine
             .analyze_content(&content, std::path::Path::new(&request.filename))
             .await
             .map_err(|e| anyhow!("Heuristic analysis error: {e}"))?;
+        matches.extend(layer_findings);
         let risk_score = self.heuristic_engine.calculate_risk_score(&matches);
 
         // Points from distinct rules: one strong rule (3) is suspicious, two
@@ -1669,11 +1687,26 @@ pub(crate) fn heuristic_text(data: &[u8]) -> String {
     let mut text = String::from_utf8_lossy(data).into_owned();
     const LNK_MAGIC: [u8; 8] = [0x4C, 0x00, 0x00, 0x00, 0x01, 0x14, 0x02, 0x00];
     let utf16_bom = data.starts_with(&[0xFF, 0xFE]);
-    if data.starts_with(&LNK_MAGIC) || utf16_bom {
+    if data.starts_with(&LNK_MAGIC) || utf16_bom || looks_utf16(data) {
         text.push('\n');
         text.push_str(&utf16_strings(data, if utf16_bom { 2 } else { 0 }));
     }
     text
+}
+
+/// UTF-16LE text saved without a byte-order mark: most odd bytes are zero.
+fn looks_utf16(data: &[u8]) -> bool {
+    let sample = &data[..data.len().min(4096)];
+    let pairs = sample.len() / 2;
+    let zeros = sample
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter(|&&b| b == 0)
+        .count();
+    let chars = sample.iter().step_by(2).filter(|&&b| b != 0).count();
+    // Text, not a binary full of zeros: the even bytes are the characters.
+    pairs >= 32 && zeros * 10 >= pairs * 8 && chars * 10 >= pairs * 9
 }
 
 /// Printable UTF-16LE runs of four or more characters, one per line.
